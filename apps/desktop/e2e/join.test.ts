@@ -8,7 +8,9 @@ import { afterAll, expect, it } from 'vitest';
 
 const apps: ElectronApplication[] = [];
 async function launch(): Promise<Page> {
-  const app = await electron.launch({ args: ['.'], cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: mkdtempSync(join(tmpdir(), 'clan-')) } });
+  // E2E_EXECUTABLE=release/mac-arm64/Classroom LAN.app/Contents/MacOS/Classroom LAN tests the packaged build instead.
+  const exe = process.env.E2E_EXECUTABLE;
+  const app = await electron.launch({ ...(exe ? { executablePath: exe, args: [] } : { args: ['.'] }), cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: mkdtempSync(join(tmpdir(), 'clan-')) } });
   apps.push(app);
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');

@@ -1,0 +1,17 @@
+appId: app.classroomlan.desktop
+productName: Classroom LAN
+directories: { output: release }
+# Main/preload/renderer are fully bundled by Vite; no node_modules needed at runtime.
+files: [dist/**, package.json]
+npmRebuild: false
+asar: true
+mac:
+  category: public.app-category.education
+  target: [dmg, zip]
+  extendInfo:
+    NSLocalNetworkUsageDescription: Classroom LAN hosts and finds classrooms on your local network. No internet is used.
+    NSBonjourServices: [_classroomlan._tcp]
+win:
+  target: [nsis]
+linux:
+  target: [AppImage]

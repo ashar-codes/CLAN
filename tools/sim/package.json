@@ -1,0 +1,6 @@
+{
+  "name": "@classroom/sim",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@classroom/client": "workspace:*", "@classroom/protocol": "workspace:*", "@classroom/server": "workspace:*" }
+}

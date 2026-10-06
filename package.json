@@ -3,20 +3,23 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.20.0",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "pnpm --filter @classroom/desktop dev",
     "dev:desktop": "pnpm --filter @classroom/desktop dev",
     "dev:mobile": "pnpm --filter @classroom/mobile start",
     "server": "node packages/server/src/cli.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @classroom/mobile typecheck",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/desktop/tsconfig.json && tsc -p apps/mobile/tsconfig.json",
     "lint": "pnpm typecheck",
     "benchmark": "node tools/sim/bench.ts",
     "build:desktop": "pnpm --filter @classroom/desktop build",
     "dist:desktop": "pnpm --filter @classroom/desktop dist",
     "build:android": "pnpm --filter @classroom/mobile build:android",
-    "build:ios": "pnpm --filter @classroom/mobile build:ios"
+    "build:ios": "pnpm --filter @classroom/mobile build:ios",
+    "test:e2e": "pnpm --filter @classroom/desktop test:e2e"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
