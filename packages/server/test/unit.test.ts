@@ -182,3 +182,59 @@ describe('classroom membership', () => {
     expect(c.timeline().map((e) => e.type)).toEqual(['class.started', 'member.requested', 'member.approved', 'class.locked', 'class.ended']);
   });
 });
+
+import { contentDisposition, parseRange, Storage } from '../src/storage.ts';
+import { safeFileName, extensionOf } from '@classroom/protocol';
+
+describe('file primitives', () => {
+  it('parseRange', () => {
+    expect(parseRange(undefined, 100)).toBeNull();
+    expect(parseRange('bytes=0-9', 100)).toEqual({ start: 0, end: 9 });
+    expect(parseRange('bytes=90-', 100)).toEqual({ start: 90, end: 99 });
+    expect(parseRange('bytes=-5', 100)).toEqual({ start: 95, end: 99 });
+    expect(parseRange('bytes=-500', 100)).toEqual({ start: 0, end: 99 });
+    expect(parseRange('bytes=50-1000', 100)).toEqual({ start: 50, end: 99 });
+    for (const bad of ['bytes=100-', 'bytes=9-0', 'bytes=0-1,3-4', 'bytes=-0', 'bytes=-', 'chars=0-1', 'bytes=a-b', ' bytes = 0-1', 'bytes=1234567890123456-']) expect(parseRange(bad, 100), bad).toBe('invalid');
+    expect(parseRange('bytes=0-0', 0)).toBe('invalid');
+  });
+
+  it('safeFileName handles traversal, reserved names, unicode and length', () => {
+    expect(safeFileName('../../etc/passwd')).toBe('passwd');
+    expect(safeFileName('..\\..\\boot.ini')).toBe('boot.ini');
+    expect(safeFileName('..')).toBe('file');
+    expect(safeFileName('/')).toBe('file');
+    expect(safeFileName('')).toBe('file');
+    expect(safeFileName('nul.txt')).toBe('_nul.txt');
+    expect(safeFileName('COM1')).toBe('_COM1');
+    expect(safeFileName('lpt9.pdf')).toBe('_lpt9.pdf');
+    expect(safeFileName('a\u0000b')).toBe('a_b');
+    expect(safeFileName('report‮fdp.exe')).toBe('report_fdp.exe');
+    expect(safeFileName('name. . .')).toBe('name');
+    expect(safeFileName('é.txt')).toBe('é.txt'); // NFC
+    const long = safeFileName('😀'.repeat(200) + '.pdf');
+    expect(new TextEncoder().encode(long).length).toBeLessThanOrEqual(120);
+    expect(long.endsWith('.pdf')).toBe(true);
+    expect(safeFileName('x'.repeat(5_000_000)).length).toBeLessThanOrEqual(120); // bounded work
+    expect(extensionOf('Lab.ZIP')).toBe('zip');
+    expect(extensionOf('archive.tar.gz')).toBe('gz');
+    expect(extensionOf('.bashrc')).toBe('');
+  });
+
+  it('contentDisposition cannot inject headers or quotes', () => {
+    const v = contentDisposition('a"b\r\nSet-Cookie: x=1;é.pdf');
+    expect(v).not.toMatch(/[\r\n]/);
+    expect(v.match(/"/g)).toHaveLength(2);
+    expect(v).toContain("filename*=UTF-8''a%22b%0D%0ASet-Cookie%3A%20x%3D1%3B%C3%A9.pdf");
+  });
+
+  it('Storage refuses ids and names that would leave the root', () => {
+    const st = new Storage('/srv/storage');
+    expect(st.resource('0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a')).toBe('/srv/storage/resources/0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a');
+    for (const bad of ['../x', '..', '/etc/passwd', 'a/b', '0B6F1C8E-5B1A-4C55-9A8B-0F0E1D2C3B4A ']) expect(() => st.resource(bad)).toThrow();
+    const sid = '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a';
+    expect(() => st.submissionFile(sid, sid, '../x')).toThrow();
+    expect(() => st.submissionFile(sid, sid, '..')).toThrow();
+    expect(() => st.abs('../../etc/passwd')).toThrow();
+    expect(st.abs('submissions/x/y')).toBe('/srv/storage/submissions/x/y');
+  });
+});

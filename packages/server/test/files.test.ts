@@ -103,7 +103,9 @@ describe('classroom files', () => {
     // Partial is never presented as the finished file.
     expect(existsSync(join(dest, 'video.mp4'))).toBe(false);
     const partial = readFileSync(partPaths(dest, r.id).part).length;
-    expect(partial).toBeGreaterThan(40 * 1024 * 1024);
+    // Bytes still in socket buffers at the drop are lost, so the partial sits somewhat below the 47 MB cut.
+    expect(partial).toBeGreaterThan(20 * 1024 * 1024);
+    expect(partial).toBeLessThanOrEqual(47 * 1024 * 1024);
     const out = await downloadResource({ url: proxy.url, token: a!.token, resource: view(r), destDir: dest });
     expect(out.resumedFrom).toBe(partial);
     expect(readFileSync(out.path).equals(f.buf)).toBe(true);
