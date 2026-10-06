@@ -146,3 +146,37 @@ export class ClassroomConnection {
     this.pings.clear();
   }
 }
+
+// ---- Files & submissions (platform-neutral HTTP pieces; byte I/O lives in ./node or the mobile app) ----
+import type { UploadInit, UploadStatus } from '@classroom/protocol';
+
+export class TransferError extends Error {
+  code: string; status: number; extra: Record<string, unknown>;
+  constructor(code: string, message: string, status = 0, extra: Record<string, unknown> = {}) { super(message); this.code = code; this.status = status; this.extra = extra; }
+}
+
+/** All authenticated HTTP goes through here so an encrypted transport can later replace it in one place. */
+export async function api<T>(base: string, token: string, path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(base + path, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.body && typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(init.headers as Record<string, string>) } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new TransferError(body.code ?? 'http_' + res.status, body.message ?? `Request failed (${res.status})`, res.status, body);
+  return body as T;
+}
+
+export const resourceContentPath = (id: string) => `/api/resources/${encodeURIComponent(id)}/content`;
+export const initUpload = (base: string, token: string, req: UploadInit) => api<UploadStatus>(base, token, '/api/uploads', { method: 'POST', body: JSON.stringify(req) });
+export const uploadStatus = (base: string, token: string, uploadId: string) => api<UploadStatus>(base, token, `/api/uploads/${encodeURIComponent(uploadId)}`);
+
+/** Bytes as "4.2 MB". */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const u = ['KB', 'MB', 'GB', 'TB'];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+  return `${n < 10 ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
+}
+
+export const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((res, rej) => {
+  const t = setTimeout(res, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); rej(signal.reason); }, { once: true });
+});

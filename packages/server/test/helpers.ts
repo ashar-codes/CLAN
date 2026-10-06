@@ -37,3 +37,72 @@ export function socket(url: string, token?: string) {
     close: () => ws.close(),
   };
 }
+
+// ---- Milestone 2 helpers ----
+import { createServer, connect, type Socket } from 'node:net';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { randomBytes, createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { joinByCode } from '@classroom/client';
+import { startClassroomServer, type ServerOptions, type RunningServer } from '../src/index.ts';
+
+export const tmp = (prefix = 'clt-') => mkdtempSync(join(tmpdir(), prefix));
+
+/** Random file of `bytes`; returns path + sha256. */
+export function makeFile(bytes: number, name = 'file.bin', dir = tmp()) {
+  const buf = randomBytes(bytes);
+  const path = join(dir, name);
+  writeFileSync(path, buf);
+  return { path, sha256: createHash('sha256').update(buf).digest('hex'), size: bytes, buf };
+}
+
+export type Student = { token: string; memberId: string };
+/** Server with open join policy and `n` approved students. */
+export async function classWith(n: number, opts: Partial<ServerOptions> = {}): Promise<{ s: RunningServer; students: Student[] }> {
+  const s = await startClassroomServer({ title: 'Class', host: '127.0.0.1', storageDir: tmp('cls-storage-'), ...opts });
+  s.classroom.setPolicy('open');
+  const students: Student[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = await joinByCode([{ url: s.url }], s.classroom.code, profile(i));
+    students.push({ token: j.token, memberId: j.memberId });
+  }
+  return { s, students };
+}
+
+export const get = (url: string, token: string | null, headers: Record<string, string> = {}) =>
+  fetch(url, { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } });
+
+/**
+ * TCP proxy that kills the first connection after `cutAfter` bytes in one direction ('down' = server->client).
+ * Later connections pass through untouched. Simulates Wi-Fi dropping mid-transfer.
+ */
+export async function cuttingProxy(target: string, cutAfter: number, dir: 'down' | 'up' = 'down') {
+  const { hostname, port } = new URL(target);
+  let cut = false;
+  const socks = new Set<Socket>();
+  const srv = createServer((client) => {
+    const upstream = connect(Number(port), hostname);
+    socks.add(client); socks.add(upstream);
+    let n = 0;
+    const armed = !cut;
+    const watch = (from: Socket, to: Socket, counting: boolean) => from.on('data', (d) => {
+      if (armed && counting && !cut) {
+        n += d.length;
+        if (n >= cutAfter) { cut = true; to.write(d.subarray(0, d.length - (n - cutAfter))); client.destroy(); upstream.destroy(); return; }
+      }
+      to.write(d);
+    });
+    watch(upstream, client, dir === 'down');
+    watch(client, upstream, dir === 'up');
+    const end = () => { client.destroy(); upstream.destroy(); };
+    client.on('error', end).on('close', end);
+    upstream.on('error', end).on('close', end);
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return {
+    url: `http://127.0.0.1:${(srv.address() as { port: number }).port}`,
+    wasCut: () => cut,
+    close: () => { socks.forEach((s) => s.destroy()); return new Promise<void>((r) => srv.close(() => r())); },
+  };
+}

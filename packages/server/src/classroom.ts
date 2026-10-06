@@ -177,6 +177,12 @@ export class Classroom extends EventEmitter {
     this.emit('roster');
   }
 
+  member(memberId: string): { id: string; deviceId: string; fullName: string; rollNo: string; status: MemberStatus } | null {
+    const r = this.db.prepare('SELECT id, device_id, full_name, roll_no, status FROM members WHERE id = ? AND session_id = ?').get(memberId, this.id) as
+      { id: string; device_id: string; full_name: string; roll_no: string; status: MemberStatus } | undefined;
+    return r ? { id: r.id, deviceId: r.device_id, fullName: r.full_name, rollNo: r.roll_no, status: r.status } : null;
+  }
+
   roster(): Member[] {
     const rows = this.db.prepare('SELECT id, device_id, full_name, roll_no, device_name, status, token_expires, joined_at, last_seen FROM members WHERE session_id = ? ORDER BY joined_at').all(this.id) as MemberRow[];
     return rows.map((r) => ({
@@ -196,7 +202,7 @@ export class Classroom extends EventEmitter {
       SELECT ?, device_id, full_name, roll_no, ? FROM members WHERE id = ?`).run(this.title, this.now(), memberId);
   }
 
-  private log(type: string, actor: string | null, data: Record<string, unknown>) {
+  log(type: string, actor: string | null, data: Record<string, unknown>) {
     this.db.prepare('INSERT INTO events (session_id, ts, type, actor, data) VALUES (?,?,?,?,?)').run(this.id, this.now(), type, actor, JSON.stringify(data));
     this.emit('timeline');
   }
