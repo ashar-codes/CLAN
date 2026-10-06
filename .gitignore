@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+release/
+.expo/
+apps/mobile/ios/
+apps/mobile/android/
+*.db
+*.db-*
+.DS_Store
+coverage/

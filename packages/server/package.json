@@ -1,0 +1,20 @@
+{
+  "name": "@classroom/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./discovery": "./src/discovery.ts"
+  },
+  "dependencies": {
+    "@classroom/protocol": "workspace:*",
+    "@fastify/websocket": "^11.3.3",
+    "bonjour-service": "^1.4.4",
+    "fastify": "^5.12.5"
+  },
+  "devDependencies": {
+    "@classroom/client": "workspace:*",
+    "@types/ws": "^8.18.2"
+  }
+}
