@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ClassroomConnection, type Quality } from '@classroom/client';
-import type { ClassroomInfo, JoinPolicy, Member, TimelineEvent } from '@classroom/protocol';
-import type { Capabilities, StartedClassroom } from '../shared.ts';
+import type { ClassroomInfo, JoinPolicy, Member, TeacherAssignmentView, TeacherResourceView, TimelineEvent, TransferStats } from '@classroom/protocol';
+import { TeacherAssignments, TeacherFiles } from './Files.tsx';
+import type { Capabilities, PastClass, StartedClassroom } from '../shared.ts';
 import { api } from './App.tsx';
 
 const POLICIES: { v: JoinPolicy; label: string }[] = [
@@ -47,7 +48,23 @@ export function TeacherSetup({ caps, onBack, onStarted }: { caps: Capabilities; 
       {noNetwork && <p className="error">This computer isn't connected to any network. Join the classroom Wi-Fi or plug in a cable, then come back.</p>}
       {error && <p className="error">{error}</p>}
       <button className="primary" disabled={!title.trim() || busy || noNetwork} onClick={start}>{busy ? 'Starting…' : 'Start Classroom'}</button>
+      <PastClasses />
     </main>
+  );
+}
+
+function PastClasses() {
+  const [list, setList] = useState<PastClass[]>([]);
+  useEffect(() => { api.pastClasses().then(setList); }, []);
+  const withData = list.filter((c) => c.files || c.submissions);
+  if (!withData.length) return null;
+  return (
+    <details className="past"><summary className="muted">Previous classes ({withData.length}) — saved on this computer</summary>
+      <table className="mini"><tbody>{withData.map((c) => (
+        <tr key={c.sessionId}><td>{c.title}</td><td className="muted">{new Date(c.startedAt).toLocaleDateString()}</td><td className="muted">{c.files} files · {c.submissions} submissions</td>
+          <td>{c.submissions > 0 && <button className="link small" onClick={() => api.revealPastClass(c.sessionId)}>Submissions folder</button>}</td></tr>
+      ))}</tbody></table>
+    </details>
   );
 }
 
@@ -60,6 +77,10 @@ function describe(e: TimelineEvent, names: Map<string, string>) {
     'class.policy': `Join rule changed to "${POLICIES.find((p) => p.v === e.data.policy)?.label}"`,
     'member.requested': `${who} asked to join`, 'member.joined': `${who} joined`, 'member.approved': `${who} approved`,
     'member.rejected': `${who} rejected`, 'member.removed': `${who} removed`, 'member.blocked': `${who} blocked`,
+    'resource.added': `${e.data.name} added`, 'resource.pushed': `${e.data.name} sent to everyone`, 'resource.removed': `${e.data.name} removed`,
+    'resource.hidden': `${e.data.name} hidden`, 'resource.shown': `${e.data.name} made available`,
+    'assignment.published': `Assignment "${e.data.title}" published`, 'assignment.closed': 'Assignment closed',
+    'submission.accepted': `${who} submitted "${e.data.title}"${e.data.late ? ' (late)' : ''}`,
   };
   return m[e.type] ?? e.type;
 }
@@ -70,6 +91,9 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [quality, setQuality] = useState<Quality>('disconnected');
   const [notice, setNotice] = useState('');
+  const [resources, setResources] = useState<TeacherResourceView[]>([]);
+  const [assignments, setAssignments] = useState<TeacherAssignmentView[]>([]);
+  const [stats, setStats] = useState<TransferStats | null>(null);
   const conn = useRef<ClassroomConnection | null>(null);
 
   useEffect(() => {
@@ -78,6 +102,9 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         if (m.t === 'hello' || m.t === 'class.state') setInfo(m.classroom);
         else if (m.t === 'roster') setMembers(m.members);
         else if (m.t === 'timeline') setTimeline(m.events);
+        else if (m.t === 'resources') setResources(m.resources as TeacherResourceView[]);
+        else if (m.t === 'assignments') setAssignments(m.assignments as TeacherAssignmentView[]);
+        else if (m.t === 'stats') setStats(m.stats);
         else if (m.t === 'error') setNotice(m.message);
       },
       onQuality: setQuality,
@@ -108,6 +135,8 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
       {notice && <p className="error" onClick={() => setNotice('')}>{notice}</p>}
 
       <section className="grid">
+        <TeacherFiles resources={resources} stats={stats} send={send} />
+        <TeacherAssignments assignments={assignments} send={send} />
         <div className="card">
           <h3>Waiting to join {pending.length > 0 && <span className="badge">{pending.length}</span>}</h3>
           {pending.length === 0 && <p className="muted">Students enter <b>{started.code}</b> in the Classroom LAN app on the same network.</p>}

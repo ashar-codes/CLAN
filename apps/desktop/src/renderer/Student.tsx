@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClassroomConnection, joinByCode, JoinFailed, type Candidate, type JoinResult, type Quality } from '@classroom/client';
-import type { ClassroomInfo, MemberStatus, StudentProfile } from '@classroom/protocol';
+import type { ClassroomInfo, ClientMessage, MemberStatus, ResourceView, StudentAssignmentView, StudentProfile } from '@classroom/protocol';
+import { StudentAssignments, StudentFiles as FilesCard } from './Files.tsx';
 import { api } from './App.tsx';
 
 type Profile = Omit<StudentProfile, 'deviceId'>;
@@ -98,6 +99,10 @@ function InClass({ joined, onLeave }: { joined: JoinResult; onLeave(): void }) {
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
   const [quality, setQuality] = useState<Quality>('disconnected');
   const [closed, setClosed] = useState('');
+  const [resources, setResources] = useState<ResourceView[]>([]);
+  const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
+  const [pushed, setPushed] = useState<string | null>(null);
+  const connRef = useRef<ClassroomConnection | null>(null);
 
   useEffect(() => {
     const c = new ClassroomConnection(joined.url, joined.token, {
@@ -105,12 +110,18 @@ function InClass({ joined, onLeave }: { joined: JoinResult; onLeave(): void }) {
         if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); }
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') setStatus(m.status);
+        if (m.t === 'resources') setResources(m.resources as ResourceView[]);
+        if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
+        if (m.t === 'resource.push') setPushed(m.resourceId);
       },
       onQuality: setQuality,
       onClosed: (reason) => setClosed(reason),
     });
+    connRef.current = c;
     return () => c.close();
   }, [joined]);
+  const send = useCallback((m: ClientMessage) => connRef.current?.send(m), []);
+  const conn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title }), [joined]);
 
   const over = info.ended ? 'The class has ended.' : status === 'rejected' ? 'The teacher declined your request.' : status === 'removed' ? 'You were removed from the class.'
     : status === 'blocked' ? 'This device was blocked from the class.' : closed ? 'Your session expired. Join again with the code.' : '';
@@ -132,7 +143,8 @@ function InClass({ joined, onLeave }: { joined: JoinResult; onLeave(): void }) {
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>
       </header>
       <section className="grid">
-        <div className="card"><h3>Classroom</h3><p className="muted">Files, presentations, chat and quizzes from your teacher will appear here as they are added in upcoming builds.</p></div>
+        <FilesCard conn={conn} resources={resources} pushed={pushed} send={send} />
+        <StudentAssignments conn={conn} assignments={assignments} />
       </section>
     </div>
   );

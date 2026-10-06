@@ -11,7 +11,7 @@
     "start": "electron .",
     "dist": "pnpm build && electron-builder",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:e2e": "pnpm build && vitest run -c vitest.e2e.config.ts",
+    "test:e2e": "vite build -c vite.main.config.ts && vite build -c vite.preload.config.ts && vite build && vitest run -c vitest.e2e.config.ts",
     "dist:dir": "pnpm build && electron-builder --dir"
   },
   "devDependencies": {
