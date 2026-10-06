@@ -145,12 +145,14 @@ export class Classroom extends EventEmitter {
   }
 
   setLocked(locked: boolean) {
+    if (this.info().locked === locked) return;
     this.db.prepare('UPDATE sessions SET locked = ? WHERE id = ?').run(locked ? 1 : 0, this.id);
     this.log(locked ? 'class.locked' : 'class.unlocked', null, {});
     this.emit('state');
   }
 
   setPolicy(policy: JoinPolicy) {
+    if (this.info().joinPolicy === policy) return;
     this.db.prepare('UPDATE sessions SET join_policy = ? WHERE id = ?').run(policy, this.id);
     this.log('class.policy', null, { policy });
     this.emit('state');
