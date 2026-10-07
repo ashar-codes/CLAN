@@ -1,10 +1,11 @@
 # Android networking
 
-**Status: cannot join in this build** (same OPAQUE + pinned-transport blockers as iOS); not device-tested (no Android SDK here).
+**Status: implemented in 2.6; NOT compiled or device-tested** (no Android SDK or JDK on the development machine).
 
-Pinned transport plan: OkHttp with a custom `X509TrustManager` whose only trust anchor is the session CA from the binding
-(validate the chain with a `TrustManagerFactory` initialised from a KeyStore containing just that CA), followed by a leaf SPKI
-SHA-256 comparison; used for requests, ranged downloads to file, offset uploads from file and WebSockets. Never a trust-all manager.
+* OPAQUE: official WASM in a hidden Android WebView (Chromium; the identical page was run in Electron's Chromium).
+* Pinned transport: `modules/pinned-transport/android` — OkHttp with `PinnedTrustManager` (KeyStore containing only the
+  class CA → chain validation → leaf SPKI SHA-256 == pin), TLS 1.3 `ConnectionSpec`, hostname verifier accepting any name for
+  this client only (identity = CA + pin). Requests, ranged downloads to file, offset uploads from file, WebSockets.
 Device Ed25519 seed in `expo-secure-store` (Android Keystore-backed).
 
 * Discovery: `react-native-zeroconf` → `NsdManager`, service `_classroomlan._tcp`.

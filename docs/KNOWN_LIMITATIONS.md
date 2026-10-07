@@ -7,7 +7,7 @@
 * Downloads are served by the teacher only (no peer redistribution); throughput is bounded by the teacher's Wi-Fi link.
 * Download progress shown to the teacher is self-reported by students.
 * Strict Range handling: multi-range or malformed `Range` headers get 416 rather than a full 200.
-* **Phones cannot join in this build**: no React Native OPAQUE binding is compatible with the teacher's OPAQUE 1.1, and the pinned native transport isn't written. (Before 2.5 mobile spoke plaintext HTTP; that path no longer exists.)
+* **Phones: implemented (2.6) but never run on a device.** The native Swift/Kotlin transport modules have not been compiled for iOS/Android on this machine; expect first-device fixes.
 * Joining takes ~0.2–0.4 s of client CPU for OPAQUE key stretching (Argon2id); the teacher process holds ~75 MB of extra WASM memory after registering the class code.
 * Replacing a laptop, reinstalling, or losing the OS keychain item creates a new device key: the teacher must approve it again. Likewise a new teacher computer/key triggers a warning for students.
 * A changed LAN IP mid-class needs a class restart (new code, new certificate); students pair again.

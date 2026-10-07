@@ -2,9 +2,8 @@
 // (iOS Keychain / Android Keystore-backed). The profile (names + public key) is not secret.
 import * as SecureStore from 'expo-secure-store';
 import { getRandomBytes } from 'expo-crypto';
-import { ed25519 } from '@noble/curves/ed25519.js';
 import { b64u, keyFingerprint, type StudentProfile } from '@classroom/protocol';
-import type { DeviceSigner } from '@classroom/client';
+import { seedSigner, type DeviceSigner } from '@classroom/client';
 
 const PROFILE = 'classroom.profile.v1';
 const DEVICE_SEED = 'classroom.device.ed25519.v1';
@@ -18,8 +17,7 @@ export async function deviceSigner(): Promise<DeviceSigner> {
     seedB64 = b64u.encode(getRandomBytes(32));
     await SecureStore.setItemAsync(DEVICE_SEED, seedB64, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
   }
-  const seed = b64u.decode(seedB64);
-  return { publicKey: b64u.encode(ed25519.getPublicKey(seed)), sign: (bytes) => b64u.encode(ed25519.sign(bytes, seed)) };
+  return seedSigner(b64u.decode(seedB64));
 }
 
 export async function loadProfile(): Promise<OwnProfile> {

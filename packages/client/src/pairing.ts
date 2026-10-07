@@ -6,13 +6,25 @@ import {
   type JoinProofPayload, type JoinResponse, type PairFinishResponse, type PairStartResponse, type ReconnectChallengeResponse,
   type ReconnectProofPayload, type TlsBinding,
 } from '@classroom/protocol';
+import { ed25519 } from '@noble/curves/ed25519.js';
+import { b64u } from '@classroom/protocol';
 import { TransferError, type Candidate, type Transport } from './index.ts';
 
-/** Subset of @serenity-kit/opaque's client API (same shape on every platform binding). */
+/** Ed25519 signer from a 32-byte seed (@noble/curves). Used by mobile, where the seed lives in secure storage. */
+export function seedSigner(seed: Uint8Array): { publicKey: string; sign(bytes: Uint8Array): string } {
+  if (seed.length !== 32) throw new Error('Ed25519 seed must be 32 bytes');
+  return { publicKey: b64u.encode(ed25519.getPublicKey(seed)), sign: (bytes) => b64u.encode(ed25519.sign(bytes, seed)) };
+}
+
+type MaybePromise<T> = T | Promise<T>;
+/**
+ * Subset of @serenity-kit/opaque's client API. Desktop passes the library directly (sync); mobile passes a bridge to
+ * the same library running in an isolated WebView (async). `clientLoginState` may be an opaque handle.
+ */
 export type OpaqueClient = {
-  startLogin(p: { password: string }): { clientLoginState: string; startLoginRequest: string };
+  startLogin(p: { password: string }): MaybePromise<{ clientLoginState: string; startLoginRequest: string }>;
   finishLogin(p: { clientLoginState: string; loginResponse: string; password: string; identifiers?: { client?: string; server?: string } }):
-    { finishLoginRequest: string; sessionKey: string } | undefined;
+    MaybePromise<{ finishLoginRequest: string; sessionKey: string } | undefined>;
 };
 /** Device identity: Ed25519 public key (raw, base64url) and a signer over exact bytes. */
 export type DeviceSigner = { publicKey: string; sign(bytes: Uint8Array): Promise<string> | string };
@@ -42,9 +54,9 @@ export async function pair(o: {
   transportFor(binding: TlsBinding): Transport;
 }): Promise<Paired & { joinKey: Uint8Array }> {
   const f = o.plainFetch ?? ((u, i) => fetch(u, i));
-  const { clientLoginState, startLoginRequest } = o.opaque.startLogin({ password: o.code });
+  const { clientLoginState, startLoginRequest } = await o.opaque.startLogin({ password: o.code });
   const start = await postJson<PairStartResponse>(f, `${o.bootstrapUrl}/api/pair/start`, { v: 1, sessionId: o.sessionId, startLoginRequest });
-  const fin = o.opaque.finishLogin({ clientLoginState, loginResponse: start.loginResponse, password: o.code, identifiers: opaqueIdentifiers(o.sessionId) });
+  const fin = await o.opaque.finishLogin({ clientLoginState, loginResponse: start.loginResponse, password: o.code, identifiers: opaqueIdentifiers(o.sessionId) });
   // undefined: the server could not prove knowledge of the code (wrong code or impostor). Tell it we gave up, so an
   // honest wrong guess is counted at once; nothing secret is sent.
   if (!fin) {

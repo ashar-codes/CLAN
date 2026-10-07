@@ -13,11 +13,13 @@ Dev Electron, unsigned packaged and Developer-ID-signed builds are different sig
 key may become unreadable; the app then generates a new key and says so (re-approval needed). No prompt appeared in this
 repository's dev or unsigned-packaged E2E runs. Sign and notarize release builds so the identity is stable across updates.
 
-## iOS student (cannot join in this build; not device-tested)
-* Joining is blocked on (a) an OPAQUE binding compatible with `@serenity-kit/opaque` 1.x and (b) a pinned transport native
-  module: URLSession delegate that evaluates the server trust with **only** the session CA from the binding as anchor
-  (`SecTrustSetAnchorCertificates` + `SecTrustSetAnchorCertificatesOnly`) and then compares the leaf SPKI SHA-256 to the pin,
-  for data tasks, download tasks (Range resume) and `URLSessionWebSocketTask`. Never accept arbitrary self-signed certs.
+## iOS student (implemented in 2.6; NOT device-tested)
+* OPAQUE: official WASM in a hidden WKWebView (see PAIRING_AND_TRUST.md › Mobile).
+* Pinned transport: `modules/pinned-transport/ios` — `PinnedTrust.swift` (trust decision) + `PinnedTransportModule.swift`
+  (Expo module: request, download, upload, WebSocket; ephemeral URLSession, TLS 1.3). `PinnedTrust.swift` is compiled for
+  macOS and run against a real classroom server by `modules/pinned-transport/tests` (accepts the right CA+pin; rejects a wrong
+  pin, another CA, both). The Expo module file itself has not been compiled (needs Xcode + Pods).
+* Deployment target 15.1 (async URLSession APIs).
 * Device Ed25519 seed in `expo-secure-store` with `WHEN_UNLOCKED_THIS_DEVICE_ONLY` (not in backups / not migrated).
 * `app.json` sets `NSLocalNetworkUsageDescription`, `NSBonjourServices` and ATS `NSAllowsLocalNetworking`
   (verified in `expo prebuild` output).

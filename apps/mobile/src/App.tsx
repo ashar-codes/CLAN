@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
-import { ClassroomConnection, pairAndJoin, TransferError, type Candidate, type PairedJoin, type Quality } from '@classroom/client';
+import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type PairedJoin, type Quality } from '@classroom/client';
 import { shortFingerprint, StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
-import { MOBILE_PAIRING_UNAVAILABLE, opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
+import { opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
+import { OpaqueBridgeHost } from './OpaqueBridgeHost';
 
 const QUALITY: Record<Quality, string> = { excellent: 'Excellent', good: 'Good', poor: 'Poor', disconnected: 'Reconnecting…' };
 
@@ -21,6 +22,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={[s.fill, { backgroundColor: c.bg }]}>
+      <OpaqueBridgeHost />
       <KeyboardAvoidingView style={s.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {editing ? (
           <ProfileForm c={c} initial={profile} onSaved={(p) => { setProfile(p); setEditing(false); }} />
@@ -71,7 +73,7 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
     setBusy(true); setError('');
     try {
       for (let i = 0; i < 24 && foundRef.current.length === 0; i++) await new Promise((r) => setTimeout(r, 250));
-      // Same secure flow as desktop; the two native seams currently refuse (see native.ts), so this shows why.
+      // Same secure flow as desktop: OPAQUE (official WASM in the isolated WebView) -> MACed binding -> pinned native TLS.
       onJoined(await pairAndJoin({ candidates: foundRef.current, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
     } catch (e) {
       setError(e instanceof TransferError ? e.message : 'Something went wrong. Try again.');
@@ -91,13 +93,14 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
       {!!error && <Text style={{ color: c.danger }}>{error}</Text>}
       <Button c={c} primary label={busy ? 'Finding classroom…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
       <Text style={{ color: c.muted, marginTop: 24 }}>
-        {MOBILE_PAIRING_UNAVAILABLE + '\n\n'}{found.length ? `Classrooms nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for classrooms on this Wi-Fi… Make sure you are on the same network as your teacher. Internet is not needed.'}
+        {found.length ? `Classrooms nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for classrooms on this Wi-Fi… Make sure you are on the same network as your teacher. Internet is not needed.'}
       </Text>
     </ScrollView>
   );
 }
 
-function InClass({ c, joined, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
+function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
+  const [joined, setJoined] = useState(first);
   const [status, setStatus] = useState<MemberStatus>(joined.status);
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
   const [quality, setQuality] = useState<Quality>('disconnected');
@@ -117,7 +120,13 @@ function InClass({ c, joined, onLeave }: { c: C; joined: PairedJoin; onLeave(): 
         if (m.t === 'resource.push') setPushed(m.resourceId);
       },
       onQuality: setQuality,
-      onClosed: () => setClosed(true),
+      onClosed: (reason) => {
+        // Token expired: prove the device key again over the pinned channel (no code), once.
+        if (/expired|invalid/.test(reason) && joined === first) {
+          deviceSigner().then((device) => reconnect({ url: joined.url, transport: joined.transport, sessionId: joined.classroom.sessionId, device }))
+            .then((r) => setJoined({ ...joined, ...r }), () => setClosed(true));
+        } else setClosed(true);
+      },
     }, 5000, joined.transport);
     ref.current = conn;
     return () => conn.close();

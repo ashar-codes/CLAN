@@ -6,6 +6,7 @@
 | 1 — LAN Mode, classroom creation, discovery, 6-digit pairing, identity, approval | ✅ done (desktop verified E2E; mobile code-complete, not device-tested) |
 | 2 — file repository, resumable transfer, assignments | ✅ done (desktop verified E2E dev + packaged; mobile code-complete, not device-tested) |
 | 2.5 — secure pairing (OPAQUE), TLS bound to the PAKE, Ed25519 device + teacher identity, signed receipts | ✅ done for desktop (dev + packaged macOS E2E); mobile blocked on a compatible OPAQUE binding (documented) |
+| 2.6 — secure mobile join (official OPAQUE WASM in isolated WebView, native pinned TLS) | ✅ implemented; bridge verified in Chromium, iOS trust code verified on Apple Security; **no device run** |
 | 3 — Windows Direct Mode, auto Wi-Fi join | not started |
 | 4 — LiveKit, screen/window sharing, student presenting | not started |
 | 5 — PDF sync presentation, notes, bookmarks | not started |

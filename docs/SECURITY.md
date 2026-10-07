@@ -17,7 +17,8 @@ Pairing, transport, identities, tokens, receipts and the full threat model: **[P
 | Need | Chosen | Why | Rejected |
 |---|---|---|---|
 | PAKE | `@serenity-kit/opaque` 1.1.0 | Maintained (1.1.0, Feb 2026) binding of `opaque-ke` (audited Rust OPAQUE, RFC 9807); WASM embedded, works in Node and Electron main without native builds; supports custom identifiers. | Home-made PAKE (never); SRP/SPAKE2 packages (older, weaker fit). |
-| PAKE on React Native | **none in this build** | `react-native-opaque` 0.3.1 (last release Oct 2023) is pinned to `@serenity-kit/opaque` 0.8, and we verified 0.8 ↔ 1.1 are **wire-incompatible** (login fails both ways). Stopped there per policy; documented options in PAIRING_AND_TRUST / ANDROID / APPLE docs. | Downgrading the desktop to 0.8 (old, would hold the whole system back). |
+| PAKE on React Native (2.6) | the **same** `@serenity-kit/opaque` 1.1.0 build, run in an isolated WebView (`react-native-webview` 13.16.1) | No maintained RN binding of OPAQUE 1.x exists; `react-native-opaque` 0.3.1 is pinned to 0.8 and verified **wire-incompatible**; other WASM packages wrap different opaque-ke builds. Hermes has no WebAssembly, so the official WASM runs in a WebView behind a 3-operation typed bridge. Identical library ⇒ compatibility is not a guess. | 0.8 on both sides; home-made PAKE; less-maintained WASM forks. |
+| Mobile pinned TLS (2.6) | local Expo module: iOS URLSession + `SecTrust` with the class CA as sole anchor + SPKI pin; Android OkHttp + `X509TrustManager` over a KeyStore holding only the class CA + SPKI pin | Platform-native TLS; no trust-all, no `rejectUnauthorized:false`, user-installed CAs never count. | Third-party pinning libraries (they pin on top of system trust and reject a per-class CA). |
 | X.509 generation | `@peculiar/x509` 2.1 over WebCrypto | Standard, maintained, pure JS (no `openssl` at runtime). Needs `reflect-metadata`. | Shelling out to `openssl`; `node-forge` (no ECDSA certs). |
 | JSON canonicalization | `canonicalize` 5.1 (RFC 8785 JCS) | Reference implementation of the standard. | Ad-hoc string concatenation. |
 | HKDF / HMAC / Ed25519 verify | `@noble/hashes`, `@noble/curves` 2.4 | Audited, dependency-free, identical on Node, Electron and Hermes. | Per-platform implementations. |
@@ -79,8 +80,10 @@ transport gap below.
 | Receipt tampering / forgery | Ed25519 over JCS(payload); verifier pins the paired teacher key | `signed receipts` (11 tests) |
 
 ## Known gaps (tracked)
-* **Mobile cannot join in this build** (no compatible OPAQUE binding; pinned native transport not written). Mobile is
-  otherwise wired to the secure flow through explicit seams that refuse with an explanation.
+* **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
+  code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.
+* Mobile OPAQUE runs inside a WebView: the 6-digit code passes over the app↔WebView message channel (in-process).
+  JS strings can't be zeroed; login state lives only inside the WebView behind single-use handles.
 * **Malware / local compromise**: anything running as the user can read tokens in memory or use the OS keystore through the app.
   Tokens are bearer tokens; proof-of-possession tokens (e.g. DPoP) were evaluated and not adopted: TLS + short lifetimes +
   device-key re-issuance address LAN theft, and DPoP wouldn't stop on-device malware that can also use the device key.

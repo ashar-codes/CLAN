@@ -1,0 +1,22 @@
+// Classroom LAN pinned transport (Android). NOT compiled on the development machine (no Android SDK) — see docs/TESTING.md.
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.pinnedtransport'
+version = '0.1.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+useExpoPublishing()
+
+android {
+  namespace "expo.modules.pinnedtransport"
+}
+
+dependencies {
+  // OkHttp is already part of React Native on Android.
+  implementation "com.squareup.okhttp3:okhttp"
+}
