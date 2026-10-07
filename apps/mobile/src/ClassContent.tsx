@@ -5,8 +5,8 @@ import * as Sharing from 'expo-sharing';
 import { randomUUID } from 'expo-crypto';
 import { File } from 'expo-file-system';
 import { formatBytes } from '@classroom/client';
-import { extensionOf, type ClientMessage, type Receipt, type ResourceView, type StudentAssignmentView, type TransferState } from '@classroom/protocol';
-import { clearIdempotencyKey, download, fileStates, idempotencyKeyFor, pause, receipts as loadReceipts, submit, type Conn, type FileState } from './transfers';
+import { extensionOf, type ClientMessage, type ResourceView, type StudentAssignmentView, type TransferState } from '@classroom/protocol';
+import { check, clearIdempotencyKey, download, fileStates, idempotencyKeyFor, pause, receipts as loadReceipts, submit, type Conn, type FileState, type StoredReceipt } from './transfers';
 
 type C = { text: string; muted: string; border: string; surface: string; accent: string; danger: string; ok: string; warn: string };
 const LABEL: Record<TransferState, string> = { not_started: 'Not downloaded', queued: 'Queued', downloading: 'Downloading', paused: 'Paused', verifying: 'Verifying…', completed: 'Downloaded', failed: 'Failed' };
@@ -17,7 +17,7 @@ export function ClassContent({ c, conn, resources, assignments, pushed, send }: 
   const [states, setStates] = useState<Record<string, FileState>>({});
   const [uploads, setUploads] = useState<Record<string, number>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [myReceipts, setMyReceipts] = useState<Receipt[]>(() => loadReceipts(conn.sessionId));
+  const [myReceipts, setMyReceipts] = useState<StoredReceipt[]>(() => loadReceipts(conn));
   const auto = useRef(new Set<string>());
 
   const onState = (s: FileState) => {
@@ -49,7 +49,7 @@ export function ClassContent({ c, conn, resources, assignments, pushed, send }: 
     try {
       await submit(conn, a.id, { uri: f.uri, name: f.name, size }, idem, (sent, total) => setUploads((x) => ({ ...x, [a.id]: total ? sent / total : 0 })));
       clearIdempotencyKey(k);
-      setMyReceipts(loadReceipts(conn.sessionId));
+      setMyReceipts(loadReceipts(conn));
     } catch (e) {
       setErrors((x) => ({ ...x, [a.id]: `${(e as Error).message} You can retry; nothing will be submitted twice.` }));
     } finally {
@@ -72,7 +72,7 @@ export function ClassContent({ c, conn, resources, assignments, pushed, send }: 
               {s.state === 'downloading' && <View style={[st.bar, { backgroundColor: c.border }]}><View style={{ width: `${pct}%`, height: '100%', backgroundColor: c.accent }} /></View>}
               <View style={st.row}>
                 {(s.state === 'not_started' || s.state === 'failed' || s.state === 'paused') && <Btn c={c} primary label={s.state === 'paused' ? 'Resume' : s.state === 'failed' ? 'Retry' : 'Download'} onPress={() => download(conn, r, onState)} />}
-                {s.state === 'downloading' && <Btn c={c} label="Pause" onPress={() => pause(conn, r, onState)} />}
+                {s.state === 'downloading' && <Btn c={c} label="Pause" onPress={() => pause(r)} />}
                 {/* Share sheet hands the file to a viewer app chosen by the student; nothing is executed. */}
                 {s.state === 'completed' && s.uri && <Btn c={c} label="Open with…" onPress={() => Sharing.shareAsync(s.uri!)} />}
               </View>
@@ -89,12 +89,17 @@ export function ClassContent({ c, conn, resources, assignments, pushed, send }: 
             <Text style={{ color: c.text, fontWeight: '600', fontSize: 16 }}>{a.title}{a.closed ? ' (closed)' : ''}</Text>
             <Text style={{ color: c.muted }}>{a.dueAt ? `Due ${new Date(a.dueAt).toLocaleString()}` : 'No due time'} · {a.allowedExtensions.length ? a.allowedExtensions.map((e) => '.' + e).join(' ') : 'any type'} · up to {formatBytes(a.maxBytes)}</Text>
             {!!a.instructions && <Text style={{ color: c.text }}>{a.instructions}</Text>}
-            {a.latest && (
-              <View style={[st.receipt, { borderColor: c.ok }]}>
-                <Text style={{ color: c.text }}>✓ Submitted{a.latest.late ? ' (late)' : ''}: {a.latest.fileName} · {formatBytes(a.latest.size)}</Text>
-                <Text style={{ color: c.muted, fontSize: 12 }}>{new Date(a.latest.submittedAt).toLocaleString()} · receipt {a.latest.submissionId.slice(0, 8)} · SHA-256 {a.latest.sha256.slice(0, 12)}…</Text>
-              </View>
-            )}
+            {a.latest && (() => {
+              const v = check(a.latest, conn.teacherPublicKey);
+              const p = a.latest.payload;
+              return (
+                <View style={[st.receipt, { borderColor: v.verified ? c.ok : c.danger }]}>
+                  <Text style={{ color: v.verified ? c.ok : c.danger, fontWeight: '600' }}>{v.verified ? 'Verified ✓' : `Verification failed — ${v.reason}`}</Text>
+                  <Text style={{ color: c.text }}>Submitted{p.late ? ' (late)' : ''}: {p.fileName} · {formatBytes(p.size)}</Text>
+                  <Text style={{ color: c.muted, fontSize: 12 }}>{new Date(p.submittedAt).toLocaleString()} · receipt {p.submissionId.slice(0, 8)} · SHA-256 {p.sha256.slice(0, 12)}…</Text>
+                </View>
+              );
+            })()}
             {a.id in uploads && <Text style={{ color: c.muted }}>Uploading… {Math.floor(uploads[a.id]! * 100)}%</Text>}
             {!!errors[a.id] && <Text style={{ color: c.danger }}>{errors[a.id]}</Text>}
             {!a.closed && !(a.id in uploads) && <Btn c={c} primary={!a.latest} label={a.latest ? 'Submit a new version' : 'Submit file'} onPress={() => submitFor(a)} />}

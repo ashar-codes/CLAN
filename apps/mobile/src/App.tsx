@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
-import { ClassroomConnection, joinByCode, JoinFailed, type Candidate, type JoinResult, type Quality } from '@classroom/client';
-import { StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
+import { ClassroomConnection, pairAndJoin, TransferError, type Candidate, type PairedJoin, type Quality } from '@classroom/client';
+import { shortFingerprint, StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { browse } from './discovery';
-import { loadProfile, saveProfile } from './storage';
+import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
+import { MOBILE_PAIRING_UNAVAILABLE, opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
 
 const QUALITY: Record<Quality, string> = { excellent: 'Excellent', good: 'Good', poor: 'Poor', disconnected: 'Reconnecting…' };
 
 export default function App() {
   const dark = useColorScheme() === 'dark';
   const c = dark ? darkColors : lightColors;
-  const [profile, setProfile] = useState<(Partial<StudentProfile> & { deviceId: string }) | null>(null);
+  const [profile, setProfile] = useState<OwnProfile | null>(null);
   const [editing, setEditing] = useState(false);
-  const [joined, setJoined] = useState<JoinResult | null>(null);
+  const [joined, setJoined] = useState<PairedJoin | null>(null);
 
   useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); }); }, []);
   if (!profile) return null;
@@ -35,14 +36,14 @@ export default function App() {
 
 type C = typeof lightColors;
 
-function ProfileForm({ c, initial, onSaved }: { c: C; initial: Partial<StudentProfile> & { deviceId: string }; onSaved(p: StudentProfile): void }) {
+function ProfileForm({ c, initial, onSaved }: { c: C; initial: OwnProfile; onSaved(p: OwnProfile): void }) {
   const [p, setP] = useState({ fullName: initial.fullName ?? '', rollNo: initial.rollNo ?? '', deviceName: initial.deviceName ?? '' });
   const [error, setError] = useState('');
   const save = async () => {
-    const parsed = StudentProfile.safeParse({ ...p, deviceId: initial.deviceId });
+    const parsed = StudentProfile.safeParse({ ...p, devicePublicKey: initial.devicePublicKey });
     if (!parsed.success) return setError('Please fill in every field.');
     await saveProfile(parsed.data);
-    onSaved(parsed.data);
+    onSaved({ ...initial, ...parsed.data });
   };
   return (
     <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
@@ -52,12 +53,13 @@ function ProfileForm({ c, initial, onSaved }: { c: C; initial: Partial<StudentPr
       <Field c={c} label="Student / roll number" value={p.rollNo} placeholder="FA23-CS-114" onChange={(v) => setP({ ...p, rollNo: v })} />
       <Field c={c} label="Device name" value={p.deviceName} placeholder="Ashar-iPhone" onChange={(v) => setP({ ...p, deviceName: v })} />
       {!!error && <Text style={{ color: c.danger }}>{error}</Text>}
+      <Text style={{ color: c.muted, fontSize: 12 }}>Device key {shortFingerprint(initial.fingerprint)} — kept in this phone's secure storage.</Text>
       <Button c={c} primary label="Save" onPress={save} />
     </ScrollView>
   );
 }
 
-function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentProfile; onJoined(j: JoinResult): void; onEdit(): void }) {
+function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentProfile; onJoined(j: PairedJoin): void; onEdit(): void }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -69,9 +71,10 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
     setBusy(true); setError('');
     try {
       for (let i = 0; i < 24 && foundRef.current.length === 0; i++) await new Promise((r) => setTimeout(r, 250));
-      onJoined(await joinByCode(foundRef.current, code, profile));
+      // Same secure flow as desktop; the two native seams currently refuse (see native.ts), so this shows why.
+      onJoined(await pairAndJoin({ candidates: foundRef.current, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
     } catch (e) {
-      setError(e instanceof JoinFailed ? e.message : 'Something went wrong. Try again.');
+      setError(e instanceof TransferError ? e.message : 'Something went wrong. Try again.');
     } finally { setBusy(false); }
   };
 
@@ -88,13 +91,13 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
       {!!error && <Text style={{ color: c.danger }}>{error}</Text>}
       <Button c={c} primary label={busy ? 'Finding classroom…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
       <Text style={{ color: c.muted, marginTop: 24 }}>
-        {found.length ? `Classrooms nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for classrooms on this Wi-Fi… Make sure you are on the same network as your teacher. Internet is not needed.'}
+        {MOBILE_PAIRING_UNAVAILABLE + '\n\n'}{found.length ? `Classrooms nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for classrooms on this Wi-Fi… Make sure you are on the same network as your teacher. Internet is not needed.'}
       </Text>
     </ScrollView>
   );
 }
 
-function InClass({ c, joined, onLeave }: { c: C; joined: JoinResult; onLeave(): void }) {
+function InClass({ c, joined, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
   const [status, setStatus] = useState<MemberStatus>(joined.status);
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
   const [quality, setQuality] = useState<Quality>('disconnected');
@@ -115,12 +118,13 @@ function InClass({ c, joined, onLeave }: { c: C; joined: JoinResult; onLeave(): 
       },
       onQuality: setQuality,
       onClosed: () => setClosed(true),
-    });
+    }, 5000, joined.transport);
     ref.current = conn;
     return () => conn.close();
   }, [joined]);
   const send = useCallback((m: ClientMessage) => ref.current?.send(m), []);
-  const conn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title }), [joined]);
+  const conn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title,
+    transport: joined.transport as PinnedNativeTransport, teacherPublicKey: joined.binding.teacherPublicKey }), [joined]);
 
   const over = info.ended ? 'The class has ended.' : status === 'rejected' ? 'The teacher declined your request.' : status === 'removed' ? 'You were removed from the class.'
     : status === 'blocked' ? 'This device was blocked from the class.' : closed ? 'Your session expired. Join again with the code.' : '';
