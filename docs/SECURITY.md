@@ -1,6 +1,6 @@
 # Security
 
-Last reviewed: 2026-10-07 (Milestone 2.5). Re-review with every milestone.
+Last reviewed: 2026-10-07 (Milestones 2.6 and 2.75). Re-review with every milestone.
 Pairing, transport, identities, tokens, receipts and the full threat model: **[PAIRING_AND_TRUST.md](PAIRING_AND_TRUST.md)**.
 
 ## Model
@@ -78,6 +78,26 @@ transport gap below.
 | Replayed / expired / cross-class challenges | Single use, 2-min TTL, session-bound | `replayed signed join…`, `expired challenge…`, `challenge/proof from class A…` |
 | Known-device impersonation | Trust = approved key fingerprint + proof; same roll number on a new key = `new_device` | `known device auto-approves only with the same key…`, `pre-2.5 UUID trust is not carried over…` |
 | Receipt tampering / forgery | Ed25519 over JCS(payload); verifier pins the paired teacher key | `signed receipts` (11 tests) |
+
+## Peer-assisted data plane (Milestone 2.75)
+Principle: **a network role never confers authority**. Peers can only move bytes; what the bytes must be, who may serve, and who
+may request are all decided by teacher-signed objects verified against the teacher key from pairing.
+
+| Threat | Control | Test |
+|---|---|---|
+| Malicious peer alters chunk / serves wrong chunk / another resource's chunk / stale version | Every chunk checked against the teacher-signed manifest before storage; whole-file hash before rename; source avoided 10 min | `peers: corrupt / wrong-chunk / lying / refusing / slow…` |
+| Forged or tampered manifest (name, chunk hash, total hash, version, other class, peer-signed) | Ed25519 verification with the paired teacher key; session + resource id + chunk-count consistency | `resource manifests` |
+| Fake peer discovery / impostor at a peer's address | Sources only used after the endorsement verifies; TLS must match the endorsed CA + leaf pin | `impostor at a peer address…` |
+| Peer impersonation (copied public key, wrong private key) | Endorsement binds device key ↔ TLS key; requests need a holder proof signed by the capability's device key | `legitimate request succeeds; none / wrong private key…` |
+| Unauthorized requester / cross-class / forged / expired capability | Teacher-signed capability, session-bound, 15 min; proof names the serving peer | `expired, forged (peer-signed) and cross-class capabilities fail` |
+| Removed / blocked student keeps downloading from peers | No new capabilities/endorsements; dropped from tracker; `peer.revoked` deny list enforced by peers; ≤ 15 min expiry backstop | `removed / blocked members…` |
+| Peer DoS (request floods, slowloris) | Per-requester rate limit, concurrency cap, header/request timeouts, pause switch | `peer endpoints: path traversal is refused; request floods are rate-limited` |
+| Path traversal on peer endpoints | Strict route regex (UUID + integer), no filesystem paths | same |
+| Topology manipulation (lying about availability, hogging) | Availability is a hint; lies cost the liar (`404` skip, failures avoid); teacher is always a fallback | `a partial peer…`, `lies` case |
+| Peer claims teacher powers / mints capabilities while teacher is offline | Only teacher-signed objects are accepted; capabilities aren't bearer tokens; WS teacher commands refused | `authority stays with the teacher` (2 tests) |
+| Private data leaking through peers | Assignments are never peer-shared | — (design) |
+
+Out of scope: a removed student keeps files it already downloaded; peers learn which classmates fetch which resources from them.
 
 ## Known gaps (tracked)
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust

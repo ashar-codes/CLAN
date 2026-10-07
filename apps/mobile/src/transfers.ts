@@ -3,11 +3,21 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { initUpload, resourceContentPath, TransferError, uploadStatus } from '@classroom/client';
-import { safeFileName, UPLOAD_CONTENT_TYPE, verifyReceipt, type Receipt, type ResourceView, type TransferState } from '@classroom/protocol';
-import type { PinnedNativeTransport } from './native';
+import {
+  acquireChunks, api, initUpload, peerAuthHeader, peerSource, resourceContentPath, teacherSource, TransferError, uploadStatus,
+  type ChunkStore, type DeviceSigner, type PeerInfo, type Source,
+} from '@classroom/client';
+import {
+  b64u, bitfield, safeFileName, UPLOAD_CONTENT_TYPE, verifyManifest, verifyReceipt,
+  type ManifestPayload, type PeerCapability, type PeerCapabilities, type Receipt, type ResourceView, type SignedManifest, type TransferState,
+} from '@classroom/protocol';
+import { pinnedNativeTransport, type PinnedNativeTransport } from './native';
 
-export type Conn = { url: string; token: string; sessionId: string; classTitle: string; transport: PinnedNativeTransport; teacherPublicKey: string };
+/** Phones download from peers but do not seed (battery, background limits, cellular risk) until measured. */
+export const MOBILE_PEER_CAPABILITIES: PeerCapabilities = { canDownload: true, canSeed: false, canRelayMedia: false };
+const SMALL_FILE_BYTES = 4 * 1024 * 1024;
+
+export type Conn = { url: string; token: string; sessionId: string; classTitle: string; transport: PinnedNativeTransport; teacherPublicKey: string; peerAssist?: boolean; device?: DeviceSigner };
 export type FileState = { resourceId: string; state: TransferState; bytes: number; size: number; error?: string; uri?: string; resumedFrom?: number };
 export type StoredReceipt = { receipt: Receipt; verified: boolean; reason?: string };
 
@@ -62,9 +72,90 @@ export function fileStates(c: Conn, resources: ResourceView[]): FileState[] {
   });
 }
 
+/** Chunk store over expo-file-system: positional writes into `.partial/<id>.part`, verified-chunk bitmap in meta. */
+class ExpoChunkStore implements ChunkStore {
+  readonly chunkCount: number;
+  constructor(private part: File, private meta: File, private m: ManifestPayload, private done: Uint8Array) { this.chunkCount = m.chunks.length; }
+  static open(c: Conn, m: ManifestPayload) {
+    const part = new File(ensure(partialDir(c)), `${m.resourceId}.part`);
+    const meta = new File(partialDir(c), `${m.resourceId}.json`);
+    const prev = readJson<{ sha256?: string; done?: string }>(meta, {});
+    let done: Uint8Array = bitfield.empty(m.chunks.length);
+    if (prev.sha256 === m.sha256 && prev.done) done = b64u.decode(prev.done); else if (part.exists) part.delete();
+    if (!part.exists) part.create();
+    const s = new ExpoChunkStore(part, meta, m, done);
+    s.save();
+    return s;
+  }
+  isDone(i: number) { return bitfield.has(this.done, i); }
+  async write(i: number, bytes: Uint8Array) {
+    const fh = this.part.open();
+    try { fh.offset = i * this.m.chunkSize; fh.writeBytes(bytes); } finally { fh.close(); }
+    bitfield.set(this.done, i);
+    this.save();
+  }
+  private save() { writeJson(this.meta, { sha256: this.m.sha256, size: this.m.size, done: b64u.encode(this.done) }); }
+  finalize(c: Conn, name: string) {
+    if (sha256File(this.part.uri) !== this.m.sha256) { this.part.delete(); this.meta.delete(); throw new TransferError('hash_mismatch', 'The assembled file failed verification and was discarded.'); }
+    const dest = uniqueFile(classDir(c), name);
+    this.part.move(dest);
+    this.meta.delete();
+    return dest;
+  }
+}
+
+/** Peer-assisted path (large files, peer assistance on): teacher-signed manifest, chunks from peers + teacher. */
+async function swarmDownload(c: Conn, r: ResourceView, onState: (s: FileState) => void, signal: AbortSignal) {
+  const manifest = await api<SignedManifest>(c.transport, c.url, c.token, `/api/resources/${r.id}/manifest`);
+  const v = verifyManifest(manifest, { trustedTeacherKey: c.teacherPublicKey, sessionId: c.sessionId, resourceId: r.id });
+  if (!v.ok || v.payload.sha256 !== r.sha256) throw new TransferError('bad_manifest', 'Resource manifest rejected.');
+  const m = v.payload;
+  const store = ExpoChunkStore.open(c, m);
+  let cap: PeerCapability | null = null;
+  const auth = async (fp: string) => {
+    if (!cap || cap.payload.expiresAt - Date.now() < 60_000) cap = await api<PeerCapability>(c.transport, c.url, c.token, '/api/peer/capability', { method: 'POST', body: '{}' });
+    return peerAuthHeader(cap, c.device!, fp);
+  };
+  const cache = new Map<string, Source & { setHave(b64: string): void }>();
+  const teacher = teacherSource(c.transport, c.url, c.token, m);
+  const sources = async (): Promise<Source[]> => {
+    const list: Source[] = [teacher];
+    const res = await api<{ sources: PeerInfo[] }>(c.transport, c.url, c.token, `/api/peer/sources/${r.id}`).catch(() => ({ sources: [] as PeerInfo[] }));
+    for (const info of res.sources) {
+      let s = cache.get(info.fingerprint);
+      if (!s) { s = peerSource({ info, teacherKey: c.teacherPublicKey, sessionId: c.sessionId, m, auth, transportFor: (e) => pinnedNativeTransport({ certificate: e.payload.tlsCa, spkiSha256: e.payload.tlsSpkiSha256 }) }) ?? undefined; if (s) cache.set(info.fingerprint, s); }
+      else s.setHave(info.have);
+      if (s) list.push(s);
+    }
+    return list;
+  };
+  let have = 0;
+  for (let i = 0; i < m.chunks.length; i++) if (store.isDone(i)) have += Math.min(m.chunkSize, m.size - i * m.chunkSize);
+  await acquireChunks({
+    manifest: m, store, sources, preferPeers: true, signal, sha256: (b) => bytesToHex(sha256(b)), concurrency: 4,
+    onChunk: (_i, _s, n) => { have += n; onState({ resourceId: r.id, state: 'downloading', bytes: have, size: r.size }); },
+  });
+  onState({ resourceId: r.id, state: 'verifying', bytes: r.size, size: r.size });
+  return { dest: store.finalize(c, r.name), sha256: m.sha256 };
+}
+
 /** Resumable download: `.partial/<id>.part` + meta, Range from the bytes on disk, SHA-256 verify, then move. */
 export async function download(c: Conn, r: ResourceView, onState: (s: FileState) => void): Promise<void> {
   if (active.has(r.id) || !r.sha256) return;
+  if (c.peerAssist && c.device && MOBILE_PEER_CAPABILITIES.canDownload && r.size > SMALL_FILE_BYTES) {
+    const ctl = new AbortController();
+    active.set(r.id, ctl);
+    try {
+      const { dest } = await swarmDownload(c, r, onState, ctl.signal);
+      const idx = readJson<Index>(indexFile(), {});
+      idx[key(c, r.id)] = { uri: dest.uri, sha256: r.sha256 };
+      writeJson(indexFile(), idx);
+      onState({ resourceId: r.id, state: 'completed', bytes: r.size, size: r.size, uri: dest.uri });
+    } catch (e) {
+      onState({ resourceId: r.id, state: ctl.signal.aborted ? 'paused' : 'failed', bytes: 0, size: r.size, error: ctl.signal.aborted ? undefined : (e as Error).message });
+    } finally { active.delete(r.id); }
+    return;
+  }
   const report = (state: TransferState, bytes: number, extra: Partial<FileState> = {}) => onState({ resourceId: r.id, state, bytes, size: r.size, ...extra });
   const part = new File(ensure(partialDir(c)), `${r.id}.part`);
   const meta = new File(partialDir(c), `${r.id}.json`);

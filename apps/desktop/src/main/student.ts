@@ -4,8 +4,11 @@ import { app, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { downloadResource, partPaths, uploadSubmission } from '@classroom/client/node';
-import { safeFileName, verifyReceipt, type Receipt, type ResourceView } from '@classroom/protocol';
+import { partPaths, uploadSubmission } from '@classroom/client/node';
+import { completedFileReader, PeerAgent } from '@classroom/client/peer';
+import { api, type PeerInfo } from '@classroom/client';
+import { candidateInterfaces } from '@classroom/server';
+import { safeFileName, verifyReceipt, type Receipt, type ResourceView, type SignedManifest } from '@classroom/protocol';
 import type { Conn, FileState, StoredReceipt } from '../shared.ts';
 import type { Trust } from './trust.ts';
 type Job = { conn: Conn; resource: ResourceView; ctl?: AbortController; state: FileState };
@@ -20,6 +23,7 @@ const SAFE_TO_OPEN = new Set(['pdf', 'txt', 'md', 'csv', 'png', 'jpg', 'jpeg', '
 export const canOpen = (path: string) => SAFE_TO_OPEN.has(extname(path).slice(1).toLowerCase());
 const CONCURRENCY = 2;
 
+const via = (teacher: boolean, peers: number) => [peers ? `${peers} peer${peers > 1 ? 's' : ''}` : '', teacher ? 'teacher' : ''].filter(Boolean).join(' + ') || 'teacher';
 const json = <T>(p: string, fallback: T): Promise<T> => readFile(p, 'utf8').then(JSON.parse, () => fallback);
 const exists = (p: string) => access(p).then(() => true, () => false);
 
@@ -30,7 +34,54 @@ export class StudentFiles {
   private trust: Trust;
   private dataDir = app.getPath('userData');
 
+  // ---- data plane (Milestone 2.75) ----
+  private agents = new Map<string, PeerAgent>();
+  private tokens = new Map<string, string>();
+  private peerAssist = new Map<string, boolean>();
+  private cache = new Map<string, { manifest?: SignedManifest; sources?: PeerInfo[] }>(); // for teacher outages
+  private offeredCompleted = new Set<string>();
+  sharing = true; // "Share with classmates" (student can pause seeding)
+
   constructor(win: () => BrowserWindow | undefined, trust: Trust) { this.win = win; this.trust = trust; }
+
+  /** Serve only on the interface that reaches the teacher (same subnet), never on other networks. */
+  private classroomInterface(teacherHost: string) {
+    const prefix = teacherHost.split('.').slice(0, 3).join('.') + '.';
+    const ifs = candidateInterfaces();
+    return (ifs.find((i) => i.address.startsWith(prefix)) ?? ifs[0])?.address ?? '127.0.0.1';
+  }
+
+  private agent(c: Conn): PeerAgent {
+    this.tokens.set(c.sessionId, c.token);
+    let a = this.agents.get(c.sessionId);
+    if (!a) {
+      const route = this.route(c);
+      const host = new URL(route.url).hostname;
+      const limit = Number(process.env.CLASSROOM_PEER_UPLOAD_LIMIT ?? 0); // bytes/s; used by tests to slow a peer down
+      a = new PeerAgent({
+        transport: route.transport, url: route.url, token: () => this.tokens.get(c.sessionId)!, sessionId: c.sessionId,
+        teacherKey: route.binding.teacherPublicKey, device: this.trust.device(), host: host === '127.0.0.1' ? host : this.classroomInterface(host),
+        destDir: this.destDir(c), canSeed: true, limits: limit > 0 ? { maxBytesPerSec: limit } : undefined,
+      });
+      a.paused = !this.sharing;
+      this.agents.set(c.sessionId, a);
+      void a.start().catch(() => {});
+    }
+    return a;
+  }
+
+  /** Control-plane updates forwarded by the renderer (class.state / peer.revoked). */
+  async peerState(c: Conn, s: { peerAssist: boolean; revoked: string[] }) {
+    const a = this.agent(c);
+    const was = this.peerAssist.get(c.sessionId);
+    this.peerAssist.set(c.sessionId, s.peerAssist);
+    a.deny(s.revoked);
+    if (s.peerAssist) await (was ? a.ensureEndorsed() : a.endorse()).catch(() => {}); // retried later if still pending
+  }
+
+  setSharing(on: boolean) { this.sharing = on; for (const a of this.agents.values()) a.paused = !on; }
+
+  async stopAll() { await Promise.all([...this.agents.values()].map((a) => a.stop())); this.agents.clear(); }
 
   /** The paired session's own URL + pinned transport; renderer-supplied URLs are never used. */
   private route(c: Conn) {
@@ -59,11 +110,27 @@ export class StudentFiles {
       const job = this.jobs.get(r.id);
       if (job) return job.state;
       const d = done[`${c.sessionId}:${r.id}`];
-      if (d && d.sha256 === r.sha256 && (await exists(d.path))) return { resourceId: r.id, state: 'completed', bytes: r.size, size: r.size, canOpen: canOpen(d.path) } satisfies FileState;
+      if (d && d.sha256 === r.sha256 && (await exists(d.path))) {
+        void this.offerCompleted(c, r, d.path);
+        return { resourceId: r.id, state: 'completed', bytes: r.size, size: r.size, canOpen: canOpen(d.path) } satisfies FileState;
+      }
       const p = partPaths(this.destDir(c), r.id);
       const part = await stat(p.part).then((s) => s.size, () => 0);
       return { resourceId: r.id, state: part > 0 ? 'paused' : 'not_started', bytes: part, size: r.size } satisfies FileState;
     }));
+  }
+
+  /** Seed files completed earlier (e.g. before an app restart) when peer assistance is on. */
+  private async offerCompleted(c: Conn, r: ResourceView, path: string) {
+    const key = `${c.sessionId}:${r.id}`;
+    if (!this.peerAssist.get(c.sessionId) || this.offeredCompleted.has(key)) return;
+    this.offeredCompleted.add(key);
+    try {
+      const route = this.route(c);
+      const m = await api<SignedManifest>(route.transport, route.url, c.token, `/api/resources/${r.id}/manifest`);
+      const reader = await completedFileReader(path, m.payload);
+      this.agent(c).offer(m, { read: (i) => reader.read(i), have: reader.have });
+    } catch { this.offeredCompleted.delete(key); }
   }
 
   download(c: Conn, r: ResourceView) {
@@ -95,15 +162,29 @@ export class StudentFiles {
     job.ctl = ctl;
     this.set(job, { state: 'downloading', error: undefined });
     try {
-      const route = this.route(job.conn);
-      const out = await downloadResource({
-        transport: route.transport, url: route.url, token: job.conn.token, resource: job.resource, destDir: this.destDir(job.conn), signal: ctl.signal,
-        onProgress: (p) => this.set(job, { state: p.state, bytes: p.bytes, resumedFrom: p.resumedFrom || undefined }),
+      const agent = this.agent(job.conn);
+      const key = `${job.conn.sessionId}:${job.resource.id}`;
+      const cached = this.cache.get(key) ?? {};
+      const peers = new Set<string>();
+      let teacher = false;
+      const out = await agent.acquire(job.resource, {
+        peerAssist: this.peerAssist.get(job.conn.sessionId) ?? false, signal: ctl.signal,
+        cachedManifest: cached.manifest, cachedSources: cached.sources,
+        onSources: (src) => { this.cache.set(key, { ...this.cache.get(key), sources: src }); },
+        onProgress: (p) => {
+          for (const s of p.sources ?? []) if (s === 'teacher') teacher = true; else peers.add(s);
+          this.set(job, { state: p.state, bytes: p.bytes, resumedFrom: p.resumedFrom || undefined, via: via(teacher, peers.size) });
+        },
       });
+      if (out.manifest) this.cache.set(key, { ...this.cache.get(key), manifest: out.manifest });
+      this.offeredCompleted.add(key);
       const done = await this.completed();
       done[`${job.conn.sessionId}:${job.resource.id}`] = { path: out.path, sha256: job.resource.sha256! };
       await writeFile(this.completedPath(), JSON.stringify(done));
-      this.set(job, { state: 'completed', bytes: job.resource.size, canOpen: canOpen(out.path) });
+      this.set(job, {
+        state: 'completed', bytes: job.resource.size, canOpen: canOpen(out.path),
+        via: out.stats.mode === 'swarm' ? `${via(out.stats.teacherBytes > 0, out.stats.sources.filter((x) => x.kind === 'peer' && x.chunks > 0).length)} · teacher-signed ✓` : 'teacher',
+      });
     } catch (e) {
       if (ctl.signal.aborted) return this.set(job, { state: 'paused' });
       this.set(job, { state: 'failed', error: (e as Error).message });

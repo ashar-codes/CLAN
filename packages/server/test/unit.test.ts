@@ -278,3 +278,22 @@ describe('migration 3 (Milestone 2.5 upgrade of an existing teacher database)', 
     expect(c.join({ ...profile(), fullName: 'Ashar', rollNo: 'FA23-CS-114' }).status).toBe('pending');
   });
 });
+
+import { MODES, modeOf } from '@classroom/protocol';
+import { recommendDistribution } from '@classroom/client';
+
+describe('network modes', () => {
+  it('two axes; presets; session info maps to a mode', () => {
+    expect(modeOf({ connectivity: 'lan', peerAssist: false })).toEqual({ connectivity: 'lan', distribution: 'teacher' });
+    expect(modeOf({ connectivity: 'lan', peerAssist: true })).toEqual({ connectivity: 'lan', distribution: 'peer_assisted' });
+    expect(MODES.DIRECT.status).toBe('interface-only');
+    expect(MODES.MESH_EXPERIMENTAL.status).toBe('research');
+  });
+  it('experimental recommendation: small class or small files -> teacher; large class + large files -> peers', () => {
+    expect(recommendDistribution({ students: 5, largestResourceBytes: 500e6 }).peerAssist).toBe(false);
+    expect(recommendDistribution({ students: 60, largestResourceBytes: 1e6 }).peerAssist).toBe(false);
+    const r = recommendDistribution({ students: 60, largestResourceBytes: 100e6, teacherBytesPerSec: 20e6 });
+    expect(r.peerAssist).toBe(true);
+    expect(r.reason).toMatch(/≈300 s/);
+  });
+});

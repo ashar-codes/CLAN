@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
-import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type PairedJoin, type Quality } from '@classroom/client';
+import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
 import { shortFingerprint, StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { browse } from './discovery';
@@ -117,7 +117,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
         if (m.t === 'member.status') setStatus(m.status);
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
         if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
-        if (m.t === 'resource.push') setPushed(m.resourceId);
+        if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
       },
       onQuality: setQuality,
       onClosed: (reason) => {
@@ -132,8 +132,10 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
     return () => conn.close();
   }, [joined]);
   const send = useCallback((m: ClientMessage) => ref.current?.send(m), []);
+  const [device, setDevice] = useState<DeviceSigner>();
+  useEffect(() => { deviceSigner().then(setDevice); }, []);
   const conn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title,
-    transport: joined.transport as PinnedNativeTransport, teacherPublicKey: joined.binding.teacherPublicKey }), [joined]);
+    transport: joined.transport as PinnedNativeTransport, teacherPublicKey: joined.binding.teacherPublicKey, peerAssist: info.peerAssist, device }), [joined, info.peerAssist, device]);
 
   const over = info.ended ? 'The class has ended.' : status === 'rejected' ? 'The teacher declined your request.' : status === 'removed' ? 'You were removed from the class.'
     : status === 'blocked' ? 'This device was blocked from the class.' : closed ? 'Your session expired. Join again with the code.' : '';

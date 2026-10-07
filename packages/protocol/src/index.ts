@@ -248,3 +248,4 @@ export const WS_CLOSE = { authFailed: 4001, removed: 4003, ended: 4004, badMessa
 
 export * from './trust.ts';
 export * from './peer.ts';
+export * from './network.ts';

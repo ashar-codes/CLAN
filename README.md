@@ -3,11 +3,11 @@
 Offline-first classroom collaboration. One teacher laptop hosts the classroom; students join from desktop or phone
 over the local network with a 6-digit code. **No internet is required at runtime.**
 
-> Status: Milestones 0–2.5 are complete on desktop: LAN Mode, discovery, approval, roster, presence, timeline, classroom
-> files with resumable verified downloads, assignments with idempotent submissions, and the security foundation — 6-digit
-> code authenticated with OPAQUE, TLS pinned through the PAKE, Ed25519 device/teacher identities, signed receipts
-> ([docs/PAIRING_AND_TRUST.md](docs/PAIRING_AND_TRUST.md)). Phones cannot join yet (see KNOWN_LIMITATIONS). Everything else
-> in the V1 spec is not built yet — see [docs/PROGRESS.md](docs/PROGRESS.md).
+> Status: Milestones 0–2.75. Desktop: LAN Mode, secure pairing (OPAQUE + pinned TLS + Ed25519 identities), files and
+> assignments with signed receipts, and **peer-assisted distribution** (teacher-signed manifests; the teacher stays the only
+> authority — [docs/PEER_ASSISTED_MODE.md](docs/PEER_ASSISTED_MODE.md)). Mobile: secure join and peer downloads implemented,
+> **not yet run on a device**. Windows Direct Mode, screen sharing and the rest of V1 are not built — see
+> [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Quick start (development)
 
@@ -17,7 +17,8 @@ pnpm dev              # desktop app (teacher or student) with hot reload
 pnpm test             # unit + integration + security tests
 pnpm test:e2e         # launches two real Electron apps and joins over your LAN
 pnpm benchmark        # join + file-transfer benchmarks; rewrites docs/BENCHMARKS.md
-node tools/sim/lan-bench.ts   # real-Wi-Fi capacity: students open the printed URL in any browser
+node tools/sim/bench-swarm.ts --workers 6   # 60/100-client teacher-only vs peer-assisted
+node tools/sim/lan-bench.ts [--mode classroom]   # real Wi-Fi: browser capacity test, or a real classroom with real devices
 node tools/sim/verify-receipt.ts receipt.json --teacher-key KEY   # verify an archived receipt offline
 pnpm typecheck
 ```

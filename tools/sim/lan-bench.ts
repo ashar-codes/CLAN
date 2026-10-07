@@ -1,26 +1,31 @@
-// Real-network (Wi-Fi) capacity benchmark. Run on the TEACHER machine:
-//   node tools/sim/lan-bench.ts [--host 192.168.1.20] [--sizes 1,10,100] [--runs 3]
-// Then on each student device (phone, laptop — any browser, no dev tools) open the printed http://… address on the
-// same Wi-Fi and press Run. It measures raw LAN throughput/latency from this machine's own plain HTTP endpoint
-// (test bytes only, nothing classroom-related). A browser cannot pin the classroom's per-session TLS certificate,
-// so the production HTTPS path is measured separately (same-machine TLS benchmark); expected Wi-Fi throughput for
-// the real app ≈ min(this result, the TLS benchmark).
-// Results are appended to docs/lan-bench/<date>.jsonl and summarized in the terminal. Nothing is fabricated:
-// if no device runs it, nothing is recorded.
+// Real-network benchmark. Two modes, both run on the TEACHER machine:
+//
+//   raw (default):  node tools/sim/lan-bench.ts [--host IP] [--sizes 1,10,100] [--runs 3]
+//     Students open the printed http://… address in any browser. Measures raw LAN capacity (no TLS, no app).
+//
+//   classroom:      node tools/sim/lan-bench.ts --mode classroom [--size 100] [--peer-assist on|off] [--host IP]
+//     Starts a REAL classroom (OPAQUE pairing, pinned TLS, signed manifests). Students join with the normal Classroom
+//     LAN app (laptops/phones, no dev tools) using the printed code and press Download (or the teacher pushes it).
+//     Records teacher upload, peer uploads, per-student completion times, peer count, mode, Wi-Fi details where the OS
+//     exposes them. Press Ctrl+C to write results to docs/lan-bench/<date>.jsonl.
+//
+// Nothing is fabricated: if no device runs it, nothing is recorded.
 import { createServer } from 'node:http';
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { hostname, platform, tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createReadStream, statSync } from 'node:fs';
 import { candidateInterfaces } from '@classroom/server';
 
-const { values } = parseArgs({ options: { host: { type: 'string' }, sizes: { type: 'string', default: '1,10,100' }, runs: { type: 'string', default: '3' } } });
+const { values } = parseArgs({ options: { host: { type: 'string' }, sizes: { type: 'string', default: '1,10,100' }, runs: { type: 'string', default: '3' }, mode: { type: 'string', default: 'raw' }, size: { type: 'string', default: '100' }, 'peer-assist': { type: 'string', default: 'on' } } });
 const host = values.host ?? candidateInterfaces()[0]?.address;
 if (!host) throw new Error('No LAN interface found. Connect to the classroom network first.');
 const MB = 1024 * 1024;
 
+if (values.mode === 'classroom') { await classroomMode(); }
 const dir = mkdtempSync(join(tmpdir(), 'lan-bench-'));
 const resources: { id: string; size: number; path: string }[] = [];
 for (const mbs of values.sizes!.split(',').map(Number)) {
@@ -110,3 +115,66 @@ function summarize(r: { label: string; client: string; rttMedianMs: number; down
 }
 
 process.on('SIGINT', async () => { web.close(); console.log(`\n${results.length} device result(s) recorded.`); process.exit(0); });
+
+
+/** Best-effort Wi-Fi description from the OS (no elevated rights). */
+function wifiInfo(): Record<string, unknown> {
+  try {
+    if (platform() === 'darwin') {
+      const j = JSON.parse(execFileSync('system_profiler', ['SPAirPortDataType', '-json'], { encoding: 'utf8', timeout: 15_000 }));
+      const cur = j.SPAirPortDataType?.[0]?.spairport_airport_interfaces?.[0]?.spairport_current_network_information;
+      return cur ? { phyMode: cur.spairport_network_phymode, channel: cur.spairport_network_channel, signalNoise: cur.spairport_signal_noise, txRate: cur.spairport_network_rate } : {};
+    }
+    if (platform() === 'win32') return { netsh: execFileSync('netsh', ['wlan', 'show', 'interfaces'], { encoding: 'utf8', timeout: 15_000 }).split('\n').filter((l) => /Radio type|Channel|Receive rate|Transmit rate|Signal|Band/.test(l)).map((l) => l.trim()) };
+  } catch { /* not available */ }
+  return {};
+}
+
+async function classroomMode() {
+  const { startClassroomServer } = await import('@classroom/server');
+  const MBc = 1024 * 1024;
+  const d = mkdtempSync(join(tmpdir(), 'lan-bench-'));
+  const p = join(d, `bench-${values.size}MB.bin`);
+  writeFileSync(p, '');
+  for (let i = 0; i < Number(values.size); i++) appendFileSync(p, randomBytes(MBc));
+  const s = await startClassroomServer({ title: 'LAN benchmark', host: host!, storageDir: join(d, 'storage'), advertise: true });
+  s.classroom.setPolicy('open');
+  s.classroom.setPeerAssist(values['peer-assist'] === 'on');
+  const r = await s.resources.importFile(p);
+  console.log(`\nReal classroom running. Code: ${s.classroom.code}   (peer assistance ${values['peer-assist']})`);
+  console.log(`Students: open Classroom LAN → Join → ${s.classroom.code} → download "${r.name}" (${values.size} MB).`);
+  console.log('Teacher: this terminal records the run; press Ctrl+C when everyone is done.\n');
+  const timeline = new Map<string, { name: string; start?: number; done?: number }>();
+  const served0 = s.resources.stats(0).servedBytes;
+  const t = setInterval(() => {
+    const now = Date.now();
+    const v = s.resources.listForTeacher().find((x) => x.id === r.id);
+    for (const st of v?.students ?? []) {
+      const e = timeline.get(st.memberId) ?? { name: st.fullName };
+      if (!e.start && st.state !== 'not_started') e.start = now;
+      if (!e.done && st.state === 'completed') { e.done = now; console.log(`  ${e.name}: ${((now - e.start!) / 1000).toFixed(1)} s`); }
+      timeline.set(st.memberId, e);
+    }
+  }, 250);
+  process.on('SIGINT', async () => {
+    clearInterval(t);
+    const done = [...timeline.values()].filter((e) => e.start && e.done);
+    const peers = s.peers.summary();
+    const result = {
+      at: new Date().toISOString(), mode: values['peer-assist'] === 'on' ? 'peer-assisted' : 'teacher-only', connectivity: 'lan',
+      teacherHost: hostname(), teacherOs: platform(), serverAddress: host, wifi: wifiInfo(), fileMB: Number(values.size),
+      students: timeline.size, completed: done.length, completionSec: done.map((e) => (e.done! - e.start!) / 1000).sort((a, b) => a - b),
+      teacherUploadMB: (s.resources.stats(0).servedBytes - served0) / MBc, peerUploadMB: peers.peerUploadedBytes / MBc, servingPeers: peers.peers,
+    };
+    if (done.length) {
+      // LAN_BENCH_OUT (file path) redirects output; used for same-machine smoke tests so they are never recorded as real results.
+      const out = process.env.LAN_BENCH_OUT ? process.env.LAN_BENCH_OUT : new URL(`../../docs/lan-bench/${new Date().toISOString().slice(0, 10)}-classroom.jsonl`, import.meta.url).pathname;
+      mkdirSync(join(out, '..'), { recursive: true });
+      appendFileSync(out, JSON.stringify(result) + '\n');
+      console.log('\nRecorded:', JSON.stringify(result, null, 2));
+    } else console.log('\nNo completed downloads — nothing recorded.');
+    await s.close();
+    process.exit(0);
+  });
+  await new Promise(() => {});
+}

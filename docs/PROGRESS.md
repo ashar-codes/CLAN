@@ -7,6 +7,7 @@
 | 2 — file repository, resumable transfer, assignments | ✅ done (desktop verified E2E dev + packaged; mobile code-complete, not device-tested) |
 | 2.5 — secure pairing (OPAQUE), TLS bound to the PAKE, Ed25519 device + teacher identity, signed receipts | ✅ done for desktop (dev + packaged macOS E2E); mobile blocked on a compatible OPAQUE binding (documented) |
 | 2.6 — secure mobile join (official OPAQUE WASM in isolated WebView, native pinned TLS) | ✅ implemented; bridge verified in Chromium, iOS trust code verified on Apple Security; **no device run** |
+| 2.75 — multi-mode architecture, peer-assisted distribution (control vs data plane) | ✅ done: manifests, endorsements, capabilities, swarm, Teacher-only ↔ Peer-assisted switching; 3-app desktop E2E (dev + packaged); 60/100-client benchmarks; real-Wi-Fi not yet measured |
 | 3 — Windows Direct Mode, auto Wi-Fi join | not started |
 | 4 — LiveKit, screen/window sharing, student presenting | not started |
 | 5 — PDF sync presentation, notes, bookmarks | not started |
@@ -52,3 +53,14 @@
 ## Next
 Milestone 3 (Windows Direct Mode) — or first, if phones matter for the pilot: a mobile OPAQUE binding compatible with
 `@serenity-kit/opaque` 1.x plus the pinned native transport (see ANDROID_NETWORKING.md / APPLE_PERMISSIONS.md).
+
+## Milestones 2.6 and 2.75 delivered
+* 2.6: mobile joins with the same OPAQUE 1.1 (official WASM in an isolated WebView, narrow bridge), native pinned TLS modules
+  (iOS SecTrust, Android OkHttp), device-key reconnect, peer-assisted downloads on mobile (no seeding). No device run yet.
+* 2.75: teacher-signed manifests with chunk hashes; peer endorsements/capabilities/proofs; peer servers on every desktop student;
+  scheduler with flash-crowd control and local health; teacher-offline resilience for published resources; revocation; mode
+  axes + transport boundaries (Direct/Mesh/Media interfaces only); teacher Network panel with Peer Assistance toggle and
+  experimental recommendation; student sharing toggle and source details; swarm benchmark and classroom-mode real-Wi-Fi tool.
+
+## Next
+Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi-AP) and real phones; then Milestone 3.

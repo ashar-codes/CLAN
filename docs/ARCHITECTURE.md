@@ -40,3 +40,23 @@
   authorization path.
 
 Planned (not built): mobile OPAQUE binding + pinned native transport, LiveKit sidecar for media (M4), Windows Direct Mode (M3). See PROGRESS.md.
+
+## Control plane vs data plane (Milestone 2.75)
+
+```
+CONTROL PLANE — always the teacher (pinned HTTPS/WSS, teacher Ed25519 signatures)
+  lifecycle · approvals · permissions · lock/end · official resources · assignments · (later: quizzes, groups, presenting, exam)
+  signs manifests / peer endorsements / peer capabilities / receipts · tracker of who holds which chunks · revocation push
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+DATA PLANE — teacher or peers, chosen per mode; correctness never depends on who carried the bytes
+  teacher Range streaming ──┐
+  peer servers (HTTPS, teacher-endorsed TLS key, capability + holder proof) ──┼──▶ chunk SHA-256 (manifest) ──▶ file SHA-256 ──▶ atomic rename
+  scheduler: own slice from teacher, rest from peers, teacher fallback ─────┘
+```
+
+* `packages/protocol/src/peer.ts` / `network.ts` — signed data-plane objects, mode axes.
+* `packages/server/src/peers.ts` — teacher-side registry (signs endorsements/capabilities, tracks availability). No bytes.
+* `packages/client/src/swarm.ts` — platform-neutral scheduler, peer auth, sources. `peer-node.ts` — chunk store, peer server,
+  `PeerAgent` (the desktop `ResourceTransport`). `transports.ts` — the mode-independent boundaries.
+* Mobile (2.6): OPAQUE in an isolated WebView + native pinned TLS module; downloads from peers, does not seed.
+Details: [PEER_ASSISTED_MODE.md](PEER_ASSISTED_MODE.md), [TRANSPORT_MODES.md](TRANSPORT_MODES.md), [MESH_MODE.md](MESH_MODE.md).

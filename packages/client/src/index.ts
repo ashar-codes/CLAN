@@ -139,6 +139,7 @@ export class ClassroomConnection {
 import type { UploadInit, UploadStatus } from '@classroom/protocol';
 export * from './pairing.ts';
 export * from './swarm.ts';
+export type * from './transports.ts';
 
 export class TransferError extends Error {
   code: string; status: number; extra: Record<string, unknown>;

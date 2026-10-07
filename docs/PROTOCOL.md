@@ -70,3 +70,29 @@ Close codes: `4001` auth failed/expired, `4003` removed/rejected/blocked, `4004`
 Other closes are transient: the client reconnects with jittered exponential backoff (max 10 s) and re-authenticates
 with the same token. A ping unanswered for 3 intervals forces a redial (dead Wi-Fi links may never deliver a TCP close).
 Max WS message 64 KB.
+
+## Data plane (Milestone 2.75)
+
+HTTPS (teacher), all bearer-authenticated, approved students only (teacher may read):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/resources/:id/manifest` | teacher-signed `SignedManifest` (same visibility as the resource) |
+| POST | `/api/peer/endorse` | `{v:1, tlsCa, tlsSpkiSha256, port}` → `PeerEndorsement` (409 if Peer Assistance is off) |
+| POST | `/api/peer/capability` | → `PeerCapability` (15 min) |
+| POST | `/api/peer/have` | `{v:1, resourceId, chunks: base64url bitfield}` (length must match the manifest) |
+| POST | `/api/peer/stats` | `{v:1, uploadedBytes}` |
+| GET | `/api/peer/sources/:id` | `{peerAssist, swarm, sources: [{fingerprint, url, endorsement, have}]}` |
+
+Peer servers (HTTPS with the endorsed TLS identity; `Authorization: Peer base64url(JSON{capability, proof})`):
+`GET /peer/v1/chunk/:resourceId/:index` (bytes), `GET /peer/v1/manifest/:resourceId`, `GET /peer/v1/have/:resourceId`.
+`401` bad/expired/forged capability or proof, `403` revoked or other class, `404` unknown/not held, `429` busy/rate limited, `503` paused.
+
+WebSocket additions: teacher `class.peerAssist {enabled}`; server → students `resource.seed {resourceId}`, `peer.revoked {fingerprints}`;
+`class.state` carries `connectivity` and `peerAssist`; teacher `stats` adds `peers, peerUploadedBytes, peerBytesPerSec`.
+Signed object formats: [PEER_ASSISTED_MODE.md](PEER_ASSISTED_MODE.md).
+
+## Mobile OPAQUE bridge (Milestone 2.6)
+App ↔ WebView messages (JSON strings via `postMessage`): `{id, op:'startLogin', password}` → `{id, ok, result:{clientLoginState: <handle>, startLoginRequest}}`;
+`{id, op:'finishLogin', handle, loginResponse, password, identifiers}` → `{id, ok, result: {finishLoginRequest, sessionKey} | null}`;
+`{id, op:'discard', handle}`. Anything else → `{ok:false, error:'unsupported operation'}`. Readiness: `{id:0, ok:true, result:'ready'}`.

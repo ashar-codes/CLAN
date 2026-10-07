@@ -12,9 +12,10 @@ import {
 } from '@classroom/protocol';
 import { api, sleep, TransferError, type Transport } from './index.ts';
 import type { DeviceSigner } from './pairing.ts';
+import type { ResourceTransport } from './transports.ts';
 import { acquireChunks, doneBitfield, peerAuthHeader, peerSource, teacherSource, verifyPeerAuth, type AcquireResult, type ChunkStore, type PeerInfo, type Source } from './swarm.ts';
 import { downloadResource, partPaths, pinnedTransport, uniquePath, type Progress } from './node.ts';
-import type { ClassroomTls } from './tls.ts';
+import { createClassroomTls, type ClassroomTls } from './tls.ts';
 
 const sha256Hex = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 
@@ -358,7 +359,8 @@ export type AgentOptions = {
   transportFor?(e: PeerEndorsement): Transport;
 };
 
-export class PeerAgent {
+/** The desktop/Node ResourceTransport: teacher-direct or peer-assisted, seeding what it verifies. */
+export class PeerAgent implements ResourceTransport {
   private o: AgentOptions;
   private server: PeerServer | null = null;
   private tls: ClassroomTls | null = null;
@@ -389,7 +391,6 @@ export class PeerAgent {
   /** Start serving (if allowed) and get the teacher's endorsement of this peer's TLS identity. */
   async start() {
     if (!this.o.canSeed || this.server) return;
-    const { createClassroomTls } = await import('./tls.ts');
     this.tls = await createClassroomTls(`peer-${this.fingerprint.slice(0, 12)}`, Date.now(), 25 * 60 * 60_000);
     this.server = await startPeerServer({
       host: this.o.host, tls: this.tls, sessionId: this.o.sessionId, teacherKey: this.o.teacherKey, selfFingerprint: this.fingerprint,
@@ -407,6 +408,7 @@ export class PeerAgent {
     this.endorsedUntil = e.payload.expiresAt;
     for (const id of this.offered.keys()) this.announce(id, 0);
   }
+  /** Endorse if we never managed to (e.g. we were still pending approval) or the endorsement is about to expire. */
   async ensureEndorsed() { if (this.server && Date.now() > this.endorsedUntil - 5 * 60_000) await this.endorse(); }
 
   /** Revocations pushed by the teacher: refuse those devices immediately. */
@@ -436,12 +438,13 @@ export class PeerAgent {
     this.announceTimers.set(resourceId, setTimeout(() => {
       this.announceTimers.delete(resourceId);
       const r = this.offered.get(resourceId);
-      if (r) void this.call('/api/peer/have', { v: 1, resourceId, chunks: b64u.encode(r.have()) }).catch(() => {});
+      if (r) void this.ensureEndorsed().then(() => this.call('/api/peer/have', { v: 1, resourceId, chunks: b64u.encode(r.have()) })).catch(() => {});
     }, delay));
   }
 
   /** Acquire (peer-assisted when on), seeding verified chunks while downloading and the whole file afterwards. */
   async acquire(resource: Pick<ResourceView, 'id' | 'name' | 'size' | 'sha256'>, opts: { peerAssist: boolean; signal?: AbortSignal; onProgress?: Parameters<typeof acquireResource>[0]['onProgress']; startOffset?: number; cachedSources?: PeerInfo[]; cachedManifest?: SignedManifest; chunkTimeoutMs?: number; stallTimeoutMs?: number; smallFileBytes?: number; onSources?(s: PeerInfo[]): void }) {
+    if (opts.peerAssist) await this.ensureEndorsed().catch(() => {}); // become a source as soon as we're approved
     const out = await acquireResource({
       transport: this.o.transport, url: this.o.url, token: this.o.token(), resource, destDir: this.o.destDir,
       peerAssist: opts.peerAssist, peers: this.peerContext(), signal: opts.signal, startOffset: opts.startOffset ?? this.spread,

@@ -83,3 +83,10 @@ re-sends from byte 0** on retry (Expo's `uploadAsync` can't start mid-file) — 
 
 There is no total-time limit on transfers (`requestTimeout: 0`), so large lecture videos on slow Wi-Fi are fine; only *idle* transfers are cut.
 Open file descriptors are bounded by the concurrency caps (one fd per active transfer).
+
+## Chunked, peer-assisted path (Milestone 2.75)
+Large files (> 4 MB) with Peer Assistance on use the teacher-signed manifest (1 MiB chunks, chosen by benchmark) and the swarm
+scheduler; chunks may come from peers or the teacher (Range requests on the same content endpoint). Each chunk is verified before
+it is written at its offset in the same `.partial/<id>.part` file; a verified-chunk bitmap lives in the meta file. Small files and
+teacher-only mode keep the streaming path above. Either path adopts the other's partial (verified prefix / hashed whole chunks).
+Details: PEER_ASSISTED_MODE.md.

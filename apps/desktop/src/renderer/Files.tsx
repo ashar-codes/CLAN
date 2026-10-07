@@ -155,10 +155,17 @@ export function StudentFiles({ conn, resources, pushed, send }: { conn: Conn; re
   }, [resources, pushed, states, conn]);
 
   const act = (f: () => Promise<unknown>) => { setError(''); f().catch((e) => setError(errText(e))); };
+  const [sharing, setSharing] = useState(true);
+  const [details, setDetails] = useState(false);
 
   return (
     <div className="card wide">
-      <h3>Classroom files</h3>
+      <h3>Classroom files
+        <label className="toggle push small-text" title="Lets classmates download verified parts of files you already have, over this network only.">
+          <input type="checkbox" checked={sharing} onChange={(e) => { setSharing(e.target.checked); void api.setSharing(e.target.checked); }} /> Share with classmates
+        </label>
+        <button className="link small" onClick={() => setDetails(!details)}>{details ? 'Hide details' : 'Details'}</button>
+      </h3>
       {error && <p className="error">{error}</p>}
       {resources.length === 0 && <p className="muted">Your teacher hasn't shared any files yet.</p>}
       {resources.map((r) => {
@@ -172,6 +179,7 @@ export function StudentFiles({ conn, resources, pushed, send }: { conn: Conn; re
                 <b>{r.name}</b> <span className="muted">{formatBytes(r.size)}</span><br />
                 <small className={s.state === 'failed' ? 'error' : 'muted'} data-testid="file-state">
                   {STATE_LABEL[s.state]}{(s.state === 'downloading' || s.state === 'paused') && ` · ${pct}%`}{s.resumedFrom ? ' · resumed' : ''}{s.error ? ` — ${s.error}` : ''}
+                  {details && s.via ? <span data-testid="file-via"> · via {s.via}</span> : null}
                 </small>
                 {(s.state === 'downloading' || s.state === 'paused' || s.state === 'verifying') && <progress max={100} value={pct} />}
               </div>

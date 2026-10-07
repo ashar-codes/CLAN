@@ -23,7 +23,7 @@ export type Joined = {
 
 export type StartedClassroom = { url: string; code: string; teacherToken: string; title: string; host: string; iface: string };
 
-export type FileState = { resourceId: string; state: TransferState; bytes: number; size: number; resumedFrom?: number; error?: string; canOpen?: boolean };
+export type FileState = { resourceId: string; state: TransferState; bytes: number; size: number; resumedFrom?: number; error?: string; canOpen?: boolean; via?: string };
 /** `url` is informational: main routes every request through the session it paired with. */
 export type Conn = { url: string; token: string; sessionId: string; classTitle: string };
 export type PastClass = { sessionId: string; title: string; startedAt: number; endedAt: number | null; files: number; submissions: number };
@@ -61,5 +61,8 @@ export type DesktopApi = {
   submit(c: Conn, assignmentId: string, pickId: string): Promise<StoredReceipt>;
   onUploadProgress(cb: (p: { assignmentId: string; sent: number; size: number }) => void): () => void;
   receipts(sessionId?: string): Promise<StoredReceipt[]>;
+  /** Forward control-plane state the data plane needs (peer assistance on/off, revoked devices). */
+  peerState(c: Conn, s: { peerAssist: boolean; revoked: string[] }): Promise<void>;
+  setSharing(on: boolean): Promise<void>;
   verifyReceipt(r: Receipt): Promise<StoredReceipt>;
 };

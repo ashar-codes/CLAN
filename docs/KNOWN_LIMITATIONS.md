@@ -19,3 +19,13 @@
   let back in without re-approval).
 * If two classrooms on one LAN ever share a code (1-in-a-million per pair), the student joins whichever answers first.
 * Mobile and Windows builds have not been executed on real devices/OS from this machine.
+* Peer assistance does not add Wi-Fi capacity on a single access point (airtime is shared); it offloads the teacher machine.
+  Real-Wi-Fi measurements are still pending (`lan-bench --mode classroom`).
+* On loopback, peer-assisted distribution is slower than teacher-only (the teacher is effectively infinitely fast there); the
+  win is teacher bytes (5–10 % of teacher-only for 10–100 MB files to 60–100 clients).
+* Phones download from peers but don't seed. Peer discovery relies on the teacher's tracker plus a cache (no peer mDNS).
+* While the teacher is offline, peer downloads continue only until capabilities expire (15 min) and only for resources whose
+  manifest the student already had.
+* Removed/blocked students keep files they already downloaded; a peer that missed the revocation push accepts them until the
+  capability expires (≤ 15 min).
+* Teacher handoff/delegation is designed, not implemented. Mesh and Direct Mode are not implemented.

@@ -266,3 +266,16 @@ export function peerSource(o: { info: PeerInfo; teacherKey: string; sessionId: s
     },
   };
 }
+
+/**
+ * EXPERIMENTAL distribution recommendation for the teacher UI. Heuristic only (not a guarantee): based on class size,
+ * typical resource size and measured teacher throughput when available. Peer assistance moves load off the teacher's
+ * machine/uplink; on a single Wi-Fi access point it does not add channel airtime (see docs/PEER_ASSISTED_MODE.md).
+ */
+export function recommendDistribution(o: { students: number; largestResourceBytes: number; teacherBytesPerSec?: number }): { peerAssist: boolean; reason: string } {
+  const big = o.largestResourceBytes > 4 * 1024 * 1024;
+  if (o.students < 8) return { peerAssist: false, reason: 'Small class: the teacher computer can serve everyone directly.' };
+  if (!big) return { peerAssist: false, reason: 'Files are small: direct downloads finish before sharing would help.' };
+  const est = o.teacherBytesPerSec ? (o.students * o.largestResourceBytes) / o.teacherBytesPerSec : null;
+  return { peerAssist: true, reason: `Large class and large files${est ? ` (≈${Math.round(est)} s from the teacher alone at the current rate)` : ''}: Peer Assistance can take load off the teacher computer.` };
+}

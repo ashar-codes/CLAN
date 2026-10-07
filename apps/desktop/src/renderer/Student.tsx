@@ -99,6 +99,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [resources, setResources] = useState<ResourceView[]>([]);
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
   const [pushed, setPushed] = useState<string | null>(null);
+  const [offlineSince, setOfflineSince] = useState<number | null>(null);
+  const revoked = useRef<string[]>([]);
   const connRef = useRef<ClassroomConnection | null>(null);
 
   useEffect(() => {
@@ -111,9 +113,11 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         if (m.t === 'member.status') setStatus(m.status);
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
         if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
-        if (m.t === 'resource.push') setPushed(m.resourceId);
+        if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
+        if (m.t === 'peer.revoked') { revoked.current = [...revoked.current, ...m.fingerprints]; void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: m.fingerprints }); }
+        if (m.t === 'hello' || m.t === 'class.state') { infoRef.current = m.classroom; void api.peerState(connOf(), { peerAssist: m.classroom.peerAssist, revoked: [] }); }
       },
-      onQuality: setQuality,
+      onQuality: (q) => { setQuality(q); setOfflineSince((t) => (q === 'disconnected' ? t ?? Date.now() : null)); },
       onClosed: (reason) => {
         // Token expired (idle/absolute lifetime): prove the device key again for a fresh one, once.
         if (/expired|invalid/.test(reason) && !retried) {
@@ -125,6 +129,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
     connRef.current = c;
     return () => c.close();
   }, [session]);
+  const infoRef = useRef(joined.classroom);
+  const connOf = () => ({ url: session.url, token: session.token, sessionId: session.classroom.sessionId, classTitle: session.classroom.title });
   const send = useCallback((m: ClientMessage) => connRef.current?.send(m), []);
   const conn = useMemo(() => ({ url: session.url, token: session.token, sessionId: session.classroom.sessionId, classTitle: session.classroom.title }), [session]);
 
@@ -152,6 +158,9 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   return (
     <div className="dash">
       {banner}
+      {offlineSince !== null ? (
+        <div className="warning-banner" role="status" data-testid="teacher-offline">Teacher temporarily disconnected. Previously published resources remain available.</div>
+      ) : null}
       <header className="bar">
         <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · teacher {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span></div>
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>

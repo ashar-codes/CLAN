@@ -16,3 +16,10 @@ no software workaround exists — use a classroom router or Direct Mode (Windows
 
 ## Direct Mode
 Not implemented yet (Milestone 3). See WINDOWS_DIRECT_MODE.md. The UI shows it disabled with an OS-specific reason.
+
+## Peer traffic (Milestone 2.75)
+Peer servers bind only the interface on the teacher's subnet; peer traffic never uses cellular or the internet. Peers are found
+through the teacher's tracker (authenticated) and a last-known cache — not by trusting mDNS, IPs or names.
+On a single Wi-Fi access point, peer-to-peer traffic consumes the same shared airtime as teacher traffic (A → AP → B); peer
+assistance offloads the teacher *machine*, it does not create channel capacity. Multi-AP and wired networks gain capacity.
+See PEER_ASSISTED_MODE.md and TRANSPORT_MODES.md.

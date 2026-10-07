@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ClassroomConnection, type Quality } from '@classroom/client';
+import { ClassroomConnection, formatBytes, recommendDistribution, type Quality } from '@classroom/client';
 import { shortFingerprint, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats } from '@classroom/protocol';
 import { TeacherAssignments, TeacherFiles } from './Files.tsx';
 import type { Capabilities, PastClass, StartedClassroom } from '../shared.ts';
@@ -170,9 +170,20 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         <div className="card">
           <h3>Settings</h3>
           <label>Who can join<select value={info.joinPolicy} onChange={(e) => send({ t: 'class.policy', policy: e.target.value as JoinPolicy })}>{POLICIES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}</select></label>
-          <h3>Network</h3>
+          <h3>Classroom network</h3>
           <dl className="kv">
-            <dt>Mode</dt><dd>Existing network (LAN)</dd>
+            <dt>Connectivity</dt><dd>Existing LAN</dd>
+            <dt>Distribution</dt><dd data-testid="distribution">{info.peerAssist ? 'Peer Assistance ON' : 'Teacher only'} <button className="small" data-testid="peer-assist-toggle" onClick={() => send({ t: 'class.peerAssist', enabled: !info.peerAssist })}>{info.peerAssist ? 'Disable Peer Assistance' : 'Enable Peer Assistance'}</button></dd>
+            <dt>Students</dt><dd>{roster.length}</dd>
+            <dt>Resource sources</dt><dd data-testid="sources">Teacher{info.peerAssist ? ` + ${stats?.peers ?? 0} peers` : ''}</dd>
+            <dt>Teacher upload</dt><dd>{formatBytes(stats?.bytesPerSec ?? 0)}/s · <span data-testid="teacher-served">{formatBytes(stats?.servedBytes ?? 0)}</span> total</dd>
+            {info.peerAssist && <><dt>Peer upload</dt><dd>{formatBytes(stats?.peerBytesPerSec ?? 0)}/s · {formatBytes(stats?.peerUploadedBytes ?? 0)} total</dd></>}
+            <dt>Health</dt><dd>{quality === 'disconnected' ? 'Server not responding' : (stats?.failedDownloads ?? 0) > 5 ? 'Fair (some transfers failed)' : 'Good'}</dd>
+          </dl>
+          {(() => { const r = recommendDistribution({ students: roster.length, largestResourceBytes: Math.max(0, ...resources.map((x) => x.size)), teacherBytesPerSec: stats?.bytesPerSec || undefined });
+            return r.peerAssist !== info.peerAssist && roster.length > 0 ? <p className="muted small-text">Suggestion (experimental): {r.peerAssist ? 'turn Peer Assistance on' : 'teacher-only is enough'} — {r.reason}</p> : null; })()}
+          <h3>Server</h3>
+          <dl className="kv">
             <dt>Adapter</dt><dd>{started.iface}</dd>
             <dt>Address</dt><dd>{started.url.replace('http://', '')}</dd>
             <dt>Server</dt><dd><span className={`dot ${quality}`} /> {quality === 'disconnected' ? 'Not responding' : 'Running'}</dd>

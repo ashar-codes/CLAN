@@ -87,7 +87,8 @@ function registerIpc() {
       const m = z.string().regex(/^(http:\/\/)?[\w.-]+:\d{1,5}$/).parse(manual); // diagnostics fallback: teacher's bootstrap address
       candidates = [{ url: m.startsWith('http') ? m : `http://${m}` }];
     }
-    for (let i = 0; i < 20 && candidates.length === 0; i++) { await new Promise((r) => setTimeout(r, 250)); candidates = discovered; }
+    // Multicast discovery can take several seconds on busy Wi-Fi; wait up to 10 s before reporting "none found".
+    for (let i = 0; i < 40 && candidates.length === 0; i++) { await new Promise((r) => setTimeout(r, 250)); candidates = discovered; }
     await opaque.ready;
     const r = await pairAndJoin({
       candidates, code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName }, device: trust.device(),
@@ -164,6 +165,9 @@ function registerIpc() {
   ipcMain.handle('student:submit', (_e, c, a, p) => files.submit(conn(c), z.uuid().parse(a), z.uuid().parse(p)));
   ipcMain.handle('student:receipts', (_e, sid) => files.receipts(sid === undefined ? undefined : z.uuid().parse(sid)));
   ipcMain.handle('student:verifyReceipt', (_e, r: unknown) => files.check(r as Receipt));
+  ipcMain.handle('student:peerState', (_e, c, s: unknown) => files.peerState(conn(c), z.object({ peerAssist: z.boolean(), revoked: z.array(z.string().max(64)).max(1000) }).parse(s)));
+  ipcMain.handle('student:setSharing', (_e, on: unknown) => files.setSharing(z.boolean().parse(on)));
+  app.on('before-quit', () => { void files.stopAll(); });
 
   const browsers = new Map<WebContents, () => void>();
   ipcMain.handle('discover:start', (e) => {
