@@ -2,7 +2,7 @@
 import * as opaque from '@serenity-kit/opaque';
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
-  b64u, derivePairingKeys, ed25519Verify, keyFingerprint, macOf, macValid,
+  b64u, derivePairingKeys, sealDirect, type DirectPackage, ed25519Verify, keyFingerprint, macOf, macValid,
   type JoinProofPayload, type JoinRequest, type PairFinishResponse, type PairStartResponse, type ReconnectChallengeResponse,
   type ReconnectProofPayload, type TlsBinding,
 } from '@classroom/protocol';
@@ -35,6 +35,9 @@ export class Pairing {
   private started = new Map<string, Started>();
   private finished = new Map<string, Finished>();
   private challenges = new Map<string, Challenge>();
+
+  /** Set while the host runs a Direct network: its package is sealed into every successful finish. */
+  direct: (() => DirectPackage | null) | null = null;
 
   private constructor(classroom: Classroom, setup: string, record: string, info: () => BindingInfo, now: () => number) {
     this.classroom = classroom; this.setup = setup; this.record = record; this.info = info; this.now = now;
@@ -127,7 +130,8 @@ export class Pairing {
       ...this.info(), challenge: nonce(), issuedAt: t, expiresAt: t + BINDING_TTL_MS,
     };
     this.finished.set(pairingId, { joinKey: keys.join, challenge: binding.challenge, expires: binding.expiresAt });
-    return { binding, mac: macOf(keys.binding, binding) };
+    const pkg = this.direct?.();
+    return { binding, mac: macOf(keys.binding, binding), ...(pkg ? { direct: sealDirect(keys.direct, pkg, pairingId) } : {}) };
   }
 
   /**

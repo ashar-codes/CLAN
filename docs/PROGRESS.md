@@ -12,7 +12,7 @@
 | CLAN Phase 1 — visual exploration | ✅ Visual Lab, 8 screens, design system, lazy 3D, screenshots, perf (design/VISUAL-LAB.md) |
 | CLAN Phase 2 — modular foundation | ✅ @clan/core: core services, 6 product modules + contracts, classroom→CLAN migration, privacy/AI context, shell (Home/CLANs/Study/Saved/Me) |
 | CLAN universal join | ✅ all five types hosted/joined with the same secure pairing; capabilities; generic policies; Study Group 3-app E2E (dev); mobile wording/contracts updated, not device-tested |
-| 3 — Windows Direct Mode, auto Wi-Fi join | not started |
+| 3 — CLAN Direct Network (Windows), BLE/QR bootstrap, auto Wi-Fi join | ✅ implemented + mock-verified (BLE bootstrap, sealed credential, re-host, host name, topology probe, Direct E2E); Windows helper compiles; **real Windows/devices UNVERIFIED**, no real-Wi-Fi benchmarks |
 | 4 — LiveKit, screen/window sharing, student presenting | not started |
 | 5 — PDF sync presentation, notes, bookmarks | not started |
 | 6 — chat, Q&A, raise hand, snippets, announcements | not started |

@@ -182,6 +182,9 @@ teacher-direct. (`--threshold-sweep`.)
   upload, serving peers.
 Results are appended to `docs/lan-bench/`. **No real-network results have been recorded yet.**
 
+Direct Network (Host Only / Peer Assisted) vs Existing LAN, 1/10/100 MB, 1→5→10→15→20 clients: **not run** — needs a Windows
+host and real client devices. Localhost/mock numbers are deliberately not reported as Direct results.
+
 ## Not yet measured
 
 Screen-share CPU/bandwidth (Milestone 4). Upload throughput benchmark beyond the integration tests.

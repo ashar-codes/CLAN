@@ -14,8 +14,11 @@ Verified on this machine: real multicast discovery on `en0` (Wi-Fi), desktop tea
 Common real-world failure: guest/university Wi-Fi with **client isolation** blocks device-to-device traffic entirely;
 no software workaround exists — use a classroom router or Direct Mode (Windows, M3).
 
-## Direct Mode
-Not implemented yet (Milestone 3). See WINDOWS_DIRECT_MODE.md. The UI shows it disabled with an OS-specific reason.
+## Direct Network
+Windows host creates its own Wi-Fi (Wi-Fi Direct legacy AP; Mobile Hotspot only with an upstream). The server binds only that
+interface; members get there from the six-digit code via BLE (or QR). See WINDOWS_DIRECT_MODE.md and DIRECT_BOOTSTRAP.md.
+Member↔member reachability is **measured** (topology probe after two peers register); if the AP isolates clients, Peer
+Assistance is switched off and stays off (“this network keeps members apart”). Applies to LAN too.
 
 ## Peer traffic (Milestone 2.75)
 Peer servers bind only the interface on the teacher's subnet; peer traffic never uses cellular or the internet. Peers are found

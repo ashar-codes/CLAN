@@ -11,7 +11,15 @@ mac:
   extendInfo:
     NSLocalNetworkUsageDescription: CLAN finds people and CLANs on your local network. No internet is used.
     NSBonjourServices: [_classroomlan._tcp]
+    NSBluetoothAlwaysUsageDescription: CLAN uses Bluetooth to find a nearby CLAN host when it runs its own network. Only pairing messages are exchanged.
+  extraResources:
+    - { from: ../../native/macos-ble/clan-ble, to: clan-ble }
 win:
   target: [nsis]
+  # Built on Windows: dotnet publish native/windows-direct -c Release (see docs/WINDOWS_DIRECT_MODE.md)
+  extraResources:
+    - { from: ../../native/windows-direct/bin/publish/CLAN.DirectHelper.exe, to: CLAN.DirectHelper.exe }
+nsis:
+  include: build/installer.nsh
 linux:
   target: [AppImage]

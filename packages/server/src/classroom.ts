@@ -53,9 +53,14 @@ export class Classroom extends EventEmitter {
   readonly networkMode: NetworkMode;
   readonly clan: Required<ClanSession>;
 
-  constructor(db: Db, title: string, networkMode: NetworkMode, opts: { now?: () => number; code?: string; clan?: ClanSession } = {}) {
+  readonly hostName: string | null;
+  /** Measured member↔member reachability (in memory; re-measured each session). */
+  p2p: 'unknown' | 'available' | 'isolated' = 'unknown';
+
+  constructor(db: Db, title: string, networkMode: NetworkMode, opts: { now?: () => number; code?: string; clan?: ClanSession; hostName?: string } = {}) {
     super();
     this.db = db; this.title = title; this.networkMode = networkMode;
+    this.hostName = opts.hostName?.trim().slice(0, 80) || null;
     const c = opts.clan ?? { type: 'CLASSROOM' };
     this.clan = { type: ClanType.parse(c.type), id: c.id ?? null, description: (c.description ?? '').slice(0, 500), expiresAt: c.expiresAt ?? null };
     if (this.clan.type === 'TEMPORARY' && !this.clan.expiresAt) throw new Error('A temporary CLAN needs an end time.');
@@ -72,7 +77,7 @@ export class Classroom extends EventEmitter {
     const r = this.db.prepare('SELECT title, locked, join_policy, started_at, ended_at, connectivity, peer_assist FROM sessions WHERE id = ?').get(this.id) as
       { title: string; locked: number; join_policy: JoinPolicy; started_at: number; ended_at: number | null; connectivity: Connectivity; peer_assist: number };
     if (r.ended_at === null && this.clan.expiresAt !== null && this.clan.expiresAt <= this.now()) { this.end(); return this.info(); } // expiry ends the session
-    return { sessionId: this.id, title: r.title, clanId: this.clan.id, clanType: this.clan.type, description: this.clan.description, expiresAt: this.clan.expiresAt, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null, connectivity: r.connectivity, peerAssist: !!r.peer_assist };
+    return { sessionId: this.id, title: r.title, clanId: this.clan.id, clanType: this.clan.type, hostName: this.hostName, description: this.clan.description, expiresAt: this.clan.expiresAt, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null, connectivity: r.connectivity, peerAssist: !!r.peer_assist, p2p: this.p2p };
   }
 
   /** Server-side authority: what this principal may do in this CLAN. */
@@ -197,9 +202,20 @@ export class Classroom extends EventEmitter {
 
   /** Switch the data plane (teacher-only <-> peer-assisted). Session, members, resources and ids are unaffected. */
   setPeerAssist(enabled: boolean) {
+    if (enabled && this.p2p === 'isolated') throw new JoinError(409, 'p2p_isolated', 'Peer Assistance is unavailable: this network keeps members apart, so files come from the host.');
     if (this.info().peerAssist === enabled) return;
     this.db.prepare('UPDATE sessions SET peer_assist = ? WHERE id = ?').run(enabled ? 1 : 0, this.id);
     this.log(enabled ? 'class.peer_assist_on' : 'class.peer_assist_off', null, {});
+    this.emit('state');
+  }
+
+  /** Topology probe result. Isolation turns peer assistance off; one successful member↔member connection proves availability. */
+  setP2p(reachable: boolean) {
+    const next = reachable ? 'available' : this.p2p === 'available' ? 'available' : 'isolated';
+    if (next === this.p2p) return;
+    this.p2p = next;
+    this.log('network.p2p', null, { p2p: next });
+    if (next === 'isolated') this.setPeerAssist(false);
     this.emit('state');
   }
 

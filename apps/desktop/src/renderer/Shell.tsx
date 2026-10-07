@@ -20,7 +20,7 @@ function useLoad<T>(f: () => Promise<T>) {
   return [v, reload, err] as const;
 }
 
-export function Shell({ onCreate, onJoin }: { onCreate(type?: ClanType): void; onJoin(): void }) {
+export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType): void; onJoin(): void; onRehost(r: { clanId: string; name: string; type: ClanType }): void }) {
   const [tab, setTab] = useState<Tab>('home');
   return (
     <div className="shell">
@@ -32,7 +32,7 @@ export function Shell({ onCreate, onJoin }: { onCreate(type?: ClanType): void; o
       </header>
       <main className="shell-body">
         {tab === 'home' && <Home go={setTab} onCreate={onCreate} onJoin={onJoin} />}
-        {tab === 'clans' && <Clans onCreate={onCreate} onJoin={onJoin} />}
+        {tab === 'clans' && <Clans onCreate={onCreate} onJoin={onJoin} onRehost={onRehost} />}
         {tab === 'study' && <Study />}
         {tab === 'saved' && <Saved />}
         {tab === 'me' && <Me />}
@@ -98,12 +98,12 @@ function NearbyList({ list, onJoin }: { list: { sid: string; title: string; type
   return <>{list.map((n) => <div key={n.sid} className="line"><span><CLANBeacon state="available" size={16} /> {n.title} <span className="muted">· {TYPE_LABEL[n.type as ClanType] ?? 'CLAN'}</span></span><button className="small" onClick={onJoin}>Join</button></div>)}</>;
 }
 
-function Clans({ onCreate, onJoin }: { onCreate(type?: ClanType): void; onJoin(): void }) {
+function Clans({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType): void; onJoin(): void; onRehost(r: { clanId: string; name: string; type: ClanType }): void }) {
   const [list] = useLoad(api.clan.list);
   const [open, setOpen] = useState<string | null>(null);
   const [nearby, setNearby] = useState<{ sid: string; title: string; type: string }[]>([]);
   useEffect(() => api.discover((l) => setNearby(l)), []);
-  if (open) return <ClanView id={open} onBack={() => setOpen(null)} />;
+  if (open) return <ClanView id={open} onBack={() => setOpen(null)} onRehost={onRehost} />;
   return (
     <div className="stack">
       <div className="row between"><h1 className="title">CLANs</h1>
@@ -120,14 +120,15 @@ function Clans({ onCreate, onJoin }: { onCreate(type?: ClanType): void; onJoin()
   );
 }
 
-function ClanView({ id, onBack }: { id: string; onBack(): void }) {
+function ClanView({ id, onBack, onRehost }: { id: string; onBack(): void; onRehost(r: { clanId: string; name: string; type: ClanType }): void }) {
   const [d] = useLoad<ClanDetail>(useCallback(() => api.clan.detail(id), [id]));
   if (!d) return null;
   return (
     <div className="stack">
       <button className="link back" onClick={onBack}>← CLANs</button>
       <span className="eyebrow">{TYPE_LABEL[d.clan.type]}{d.sessions ? ` · ${d.sessions} class session${d.sessions === 1 ? '' : 's'}` : ''}</span>
-      <h1 className="title">{d.clan.name}</h1>
+      <div className="row between"><h1 className="title">{d.clan.name}</h1>
+        {d.mine && d.clan.type !== 'TEMPORARY' && <button className="primary" onClick={() => onRehost({ clanId: d.clan.id, name: d.clan.name, type: d.clan.type })}>Host again</button>}</div>
       <div className="clan-grid">
         <section className="card"><span className="eyebrow">Members ({d.members.length})</span>{d.members.map((m) => <div key={m.userId} className="line">{m.name}<span className="muted">{m.role}</span></div>)}</section>
         <section className="card"><span className="eyebrow">Files</span>{d.files.length ? d.files.map((f) => <div key={f.refId} className="line">{f.name}<span className="muted">{(f.size / 1e6).toFixed(1)} MB</span></div>) : <p className="muted">No files.</p>}</section>

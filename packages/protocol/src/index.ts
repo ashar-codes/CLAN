@@ -2,6 +2,7 @@
 // Every inbound message is parsed with these schemas at the trust boundary.
 import { z } from 'zod';
 import type { ClanCapability, ClanType } from './clan.ts';
+import type { SealedDirect } from './direct.ts';
 
 export const PRODUCT_NAME = 'CLAN';
 /**
@@ -51,7 +52,8 @@ export type TlsBinding = {
   challenge: string;
   issuedAt: number; expiresAt: number;
 };
-export type PairFinishResponse = { binding: TlsBinding; mac: string };
+/** `direct`: sealed Direct-network package (only when the host runs a Direct network). */
+export type PairFinishResponse = { binding: TlsBinding; mac: string; direct?: SealedDirect };
 
 // ---- Join / reconnect (HTTPS only) ----
 export const JoinRequest = z.object({
@@ -90,12 +92,16 @@ export type ClassroomInfo = {
   /** Canonical CLAN this session belongs to, and its type. */
   clanId: string | null;
   clanType: ClanType;
+  /** Host's canonical display name (sent only to paired members). */
+  hostName: string | null;
   description: string;
   /** Temporary CLANs end at this time (null = no expiry). */
   expiresAt: number | null;
   connectivity: Connectivity;
   /** Data plane: teacher only (false) or peer-assisted (true). The control plane is always the teacher. */
   peerAssist: boolean;
+  /** Member↔member reachability measured on this network (never assumed). 'isolated' disables peer assistance. */
+  p2p: 'unknown' | 'available' | 'isolated';
   locked: boolean;
   joinPolicy: JoinPolicy;
   startedAt: number;
@@ -233,13 +239,14 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('class.peerAssist'), enabled: z.boolean() }),
   // student
   z.object({ t: z.literal('transfer.state'), resourceId: id, state: TransferState, bytes: z.number().int().nonnegative() }),
+  z.object({ t: z.literal('peer.probeResult'), probeId: id, tried: z.number().int().min(0).max(8), reachable: z.number().int().min(0).max(8) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export const TEACHER_ONLY: ReadonlySet<ClientMessage['t']> = new Set([
   'member.approve', 'member.reject', 'member.remove', 'member.block', 'class.lock', 'class.policy', 'class.end',
   'resource.available', 'resource.remove', 'resource.push', 'assignment.create', 'assignment.close', 'class.peerAssist',
 ]);
-export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.state']);
+export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.state', 'peer.probeResult']);
 
 // ---- WebSocket: server -> client ----
 export type ServerMessage =
@@ -258,6 +265,8 @@ export type ServerMessage =
   | { t: 'resource.seed'; resourceId: string }
   /** Devices no longer authorized; peers must refuse them immediately. */
   | { t: 'peer.revoked'; fingerprints: string[] }
+  /** Host asks a member to test plain TCP reachability of other members' peer servers (topology probe). */
+  | { t: 'peer.probe'; probeId: string; targets: string[] }
   | { t: 'assignments'; assignments: StudentAssignmentView[] | TeacherAssignmentView[] }
   | { t: 'stats'; stats: TransferStats }
   | { t: 'error'; code: string; message: string };
@@ -268,3 +277,4 @@ export * from './trust.ts';
 export * from './peer.ts';
 export * from './network.ts';
 export * from './clan.ts';
+export * from './direct.ts';

@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["DirectJoinModule"] },
+  "android": { "modules": ["expo.modules.directjoin.DirectJoinModule"] }
+}

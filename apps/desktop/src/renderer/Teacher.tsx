@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ClassroomConnection, formatBytes, recommendDistribution, type Quality } from '@classroom/client';
 import { clanLabels, shortFingerprint, type ClanCapability, type ClanType, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats } from '@classroom/protocol';
 import { TeacherAssignments, TeacherFiles } from './Files.tsx';
-import type { Capabilities, PastClass, StartedClassroom } from '../shared.ts';
+import type { Capabilities, DirectAvailability, DirectStatus, PastClass, StartedClassroom } from '../shared.ts';
 import { api } from './App.tsx';
 
 const POLICY_ORDER: JoinPolicy[] = ['approval', 'known', 'open'];
@@ -10,9 +10,14 @@ const TYPES: ClanType[] = ['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS'
 const PLACEHOLDER: Record<ClanType, string> = { CLASSROOM: 'Operating Systems', STUDY_GROUP: 'OS study group', PROJECT_TEAM: 'Project Alpha', FRIENDS: 'Weekend crew', TEMPORARY: 'Library study session' };
 
 /** Create CLAN: one flow for every type; the host device runs the session. */
-export function TeacherSetup({ caps, onBack, onStarted, initialType = 'CLASSROOM' }: { caps: Capabilities; onBack(): void; onStarted(s: StartedClassroom): void; initialType?: ClanType }) {
-  const [type, setType] = useState<ClanType>(initialType);
-  const [title, setTitle] = useState('');
+export type Rehost = { clanId: string; name: string; type: ClanType };
+export function TeacherSetup({ caps, onBack, onStarted, initialType = 'CLASSROOM', rehost }: { caps: Capabilities; onBack(): void; onStarted(s: StartedClassroom): void; initialType?: ClanType; rehost?: Rehost }) {
+  const [type, setType] = useState<ClanType>(rehost?.type ?? initialType);
+  const [title, setTitle] = useState(rehost?.name ?? '');
+  const [connectivity, setConnectivity] = useState<'lan' | 'direct'>('lan');
+  const [distribution, setDistribution] = useState<'host' | 'peer'>('host');
+  const [direct, setDirect] = useState<DirectAvailability | null>(null);
+  useEffect(() => { api.directAvailability().then(setDirect, () => setDirect(null)); }, []);
   const [description, setDescription] = useState('');
   const [hours, setHours] = useState(2);
   const [policy, setPolicy] = useState<JoinPolicy>('approval');
@@ -20,11 +25,11 @@ export function TeacherSetup({ caps, onBack, onStarted, initialType = 'CLASSROOM
   const [host, setHost] = useState(caps.interfaces[0]?.address ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const noNetwork = caps.interfaces.length === 0;
+  const noNetwork = caps.interfaces.length === 0 && connectivity === 'lan';
 
   const start = async () => {
     setBusy(true); setError('');
-    try { onStarted(await api.startClassroom({ title: title.trim(), policy, host: host || undefined, type, description: description.trim(), hours: type === 'TEMPORARY' ? hours : undefined })); }
+    try { onStarted(await api.startClassroom({ title: title.trim(), policy, host: host || undefined, type, description: description.trim(), hours: type === 'TEMPORARY' ? hours : undefined, clanId: rehost?.clanId, connectivity, distribution })); }
     catch (e) { setError(String((e as Error).message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
     finally { setBusy(false); }
   };
@@ -32,18 +37,29 @@ export function TeacherSetup({ caps, onBack, onStarted, initialType = 'CLASSROOM
   return (
     <main className="center narrow">
       <button className="link back" onClick={onBack}>← Back</button>
-      <h2>{type === 'CLASSROOM' ? 'Create Classroom' : 'Create CLAN'}</h2>
-      <div className="seg-types" role="radiogroup" aria-label="CLAN type">
+      <h2>{rehost ? `Host ${rehost.name} again` : type === 'CLASSROOM' ? 'Create Classroom' : 'Create CLAN'}</h2>
+      {rehost && <p className="muted">Same CLAN, members and files. A new code and secure session are created.</p>}
+      {!rehost && <div className="seg-types" role="radiogroup" aria-label="CLAN type">
         {TYPES.map((t) => <button key={t} role="radio" aria-checked={type === t} className={type === t ? 'on small' : 'small'} onClick={() => setType(t)}>{clanLabels(t).type}</button>)}
-      </div>
-      <label>{type === 'CLASSROOM' ? 'Class name' : 'Name'}<input autoFocus value={title} maxLength={80} placeholder={PLACEHOLDER[type]} onChange={(e) => setTitle(e.target.value)} /></label>
+      </div>}
+      {!rehost && <label>{type === 'CLASSROOM' ? 'Class name' : 'Name'}<input autoFocus value={title} maxLength={80} placeholder={PLACEHOLDER[type]} onChange={(e) => setTitle(e.target.value)} /></label>}
       <label>Description <span className="muted">(optional, shown only after joining)</span><input value={description} maxLength={500} onChange={(e) => setDescription(e.target.value)} /></label>
       {type === 'TEMPORARY' && <label>Ends after<select value={hours} onChange={(e) => setHours(Number(e.target.value))}>{[0.5, 1, 2, 3, 4, 8].map((h) => <option key={h} value={h}>{h < 1 ? '30 minutes' : `${h} hour${h > 1 ? 's' : ''}`}</option>)}</select></label>}
 
       <fieldset>
-        <legend>Network</legend>
-        <label className="radio"><input type="radio" checked readOnly /> <span><b>Use existing network</b><br /><small className="muted">University Wi-Fi, a router or Ethernet. Internet is not needed.</small></span></label>
-        <label className="radio disabled"><input type="radio" disabled /> <span><b>Direct Mode</b> — create a classroom Wi-Fi<br /><small className="muted">{caps.directMode.reason}</small></span></label>
+        <legend>Connectivity</legend>
+        <label className="radio"><input type="radio" name="conn" checked={connectivity === 'lan'} onChange={() => setConnectivity('lan')} /> <span><b>Existing Network</b><br /><small className="muted">Wi-Fi, a router or Ethernet. Internet is not needed.</small></span></label>
+        <label className={`radio ${direct?.available ? '' : 'disabled'}`}><input type="radio" name="conn" disabled={!direct?.available} checked={connectivity === 'direct'} onChange={() => setConnectivity('direct')} />
+          <span><b>Direct Network</b> — this computer creates the network<br />
+            {direct?.available ? <small className="muted">No router or internet needed. Members just enter the code.</small>
+              : <small className="muted">Unavailable on this device <details className="inline-why"><summary>Why?</summary>{direct?.reason ?? 'Checking…'}</details></small>}
+          </span></label>
+        {connectivity === 'direct' && direct?.vpn.length ? <p className="warn small-text">A VPN is active ({direct.vpn.join(', ')}). CLAN keeps Direct traffic on the local network; if members can't connect, pause the VPN.</p> : null}
+      </fieldset>
+      <fieldset>
+        <legend>Distribution</legend>
+        <label className="radio"><input type="radio" name="dist" checked={distribution === 'host'} onChange={() => setDistribution('host')} /> <span><b>Host Only</b><br /><small className="muted">Everyone downloads from this computer.</small></span></label>
+        <label className="radio"><input type="radio" name="dist" checked={distribution === 'peer'} onChange={() => setDistribution('peer')} /> <span><b>Peer Assisted</b><br /><small className="muted">Members also share verified pieces with each other — only if the network allows it (checked automatically).</small></span></label>
       </fieldset>
 
       <label>Who can join<select value={policy} onChange={(e) => setPolicy(e.target.value as JoinPolicy)}>{POLICY_ORDER.map((p) => <option key={p} value={p}>{L.policy[p]}</option>)}</select></label>
@@ -55,7 +71,7 @@ export function TeacherSetup({ caps, onBack, onStarted, initialType = 'CLASSROOM
       )}
       {noNetwork && <p className="error">This computer isn't connected to any network. Join the classroom Wi-Fi or plug in a cable, then come back.</p>}
       {error && <p className="error">{error}</p>}
-      <button className="primary" disabled={!title.trim() || busy || noNetwork} onClick={start}>{busy ? 'Starting…' : type === 'CLASSROOM' ? 'Start Classroom' : 'Start CLAN'}</button>
+      <button className="primary" disabled={!title.trim() || busy || noNetwork} onClick={start}>{busy ? (connectivity === 'direct' ? 'Creating network…' : 'Starting…') : rehost ? 'Host again' : type === 'CLASSROOM' ? 'Start Classroom' : 'Start CLAN'}</button>
       {type === 'CLASSROOM' && <PastClasses />}
     </main>
   );
@@ -83,6 +99,7 @@ function describe(e: TimelineEvent, names: Map<string, string>, L: ReturnType<ty
   const m: Record<string, string> = {
     'class.started': `${L.session[0]!.toUpperCase()}${L.session.slice(1)} started`, 'class.ended': `${L.session[0]!.toUpperCase()}${L.session.slice(1)} ended`, 'class.locked': 'Joining locked', 'class.unlocked': 'Joining unlocked',
     'class.policy': `Join rule changed to "${L.policy[e.data.policy as JoinPolicy]}"`,
+    'member.bootstrap': 'A device paired over Bluetooth', 'network.p2p': e.data.p2p === 'isolated' ? 'Network keeps members apart: Peer Assistance off' : 'Members can reach each other: Peer Assistance available',
     'member.requested': `${who} asked to join`, 'member.joined': `${who} joined`, 'member.approved': `${who} approved`,
     'member.rejected': `${who} rejected`, 'member.removed': `${who} removed`, 'member.blocked': `${who} blocked`,
     'resource.added': `${e.data.name} added`, 'resource.pushed': `${e.data.name} sent to everyone`, 'resource.removed': `${e.data.name} removed`,
@@ -182,8 +199,10 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
           <h3>Settings</h3>
           <label>Who can join<select value={info.joinPolicy} onChange={(e) => send({ t: 'class.policy', policy: e.target.value as JoinPolicy })}>{POLICY_ORDER.map((p) => <option key={p} value={p}>{L.policy[p]}</option>)}</select></label>
           <h3>Network</h3>
+          {started.direct && <DirectCard started={started} />}
+          {info.p2p === 'isolated' && <p className="muted small-text" data-testid="p2p-isolated">Peer Assistance unavailable: this network keeps members apart, so files come from you.</p>}
           <dl className="kv">
-            <dt>Connectivity</dt><dd>Existing LAN</dd>
+            <dt>Connectivity</dt><dd>{started.direct ? 'Direct network' : 'Existing network'}</dd>
             <dt>Distribution</dt><dd data-testid="distribution">{info.peerAssist ? 'Peer Assistance ON' : `${L.host} only`} <button className="small" data-testid="peer-assist-toggle" onClick={() => send({ t: 'class.peerAssist', enabled: !info.peerAssist })}>{info.peerAssist ? 'Disable Peer Assistance' : 'Enable Peer Assistance'}</button></dd>
             <dt>{L.members}</dt><dd>{roster.length}</dd>
             <dt>Resource sources</dt><dd data-testid="sources">{L.host}{info.peerAssist ? ` + ${stats?.peers ?? 0} peers` : ''}</dd>
@@ -218,6 +237,27 @@ function Who({ m }: { m: Member }) {
     <div>
       <b>{m.fullName}</b> <span className="muted">{m.rollNo}</span> {TRUST[m.trust] && <span className={`trust ${m.trust}`} title={`Device key ${shortFingerprint(m.deviceFingerprint)}`}>{TRUST[m.trust]}</span>}<br />
       <small className="muted"><span className={`dot ${m.connected ? 'excellent' : 'disconnected'}`} /> {m.deviceName} · {m.connected ? 'Connected' : 'Disconnected'}</small>
+    </div>
+  );
+}
+
+/** Direct host status: plain words up front, details under Diagnostics. */
+function DirectCard({ started }: { started: StartedClassroom }) {
+  const [st, setSt] = useState<DirectStatus>(null);
+  const [qr, setQr] = useState<{ dataUrl: string; expiresAt: number } | null>(null);
+  useEffect(() => { const t = setInterval(() => api.directStatus().then(setSt).catch(() => {}), 3000); api.directStatus().then(setSt).catch(() => {}); return () => clearInterval(t); }, []);
+  const d = started.direct!;
+  return (
+    <div className="direct-card" data-testid="direct-status">
+      <b>{d.ssid}</b>
+      <span>{st?.connected ?? 0} connected{st?.band ? ` · ${st.band} GHz` : ''}</span>
+      <span>{st?.p2p === 'available' ? 'Peer Assistance available' : st?.p2p === 'isolated' ? 'Peer Assistance unavailable' : 'Peer Assistance not checked yet'}</span>
+      <span>Health: {st ? (st.up ? 'Good' : 'Network down — reconnecting') : '…'}</span>
+      <button className="small" onClick={async () => setQr(qr ? null : await api.directQr())}>{qr ? 'Hide QR' : 'Show QR to join'}</button>
+      {qr && <figure className="qr"><img src={qr.dataUrl} alt="Join this CLAN" width={220} height={220} /><figcaption className="muted small-text">Join this CLAN — scan inside the CLAN app, then enter the code. Expires {new Date(qr.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.</figcaption></figure>}
+      <details><summary className="muted">Diagnostics</summary>
+        <dl className="kv"><dt>Method</dt><dd>{d.strategy}</dd><dt>Interface</dt><dd>{st?.interfaceName ?? '—'}</dd><dt>Address</dt><dd>{st?.hostAddress ?? '—'}</dd><dt>VPN</dt><dd>{d.vpn.length ? d.vpn.join(', ') : 'none'}</dd></dl>
+      </details>
     </div>
   );
 }

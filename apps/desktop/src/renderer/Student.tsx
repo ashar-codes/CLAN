@@ -59,9 +59,13 @@ function JoinForm({ profile, onJoined, onEditProfile, onBack }: { profile: OwnPr
   useEffect(() => api.discover(setFound), []);
   useEffect(() => { api.lastSession().then(setLast); }, []);
 
+  const [manualNet, setManualNet] = useState<{ ssid: string; passphrase: string } | null>(null);
   const run = async (f: () => Promise<Joined>) => {
-    setBusy(true); setError('');
-    try { onJoined(await f()); } catch (e) { setError(errText(e)); } finally { setBusy(false); }
+    setBusy(true); setError(''); setManualNet(null);
+    try { onJoined(await f()); } catch (e) {
+      const m = /DIRECT_MANUAL:(\{.*\})/.exec(errText(e));
+      if (m) setManualNet(JSON.parse(m[1]!)); else setError(errText(e));
+    } finally { setBusy(false); }
   };
 
   return (
@@ -72,7 +76,15 @@ function JoinForm({ profile, onJoined, onEditProfile, onBack }: { profile: OwnPr
       <input className="code-input" autoFocus inputMode="numeric" autoComplete="off" maxLength={6} placeholder="••••••" value={code} aria-label="Join code"
         onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={(e) => e.key === 'Enter' && code.length === 6 && run(() => api.joinClass(code, manual))} />
       {error && <p className="error">{error}</p>}
-      <button className="primary" disabled={code.length !== 6 || busy} onClick={() => run(() => api.joinClass(code, manual))}>{busy ? 'Connecting securely…' : 'Join'}</button>
+      {manualNet && (
+        <div className="card" data-testid="manual-network">
+          <b>Connect to this network, then press Join again</b>
+          <p className="muted small-text">This device can't switch Wi-Fi automatically. Your code was verified; this network belongs to the CLAN host.</p>
+          <dl className="kv"><dt>Network</dt><dd>{manualNet.ssid} <button className="small" onClick={() => navigator.clipboard.writeText(manualNet.ssid)}>Copy</button></dd>
+            <dt>Password</dt><dd>••••••••••• <button className="small" onClick={() => navigator.clipboard.writeText(manualNet.passphrase)}>Copy</button></dd></dl>
+        </div>
+      )}
+      <button className="primary" disabled={code.length !== 6 || busy} onClick={() => run(() => api.joinClass(code, manual))}>{busy ? 'Joining…' : 'Join'}</button>
       {last && <button disabled={busy} onClick={() => run(() => api.rejoin(last.sessionId))}>Rejoin {last.title} (no code needed)</button>}
       <details className="diag">
         <summary className="muted">Can't find it?</summary>
@@ -112,8 +124,9 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       onMessage: (m) => {
         if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
         if (m.t === 'members') setPeople(m.members);
+        if (m.t === 'peer.probe') void api.peerProbe(m.targets).then((r) => connRef.current?.send({ t: 'peer.probeResult', probeId: m.probeId, ...r })).catch(() => {});
         if (m.t === 'class.state') setInfo(m.classroom);
-        if (m.t === 'member.status') setStatus(m.status);
+        if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: [] }); } // register the peer server as soon as we're in
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
         if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
         if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
@@ -139,7 +152,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
 
   // Approved: this device now holds a canonical membership in that CLAN (profile and identity are not copied).
   useEffect(() => {
-    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt }).catch(() => {});
+    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt, hostName: info.hostName }).catch(() => {});
   }, [status, info.sessionId, info.clanId, info.clanType, info.title, info.expiresAt, joined.teacherPublicKey]);
   const L = clanLabels(info.clanType);
 
@@ -171,7 +184,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         <div className="warning-banner" role="status" data-testid="teacher-offline">{L.host} temporarily disconnected. Previously published resources remain available.</div>
       ) : null}
       <header className="bar">
-        <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.description && <p className="muted small-text">{info.description}</p>}</div>
+        <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.hostName && <p className="muted small-text" data-testid="host-name">Hosted by {info.hostName}</p>}{info.description && <p className="muted small-text">{info.description}</p>}</div>
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>
       </header>
       <section className="grid">
@@ -180,7 +193,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         {can.includes('VIEW_MEMBERS') && (
           <div className="card" data-testid="clan-members">
             <h3>{L.members} ({people.length})</h3>
-            {people.map((p, i) => <div key={i} className="person"><span><span className={`dot ${p.connected ? 'excellent' : 'disconnected'}`} /> {p.host ? `${L.host} (host)` : p.name}</span></div>)}
+            {people.map((p, i) => <div key={i} className="person"><span><span className={`dot ${p.connected ? 'excellent' : 'disconnected'}`} /> {p.host ? `${p.name} (${L.host.toLowerCase()})` : p.name}</span></div>)}
           </div>
         )}
         {info.clanType !== 'CLASSROOM' && <div className="card"><h3>Chat</h3><p className="muted">Coming in the next update. Your membership here is already set up for it.</p></div>}

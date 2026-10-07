@@ -121,3 +121,7 @@ button.on { background: var(--ink); color: var(--paper); }
 .stack > .back { justify-self: start; }
 @media (max-width: 760px) { .study-grid, .me-grid { grid-template-columns: 1fr; } .shell-top { flex-wrap: wrap; } }
 .seg-types { display: flex; gap: .3rem; flex-wrap: wrap; }
+.direct-card { display: grid; gap: .25rem; padding: .7rem; border: 1px solid var(--border); border-radius: 12px; margin-bottom: .6rem; }
+.qr { margin: .4rem 0 0; display: grid; justify-items: start; gap: .3rem; } .qr img { background: #fff; border-radius: 8px; padding: 6px; }
+.inline-why { display: inline; } .inline-why summary { display: inline; cursor: pointer; color: var(--sky); }
+.warn { color: var(--warn); }

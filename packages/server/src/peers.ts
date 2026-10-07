@@ -97,6 +97,12 @@ export class PeerRegistry {
     return out;
   }
 
+  /** Peer server URLs of other registered, approved members (topology probe targets). */
+  urls(exceptMemberId: string, max = 3) {
+    const t = this.now();
+    return [...this.peers.values()].filter((p) => p.memberId !== exceptMemberId && p.endorsement.payload.expiresAt > t && this.classroom.status(p.memberId) === 'approved').slice(0, max).map((p) => `https://${p.host}:${p.port}`);
+  }
+
   /** Registered, approved peers other than `exceptMemberId` (a scheduling hint for slice sizing). */
   swarm(exceptMemberId: string) {
     const t = this.now();

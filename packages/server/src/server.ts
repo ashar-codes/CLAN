@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { pipeline, Transform, type Readable } from 'node:stream';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from '@fastify/websocket';
-import { generateKeyPairSync, sign as edSign, createPublicKey, type KeyObject } from 'node:crypto';
+import { generateKeyPairSync, sign as edSign, createPublicKey, randomUUID, type KeyObject } from 'node:crypto';
 import * as opaque from '@serenity-kit/opaque';
 import {
-  b64u, ClientMessage, MESSAGE_CAPABILITY, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
+  b64u, BleRequest, ClientMessage, DIRECT_PACKAGE_TTL_MS, MESSAGE_CAPABILITY, type BleResponse, type DirectPackage, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
   UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, type ServerMessage,
 } from '@classroom/protocol';
 import { Pairing } from './pairing.ts';
@@ -28,6 +28,10 @@ export type ServerOptions = {
   title: string;
   /** CLAN this session hosts (type drives capabilities). Omitted → a classroom, as before. */
   clan?: ClanSession;
+  /** Host's canonical display name; members see it only after pairing (never in discovery). */
+  hostName?: string;
+  /** Direct network credentials: released, sealed, only inside a completed OPAQUE exchange. */
+  direct?: Omit<DirectPackage, 'v' | 'sessionId' | 'bootstrapPort'>;
   /** Interface address to bind. Never 0.0.0.0 in the product: bind only the classroom interface. */
   host: string;
   port?: number;
@@ -67,6 +71,7 @@ export type RunningServer = {
   assignments: Assignments;
   storage: Storage;
   port: number;
+  bootstrap(source: string, req: unknown): BleResponse;
   close(): Promise<void>;
 };
 
@@ -78,18 +83,20 @@ const MAX_WS_MESSAGE = 64 * 1024;
 
 export async function startClassroomServer(opts: ServerOptions): Promise<RunningServer> {
   const db = opts.db ?? openDb(opts.dbPath ?? ':memory:');
-  const classroom = new Classroom(db, opts.title, opts.networkMode ?? 'lan', { code: opts.code, clan: opts.clan });
+  const classroom = new Classroom(db, opts.title, opts.networkMode ?? 'lan', { code: opts.code, clan: opts.clan, hostName: opts.hostName });
   const identity = opts.identity ?? (await ephemeralIdentity());
   const teacherPublicKey = b64u.encode(new Uint8Array(createPublicKey(identity.signingKey).export({ type: 'spki', format: 'der' }).subarray(-32)));
   const signer = { publicKey: teacherPublicKey, sign: (bytes: Uint8Array) => b64u.encode(new Uint8Array(edSign(null, bytes, identity.signingKey))) };
   const tls = await createClassroomTls(classroom.id);
-  db.prepare('UPDATE sessions SET teacher_key = ?, tls_spki = ? WHERE id = ?').run(teacherPublicKey, tls.spkiSha256, classroom.id);
+  db.prepare('UPDATE sessions SET teacher_key = ?, tls_spki = ?, connectivity = ? WHERE id = ?').run(teacherPublicKey, tls.spkiSha256, opts.direct ? 'direct' : 'lan', classroom.id);
   let httpsPort = 0;
   const limits: Limits = { ...DEFAULT_LIMITS, ...opts.limits };
   const pairing = await Pairing.create(classroom, identity.opaqueServerSetup, classroom.code, () => ({
     httpsPort, spkiSha256: tls.spkiSha256, certificate: tls.certificate, teacherPublicKey, title: classroom.title,
   }));
   pairing.inflightPerSource = limits.pairInflightPerSource;
+  let bootPort = 0;
+  if (opts.direct) pairing.direct = () => ({ v: 1, sessionId: classroom.id, bootstrapPort: bootPort, ...opts.direct!, expiresAt: Math.min(opts.direct!.expiresAt, Date.now() + DIRECT_PACKAGE_TTL_MS) });
   const ownStorage = !opts.storageDir; // ephemeral storage (tests, CLI) is deleted on close
   const storage = new Storage(opts.storageDir ?? mkdtempSync(join(tmpdir(), 'classroom-storage-')));
   await storage.init();
@@ -243,7 +250,14 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     const memberId = studentOnly(auth(req));
     if (!classroom.info().peerAssist) throw new ApiError(409, 'peer_assist_off', 'Peer assistance is off.');
     const b = parse(z.object({ v: z.literal(1), tlsCa: b64(8192), tlsSpkiSha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/), port: z.number().int().min(1).max(65535) }), req.body);
-    return peers.endorse(memberId, b, req.ip);
+    const e = peers.endorse(memberId, b, req.ip);
+    // Never assume P2P: the first time two members have peer servers, ask the newer one to reach the others.
+    const targets = peers.urls(memberId);
+    if (classroom.p2p === 'unknown' && !probe && targets.length) {
+      probe = { id: randomUUID(), memberId, timer: setTimeout(() => { probe = null; }, 15_000) };
+      for (const [ws, p] of sockets) if (p.role === 'student' && p.memberId === memberId) send(ws, { t: 'peer.probe', probeId: probe.id, targets });
+    }
+    return e;
   });
   app.post('/api/peer/capability', async (req) => peers.capability(studentOnly(auth(req))));
   app.post('/api/peer/have', async (req, reply) => {
@@ -301,6 +315,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   });
 
   const sockets = new Map<WebSocket, Principal>();
+  let probe: { id: string; memberId: string; timer: ReturnType<typeof setTimeout> } | null = null;
   let shuttingDown = false;
   const send = (ws: WebSocket, m: ServerMessage) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m)); };
   const toTeachers = (m: () => ServerMessage) => {
@@ -310,7 +325,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const toAll = (m: ServerMessage) => { for (const ws of sockets.keys()) send(ws, m); };
 
   /** Names-only roster for members whose CLAN grants VIEW_MEMBERS (never device keys or ids). */
-  const memberRoster = (): ServerMessage => ({ t: 'members', members: [{ name: 'Host', host: true, connected: true },
+  const memberRoster = (): ServerMessage => ({ t: 'members', members: [{ name: classroom.hostName ?? 'Host', host: true, connected: true },
     ...classroom.roster().filter((m) => m.status === 'approved').map((m) => ({ name: m.fullName, host: false, connected: m.connected }))] });
   const toMembers = () => {
     let msg: ServerMessage | undefined;
@@ -429,6 +444,11 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
             case 'assignment.create': return void assignments.create(msg.assignment);
             case 'assignment.close': return assignments.close(msg.assignmentId);
             case 'class.peerAssist': return classroom.setPeerAssist(msg.enabled);
+            case 'peer.probeResult': {
+              if (!probe || probe.id !== msg.probeId || probe.memberId !== (principal as { memberId: string }).memberId || msg.tried === 0) return;
+              clearTimeout(probe.timer); probe = null;
+              return classroom.setP2p(msg.reachable > 0);
+            }
             case 'transfer.state': return resources.report((principal as { memberId: string }).memberId, msg.resourceId, msg.state, msg.bytes);
           }
         } catch (e) {
@@ -449,6 +469,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   httpsPort = (app.server.address() as { port: number }).port;
   await boot.listen({ host: opts.host, port: opts.port ?? 0 });
   const port = (boot.server.address() as { port: number }).port;
+  bootPort = port;
   const stopAdvertising = opts.advertise ? advertise({ host: opts.host, port, sid: classroom.id, title: classroom.title, type: classroom.clan.type }) : null;
   // The certificate is short-lived; the class ends just before it expires rather than switching keys mid-session.
   const certTimer = setTimeout(() => classroom.end(), Math.max(0, tls.notAfter - Date.now() - 60_000));
@@ -464,6 +485,23 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     port,
     url: `https://${hostPart}:${httpsPort}`,
     bootstrapUrl: `http://${hostPart}:${port}`,
+    /** Transport-neutral pairing (BLE bridge). Same Pairing object, throttles and messages as the HTTP bootstrap. */
+    bootstrap: (source: string, raw: unknown): BleResponse => {
+      const r = BleRequest.safeParse(raw);
+      if (!r.success) return { ok: false, code: 'invalid', message: 'Invalid request.' };
+      try {
+        const m = r.data;
+        if (m.t === 'hello') return { ok: true, body: { sessionId: classroom.id, v: 1 } };
+        if (m.t === 'start') return { ok: true, body: pairing.start(`ble:${source}`, m.sessionId, m.startLoginRequest) };
+        if (m.t === 'abort') { pairing.abort(`ble:${source}`, m.pairingId); return { ok: true, body: null }; }
+        const body = pairing.finish(`ble:${source}`, m.pairingId, m.finishLoginRequest);
+        classroom.log('member.bootstrap', null, { via: 'bluetooth' }); // diagnostics only: no device data
+        return { ok: true, body };
+      } catch (e) {
+        const x = e as { code?: string; message?: string };
+        return { ok: false, code: x.code ?? 'error', message: x.code ? String(x.message) : 'Pairing failed.' };
+      }
+    },
     tls: { certificate: tls.certificate, spkiSha256: tls.spkiSha256, notAfter: tls.notAfter },
     teacherPublicKey,
     async close() {

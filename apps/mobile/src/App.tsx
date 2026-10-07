@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
 import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
-import { clanLabels, shortFingerprint, StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
+import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type DirectPackage, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
 import { opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
 import { OpaqueBridgeHost } from './OpaqueBridgeHost';
+import { associator, bleCarriers } from '../modules/direct-join';
+
+/** Android asks at run time; a refusal just means no BLE (QR / existing network still work). */
+async function bleAllowed() {
+  if (Platform.OS !== 'android') return true;
+  const r = await PermissionsAndroid.requestMultiple(['android.permission.BLUETOOTH_SCAN', 'android.permission.BLUETOOTH_CONNECT', 'android.permission.ACCESS_FINE_LOCATION'] as never).catch(() => ({}));
+  return Object.values(r).some((v) => v === 'granted');
+}
 
 const QUALITY: Record<Quality, string> = { excellent: 'Excellent', good: 'Good', poor: 'Poor', disconnected: 'Reconnecting…' };
 
@@ -68,15 +76,33 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
   const [found, setFound] = useState<Candidate[]>([]);
   const foundRef = useRef<Candidate[]>([]);
   useEffect(() => browse((l) => { foundRef.current = l; setFound(l); }), []);
+  // QR fallback: the system camera opens clan://direct#… ; it gives the network only, the code is still needed.
+  const [qr, setQr] = useState<DirectPackage | null>(null);
+  const [manual, setManual] = useState<{ ssid: string; passphrase: string } | null>(null);
+  useEffect(() => {
+    const take = (url: string | null) => { if (!url) return; try { setQr(decodeDirectQr(url)); setError(''); } catch (e) { setError((e as Error).message); } };
+    void Linking.getInitialURL().then(take);
+    const sub = Linking.addEventListener('url', (e) => take(e.url));
+    return () => sub.remove();
+  }, []);
 
   const join = async () => {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setManual(null);
     try {
-      for (let i = 0; i < 24 && foundRef.current.length === 0; i++) await new Promise((r) => setTimeout(r, 250));
+      let candidates = foundRef.current;
+      if (qr) {
+        if (!associator) throw Object.assign(new TransferError('direct_manual', 'Join the CLAN network in Settings, then try again.'), { direct: qr });
+        await associator(qr);
+        candidates = [{ url: `http://${qr.host}:${qr.bootstrapPort}`, sid: qr.sessionId }];
+      }
+      const carriers = qr ? [] : (await bleAllowed()) ? await bleCarriers() : [];
+      for (let i = 0; i < 12 && candidates.length === 0 && carriers.length === 0; i++) { await new Promise((r) => setTimeout(r, 250)); candidates = foundRef.current; }
       // Same secure flow as desktop: OPAQUE (official WASM in the isolated WebView) -> MACed binding -> pinned native TLS.
-      onJoined(await pairAndJoin({ candidates: foundRef.current, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
+      onJoined(await pairAndJoin({ candidates, carriers, associate: associator, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
     } catch (e) {
-      setError(e instanceof TransferError ? e.message : 'Something went wrong. Try again.');
+      const d = (e as { code?: string; direct?: DirectPackage }).direct;
+      if ((e as { code?: string }).code === 'direct_manual' && d) setManual({ ssid: d.ssid, passphrase: d.passphrase });
+      else setError(e instanceof TransferError ? e.message : 'Something went wrong. Try again.');
     } finally { setBusy(false); }
   };
 
@@ -91,7 +117,15 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
         accessibilityLabel="Six digit classroom code" onSubmitEditing={() => code.length === 6 && join()}
       />
       {!!error && <Text style={{ color: c.danger }}>{error}</Text>}
-      <Button c={c} primary label={busy ? 'Finding classroom…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
+      {qr && <Text style={{ color: c.muted }}>Network from QR ready ({qr.ssid}). Enter the code to join.</Text>}
+      {manual && (
+        <View style={[s.pill, { borderColor: c.border, flexDirection: 'column', alignItems: 'flex-start' }]}>
+          <Text style={{ color: c.text, fontWeight: '600' }}>Connect to this network in Settings, then tap Join again</Text>
+          <Text style={{ color: c.text }} selectable>Network: {manual.ssid}</Text>
+          <Text style={{ color: c.text }} selectable>Password: {manual.passphrase}</Text>
+        </View>
+      )}
+      <Button c={c} primary label={busy ? 'Joining…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
       <Text style={{ color: c.muted, marginTop: 24 }}>
         {found.length ? `Nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for CLANs on this Wi-Fi… Make sure you are on the same network as the host. Internet is not needed.'}
       </Text>

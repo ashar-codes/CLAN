@@ -23,6 +23,11 @@ const api: DesktopApi = {
   saveProfile: (p) => ipcRenderer.invoke('profile:save', p),
   startClassroom: (a) => ipcRenderer.invoke('teacher:start', a),
   stopClassroom: () => ipcRenderer.invoke('teacher:stop'),
+  directAvailability: () => ipcRenderer.invoke('direct:availability'),
+  directStatus: () => ipcRenderer.invoke('direct:status'),
+  directQr: () => ipcRenderer.invoke('direct:qr'),
+  joinQr: (qr, code) => ipcRenderer.invoke('student:joinQr', qr, code),
+  peerProbe: (t) => ipcRenderer.invoke('student:peerProbe', t),
   discover(onList) {
     const h = (_e: unknown, list: Parameters<typeof onList>[0]) => onList(list);
     ipcRenderer.on('discover:list', h);

@@ -4,11 +4,11 @@ Two independent axes (`packages/protocol/src/network.ts`):
 
 | Axis | Values | Today |
 |---|---|---|
-| **connectivity** — how devices reach each other | `lan` (existing Wi-Fi/router/Ethernet), `direct` (Windows Wi-Fi Direct AP), `mesh_experimental` | `lan` implemented; `direct` interface only (Milestone 3); mesh research only |
+| **connectivity** — how devices reach each other | `lan` (existing Wi-Fi/router/Ethernet), `direct` (Windows Wi-Fi Direct AP), `mesh_experimental` | `lan`, `direct` implemented (direct: mock-verified, real Windows unverified); mesh research only |
 | **distribution** — who serves official data | `teacher`, `peer_assisted` | both implemented |
 
-Named presets: **TEACHER_SERVER** / **LAN** = lan + teacher · **PEER_ASSISTED** = lan + peer_assisted · **DIRECT** = direct +
-(either distribution once Milestone 3 exists) · **MESH_EXPERIMENTAL** = documentation only.
+Named presets: **TEACHER_SERVER** / **LAN** = lan + teacher · **PEER_ASSISTED** = lan + peer_assisted · **DIRECT** = direct + host-only, or
+direct + peer_assisted when the topology probe shows members can reach each other · **MESH_EXPERIMENTAL** = documentation only.
 
 The **control plane is the same in every mode**: teacher-authoritative, pinned HTTPS/WSS, teacher signatures.
 

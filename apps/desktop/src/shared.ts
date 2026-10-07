@@ -23,7 +23,10 @@ export type Joined = {
   teacherPublicKey: string; teacherFingerprint: string; teacherTrust: TeacherTrust;
 };
 
-export type StartedClassroom = { url: string; code: string; teacherToken: string; title: string; host: string; iface: string };
+export type StartedClassroom = { url: string; code: string; teacherToken: string; title: string; host: string; iface: string;
+  direct: { ssid: string; band: '2.4' | '5' | '6' | null; strategy: string; vpn: string[] } | null };
+export type DirectAvailability = { available: boolean; reason: string | null; strategy: string | null; bluetooth: string; backend: string | null; vpn: string[] };
+export type DirectStatus = { up: boolean; ssid: string | null; band: string | null; hostAddress: string | null; interfaceName: string | null; connected: number; p2p: 'unknown' | 'available' | 'isolated' } | null;
 
 export type FileState = { resourceId: string; state: TransferState; bytes: number; size: number; resumedFrom?: number; error?: string; canOpen?: boolean; via?: string };
 /** `url` is informational: main routes every request through the session it paired with. */
@@ -41,7 +44,7 @@ export type HomeView = {
   aiProvider: null;
 };
 export type ClanDetail = {
-  clan: Clan; members: { userId: string; name: string; role: string }[]; sessions: number; files: FileView[];
+  clan: Clan; mine: boolean; members: { userId: string; name: string; role: string }[]; sessions: number; files: FileView[];
   notes: { id: string; title: string; mine: boolean }[]; saved: SavedItem[];
 };
 export type SearchHit = { module: string; entityId: string; title: string; snippet: string };
@@ -49,7 +52,7 @@ export type SearchHit = { module: string; entityId: string; title: string; snipp
 /** CLAN services (window.classroom.clan). */
 export type ClanApi = {
   home(): Promise<HomeView>;
-  joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null }): Promise<void>;
+  joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null; hostName?: string | null }): Promise<void>;
   list(): Promise<Clan[]>;
   detail(id: string): Promise<ClanDetail>;
   notes(): Promise<Note[]>;
@@ -87,7 +90,12 @@ export type DesktopApi = {
   lastSession(): Promise<{ sessionId: string; title: string; savedAt: number } | null>;
   trustTeacher(title: string, teacherPublicKey: string): Promise<void>;
   /** Host any CLAN type (historical name). */
-  startClassroom(a: { title: string; policy: JoinPolicy; host?: string; type?: ClanType; description?: string; hours?: number }): Promise<StartedClassroom>;
+  startClassroom(a: { title: string; policy: JoinPolicy; host?: string; type?: ClanType; description?: string; hours?: number; clanId?: string; connectivity?: 'lan' | 'direct'; distribution?: 'host' | 'peer' }): Promise<StartedClassroom>;
+  directAvailability(): Promise<DirectAvailability>;
+  directStatus(): Promise<DirectStatus>;
+  directQr(): Promise<{ dataUrl: string; expiresAt: number }>;
+  joinQr(qr: string, code: string): Promise<Joined>;
+  peerProbe(targets: string[]): Promise<{ tried: number; reachable: number }>;
   stopClassroom(): Promise<void>;
   discover(onList: (list: DiscoveredClassroom[]) => void): () => void;
 

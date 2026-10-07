@@ -232,4 +232,22 @@ describe('compatibility', () => {
     }
     expect(hits).toEqual([]);
   });
+
+  it('Host again: same CLAN id, new session id / code / TLS identity; known members carry over', async () => {
+    const db = openDb(':memory:');
+    const clanId = randomUUID(), d = device();
+    const first = await host('STUDY_GROUP', { db, clan: { type: 'STUDY_GROUP', id: clanId } });
+    first.classroom.setPolicy('open');
+    await secureJoin(first, 1, d);
+    const before = { id: first.classroom.id, code: first.classroom.code, spki: first.tls.spkiSha256 };
+    await first.close(); servers.splice(servers.indexOf(first), 1);
+    const again = await host('STUDY_GROUP', { db, clan: { type: 'STUDY_GROUP', id: clanId } });
+    again.classroom.setPolicy('known');
+    expect(again.classroom.info().clanId).toBe(clanId);
+    expect(again.classroom.id).not.toBe(before.id);
+    expect(again.tls.spkiSha256).not.toBe(before.spki);
+    expect((await secureJoin(again, 1, d)).status).toBe('approved');
+    expect(db.prepare('SELECT count(*) n FROM sessions WHERE clan_id = ?').get(clanId)).toEqual({ n: 2 });
+  });
 });
+

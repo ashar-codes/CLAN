@@ -15,16 +15,26 @@
         ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "NSBluetoothAlwaysUsageDescription": "CLAN uses Bluetooth to find a nearby CLAN host that runs its own network. Only pairing messages are exchanged."
+      },
+      "entitlements": {
+        "com.apple.developer.networking.HotspotConfiguration": true
       }
     },
     "android": {
       "package": "app.classroomlan.student",
       "permissions": [
-        "INTERNET",
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
-        "CHANGE_WIFI_MULTICAST_STATE"
+        "CHANGE_WIFI_MULTICAST_STATE",
+        "INTERNET",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.CHANGE_NETWORK_STATE",
+        "android.permission.CHANGE_WIFI_STATE"
       ]
     },
     "plugins": [
@@ -38,6 +48,7 @@
         }
       ],
       "expo-sharing"
-    ]
+    ],
+    "scheme": "clan"
   }
 }

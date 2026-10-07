@@ -112,6 +112,14 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
   endorsements and capabilities are rejected; relaying peers gain no capabilities.
 * Temporary CLANs: after `expiresAt` (or End) joins are refused and member tokens stop working; downloaded files are not touched.
 
+## CLAN Direct Network
+* The six-digit code stays the only human secret (OPAQUE). Wi-Fi credentials are random per session, never derived from it,
+  and released only inside a completed OPAQUE exchange, AES-256-GCM-sealed under an OPAQUE-derived key (DIRECT_BOOTSTRAP.md).
+* Wi-Fi association is not authorization: OPAQUE, pinned TLS, device-key proof and capabilities apply unchanged.
+* BLE/QR carry no code; SSIDs carry no personal data; the host's name reaches members only after pairing.
+* Native helper: fixed, schema-validated command set; no shell; firewall rules are program/port/LocalSubnet/Wireless-scoped.
+* Mock backend can never be selected in a packaged build (`createDirectBackend`).
+
 ## Known gaps (tracked)
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
   code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.

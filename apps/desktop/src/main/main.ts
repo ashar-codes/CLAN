@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, powerMonitor, session, shell, type WebContents } from 'electron';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import * as opaque from '@serenity-kit/opaque';
 import { hostname } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -16,9 +17,18 @@ import { browse } from '@classroom/server/discovery';
 import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroom } from '../shared.ts';
 import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
+import { DesktopDirect } from './direct.ts';
+import { connect as tcpConnect } from 'node:net';
+import { decodeDirectQr } from '@classroom/protocol';
+import { TransferError } from '@classroom/client';
 import type { ResourceView } from '@classroom/protocol';
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** IPC rejects lose custom fields, so the manual Wi-Fi fallback travels as a tagged message (only to this app's own window). */
+const joinError = (e: unknown) => {
+  const d = (e as { code?: string; direct?: { ssid: string; passphrase: string } });
+  return new Error(d.code === 'direct_manual' && d.direct ? `DIRECT_MANUAL:${JSON.stringify({ ssid: d.direct.ssid, passphrase: d.direct.passphrase })}` : (e as Error).message);
+};
 // Storage identity first (before anything reads userData or touches safeStorage); the user-visible name is set after ready.
 app.setName(LEGACY_STORAGE_NAME);
 // `--profile=name` gives a separate data dir so one machine can run teacher + students during development.
@@ -63,7 +73,10 @@ function loadProfile(): OwnProfile {
 const ConnArgs = z.object({ url: z.string().regex(/^https:\/\/[\w.:[\]-]+$/), token: z.string().min(16).max(128), sessionId: z.uuid(), classTitle: z.string().max(200) });
 const ResourceArgs = z.object({ id: z.uuid(), name: z.string().max(300), size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/), mime: z.string().max(200), addedAt: z.number(), status: z.literal('ready'), available: z.boolean(), pushed: z.boolean() });
 const StartArgs = z.object({ title: z.string().trim().min(1).max(80), policy: JoinPolicy, host: z.ipv4().optional(), type: ClanType.default('CLASSROOM'),
-  description: z.string().max(500).default(''), hours: z.number().min(0.25).max(72).optional() });
+  description: z.string().max(500).default(''), hours: z.number().min(0.25).max(72).optional(),
+  /** Host again: a new session under this existing CLAN (same id, members, trust). */
+  clanId: z.uuid().optional(), connectivity: z.enum(['lan', 'direct']).default('lan'), distribution: z.enum(['host', 'peer']).default('host') });
+let direct: DesktopDirect;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 
 function registerIpc() {
@@ -92,16 +105,48 @@ function registerIpc() {
       const m = z.string().regex(/^(http:\/\/)?[\w.-]+:\d{1,5}$/).parse(manual); // diagnostics fallback: teacher's bootstrap address
       candidates = [{ url: m.startsWith('http') ? m : `http://${m}` }];
     }
-    // Multicast discovery can take several seconds on busy Wi-Fi; wait up to 10 s before reporting "none found".
-    for (let i = 0; i < 40 && candidates.length === 0; i++) { await new Promise((r) => setTimeout(r, 250)); candidates = discovered; }
+    // Nearby Direct hosts over BLE are tried alongside LAN hosts; the code (OPAQUE) decides which one is ours.
+    let ble: Awaited<ReturnType<DesktopDirect['bleCarriers']>> | null = manual ? [] : null;
+    const bleP = manual ? Promise.resolve([]) : direct.bleCarriers().then((c) => (ble = c));
+    // Multicast discovery can take several seconds on busy Wi-Fi: wait up to 10 s, unless BLE already found a host.
+    for (let i = 0; i < 40 && candidates.length === 0 && !(ble?.length); i++) { await new Promise((r) => setTimeout(r, 250)); candidates = discovered; }
+    const carriers = candidates.length ? await Promise.race([bleP, new Promise<[]>((r) => setTimeout(() => r([]), 500))]) : await bleP;
     await opaque.ready;
     const r = await pairAndJoin({
       candidates, code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName }, device: trust.device(),
-      opaque: opaque.client, transportFor: (b) => pinnedTransport(b),
-    }).catch((e) => { logError('join', (e as { cause?: unknown }).cause ?? e); throw new Error((e as Error).message); });
+      opaque: opaque.client, transportFor: (b) => pinnedTransport(b), carriers, associate: direct.associator(),
+    }).catch((e) => { logError('join', (e as { cause?: unknown }).cause ?? e); throw joinError(e); });
     trust.remember({ sessionId: r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });
     return joined(r, r.binding.teacherPublicKey);
   });
+  /** QR fallback: the QR gives the network; the six-digit code still decides membership. */
+  ipcMain.handle('student:joinQr', async (_e, qr: unknown, code: unknown): Promise<Joined> => {
+    const pkg = decodeDirectQr(z.string().max(1024).parse(qr));
+    const c = z.string().regex(/^\d{6}$/).parse(code);
+    const p = loadProfile();
+    if (!p.fullName || !p.rollNo || !p.deviceName) throw new Error('Fill in your details first.');
+    const associate = direct.associator();
+    if (!associate) throw joinError(Object.assign(new TransferError('direct_manual', 'Join the Wi-Fi network shown, then try again.'), { direct: pkg }));
+    await associate(pkg);
+    await opaque.ready;
+    const r = await pairAndJoin({ candidates: [{ url: `http://${pkg.host}:${pkg.bootstrapPort}`, sid: pkg.sessionId }], code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName },
+      device: trust.device(), opaque: opaque.client, transportFor: (b) => pinnedTransport(b), associate }).catch((e) => { throw joinError(e); });
+    trust.remember({ sessionId: r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });
+    return joined(r, r.binding.teacherPublicKey);
+  });
+  /** Topology probe: can this member open a TCP connection to other members' peer servers on this network? */
+  ipcMain.handle('student:peerProbe', async (_e, raw: unknown) => {
+    const targets = z.array(z.string().regex(/^https:\/\/(10|172|192|127)\.[\d.]+:\d{1,5}$/)).max(3).parse(raw);
+    const ok = await Promise.all(targets.map((t) => new Promise<boolean>((res) => {
+      const u = new URL(t);
+      const s = tcpConnect({ host: u.hostname, port: Number(u.port), timeout: 2500 }, () => { s.destroy(); res(true); });
+      s.on('error', () => res(false)).on('timeout', () => { s.destroy(); res(false); });
+    })));
+    return { tried: targets.length, reachable: ok.filter(Boolean).length };
+  });
+  ipcMain.handle('direct:availability', () => direct.availability());
+  ipcMain.handle('direct:status', async () => (server && direct.net?.active ? { ...(await direct.net.status()), connected: server.classroom.roster().filter((m) => m.connected).length, p2p: server.classroom.p2p } : null));
+  ipcMain.handle('direct:qr', async () => { if (!server) throw new Error('No active CLAN.'); return direct.qr(server); });
   ipcMain.handle('student:rejoin', async (_e, sid: unknown): Promise<Joined> => {
     const s = trust.session(z.uuid().parse(sid));
     if (!s) throw new Error('This class is no longer paired on this device. Join with the code.');
@@ -119,25 +164,51 @@ function registerIpc() {
   ipcMain.handle('teacher:start', async (e, raw: unknown): Promise<StartedClassroom> => {
     const a = StartArgs.parse(raw);
     if (server) await server.close();
-    const ifaces = candidateInterfaces();
-    const host = a.host && ifaces.some((i) => i.address === a.host) ? a.host : ifaces[0]?.address;
-    if (!host) throw new Error('No network connection found. Connect this computer to the classroom Wi-Fi or router first.');
-    // Every hosted session belongs to a canonical CLAN: classrooms reuse their course's CLAN, other types are created here.
-    const expiresAt = a.type === 'TEMPORARY' ? Date.now() + (a.hours ?? 2) * 3600_000 : null;
-    const clanId = a.type === 'CLASSROOM' ? clan.classroomClanFor(a.title) : clan.clans.create({ type: a.type, name: a.title, createdBy: clan.me, expiresAt: expiresAt ?? undefined }).id;
-    server = await startClassroomServer({ title: a.title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: 'lan', identity: await trust.teacherIdentity(),
-      clan: { type: a.type, id: clanId, description: a.description, expiresAt } });
+    await direct.stop();
+    // Every hosted session belongs to a canonical CLAN: re-host keeps it; classrooms reuse their course's CLAN; others are created.
+    let title = a.title, type = a.type, clanId: string | null;
+    if (a.clanId) {
+      const c = clan.clans.get(a.clanId);
+      if (!c || c.archivedAt || !clan.clans.members(c.id).some((m) => m.userId === clan.me && m.role === 'owner')) throw new Error('You can only host your own CLANs again.');
+      if (c.type === 'TEMPORARY') throw new Error('A Temporary CLAN cannot be hosted again; start a new one.');
+      ({ name: title, type } = c); clanId = c.id;
+    } else clanId = null;
+    const expiresAt = type === 'TEMPORARY' ? Date.now() + (a.hours ?? 2) * 3600_000 : null;
+    clanId ??= type === 'CLASSROOM' ? clan.classroomClanFor(title) : clan.clans.create({ type, name: title, createdBy: clan.me, expiresAt: expiresAt ?? undefined }).id;
+    const sessionKey = randomUUID();
+    let host: string | undefined, iface = '', directNet: Awaited<ReturnType<DesktopDirect['start']>> | null = null;
+    if (a.connectivity === 'direct') {
+      directNet = await direct.start(sessionKey); // the CLAN server binds only to the Direct interface
+      host = directNet.hostAddress; iface = 'Direct network';
+    } else {
+      const ifaces = candidateInterfaces();
+      host = a.host && ifaces.some((i) => i.address === a.host) ? a.host : ifaces[0]?.address;
+      iface = ifaces.find((i) => i.address === host)?.name ?? '';
+      if (!host) throw new Error('No network connection found. Connect this computer to a Wi-Fi network or router, or use Direct Network.');
+    }
+    // Canonical display name only if the person actually set one (never the placeholder, never device data).
+    const named = clan.identity.displayName(clan.me);
+    const hostName = loadProfile().fullName || (named && named !== 'Me' ? named : undefined);
+    try {
+      server = await startClassroomServer({ title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: a.connectivity === 'direct' ? 'direct' : 'lan', identity: await trust.teacherIdentity(),
+        clan: { type, id: clanId, description: a.description, expiresAt }, hostName,
+        direct: directNet ? { ssid: directNet.ssid, passphrase: directNet.passphrase, auth: 'WPA2', host: directNet.hostAddress, expiresAt: expiresAt ?? Date.now() + 12 * 3600_000 } : undefined });
+      if (directNet) await direct.publish(server);
+    } catch (err) { await server?.close(); server = null; await direct.stop(); throw err; }
     clan.syncClassrooms();
     clearTimeout(expiryTimer);
     if (expiresAt) expiryTimer = setTimeout(() => server?.classroom.end(), expiresAt - Date.now()); // the session also refuses joins/tokens after expiry
     trust.pin(server.url, server.tls.spkiSha256); // the teacher's own dashboard uses WSS too
     server.resources.on('progress', (resourceId: string, bytes: number, size: number) => e.sender.send('teacher:import', { resourceId, bytes, size }));
     server.classroom.setPolicy(a.policy);
-    return { url: server.url, code: server.classroom.code, teacherToken: server.classroom.teacherToken, title: a.title, host, iface: ifaces.find((i) => i.address === host)!.name };
+    if (a.distribution === 'peer') server.classroom.setPeerAssist(true);
+    return { url: server.url, code: server.classroom.code, teacherToken: server.classroom.teacherToken, title, host, iface,
+      direct: directNet ? { ssid: directNet.ssid, band: directNet.band, strategy: directNet.strategy, vpn: directNet.vpn } : null };
   });
   ipcMain.handle('teacher:stop', async () => {
     const ended = server?.classroom.clan;
     await server?.close(); server = null; clearTimeout(expiryTimer);
+    await direct.stop(); // AP down, its credentials gone, firewall rules removed
     clan.syncClassrooms();
     if (ended?.type === 'TEMPORARY' && ended.id) clan.clans.archive(ended.id); // ending a Temporary CLAN ends the CLAN; downloaded files stay
   });
@@ -219,6 +290,9 @@ app.whenReady().then(() => {
   // Nothing needs camera/mic/notifications yet; grant capabilities explicitly as features land.
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
   process.on('uncaughtException', (e) => logError('main', e));
+  direct = new DesktopDirect();
+  void direct.recover(); // a crash may have left a Direct network or firewall rules behind
+  powerMonitor.on('resume', () => { void direct.net?.restart().catch((e) => logError('direct', e)); }); // same SSID/passphrase: members rejoin with their device keys
   registerIpc();
   clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName);
   createWindow();
@@ -230,6 +304,6 @@ app.on('before-quit', (e) => {
   if (quitting || !server) return;
   e.preventDefault();
   quitting = true;
-  server.close().finally(() => app.quit());
+  server.close().then(() => direct.stop()).finally(() => app.quit());
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

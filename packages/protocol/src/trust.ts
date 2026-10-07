@@ -50,6 +50,8 @@ export function derivePairingKeys(opaqueSessionKeyB64: string) {
   return {
     binding: hkdf(sha256, ikm, salt, enc.encode('classroom-lan/v1 tls-binding mac'), 32),
     join: hkdf(sha256, ikm, salt, enc.encode('classroom-lan/v1 join-proof mac'), 32),
+    /** AEAD key for the Direct-network package (Wi-Fi credential), released only after OPAQUE succeeds. */
+    direct: hkdf(sha256, ikm, salt, enc.encode('classroom-lan/v1 direct-package aead'), 32),
   };
 }
 

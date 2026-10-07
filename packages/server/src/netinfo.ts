@@ -17,3 +17,14 @@ export function candidateInterfaces(): Iface[] {
   const score = (i: Iface) => (i.private ? 0 : 2) + (i.address.startsWith('169.254.') ? 1 : 0) + (/^(en0|wi-?fi|wlan)/i.test(i.name) ? -1 : 0);
   return out.sort((x, y) => score(x) - score(y));
 }
+
+const VPN = /^(utun|tun|tap|ppp|ipsec|wg|tailscale|zt|nordlynx|proton|mullvad|.*vpn.*|.*wireguard.*)/i;
+/** Active VPN-looking interfaces (name patterns + CGNAT range used by overlay VPNs). Best effort: used to warn, never to trust. */
+export function vpnInterfaces(ifaces = networkInterfaces()): string[] {
+  const out = new Set<string>();
+  for (const [name, addrs] of Object.entries(ifaces)) for (const a of addrs ?? []) {
+    if (a.internal) continue;
+    if (VPN.test(name) || (a.family === 'IPv4' && /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a.address))) out.add(name);
+  }
+  return [...out];
+}

@@ -9,3 +9,5 @@ export { Throttle } from './throttle.ts';
 export { Resources } from './resources.ts';
 export { Assignments } from './assignments.ts';
 export { Storage, DEFAULT_LIMITS, ApiError, parseRange, contentDisposition, hashFile, type Limits } from './storage.ts';
+export * from './direct.ts';
+export { vpnInterfaces } from './netinfo.ts';

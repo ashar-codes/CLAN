@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Capabilities, DesktopApi } from '../shared.ts';
-import { TeacherSetup, TeacherDashboard } from './Teacher.tsx';
+import { TeacherSetup, TeacherDashboard, type Rehost } from './Teacher.tsx';
 import { StudentFlow } from './Student.tsx';
 import { Shell } from './Shell.tsx';
 import type { StartedClassroom } from '../shared.ts';
@@ -9,7 +9,7 @@ import type { ClanType } from '@classroom/protocol';
 declare global { interface Window { classroom: DesktopApi } }
 export const api = window.classroom;
 
-type Screen = { s: 'home' } | { s: 'teacher-setup'; type?: ClanType } | { s: 'teacher'; started: StartedClassroom } | { s: 'student' };
+type Screen = { s: 'home' } | { s: 'teacher-setup'; type?: ClanType; rehost?: Rehost } | { s: 'teacher'; started: StartedClassroom } | { s: 'student' };
 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ s: 'home' });
@@ -29,9 +29,9 @@ function Screens({ screen, setScreen, caps }: { screen: Screen; setScreen(s: Scr
   const home = () => setScreen({ s: 'home' });
   switch (screen.s) {
     case 'home':
-      return <Shell onCreate={(type) => setScreen({ s: 'teacher-setup', type })} onJoin={() => setScreen({ s: 'student' })} />;
+      return <Shell onCreate={(type) => setScreen({ s: 'teacher-setup', type })} onRehost={(rehost) => setScreen({ s: 'teacher-setup', rehost })} onJoin={() => setScreen({ s: 'student' })} />;
     case 'teacher-setup':
-      return <TeacherSetup caps={caps} initialType={screen.type} onBack={home} onStarted={(started) => setScreen({ s: 'teacher', started })} />;
+      return <TeacherSetup caps={caps} initialType={screen.type} rehost={screen.rehost} onBack={home} onStarted={(started) => setScreen({ s: 'teacher', started })} />;
     case 'teacher':
       return <TeacherDashboard caps={caps} started={screen.started} onEnded={home} />;
     case 'student':

@@ -51,13 +51,13 @@ it('secure join, approve, files, assignment + signed receipt, MITM/downgrade/clo
   // Wrong code first: must be refused without revealing anything.
   await student.locator('.code-input').fill(code === '000000' ? '000001' : '000000');
   await student.getByRole('button', { name: 'Join', exact: true }).click();
-  await expect.poll(() => student.locator('.error').textContent(), { timeout: 10_000 }).toContain('No classroom matches');
+  await expect.poll(() => student.locator('.error').textContent(), { timeout: 10_000 }).toContain('No CLAN matches');
 
   await student.locator('.code-input').fill(code);
   await student.getByRole('button', { name: 'Join', exact: true }).click();
   await Promise.race([
     student.getByText('Waiting for the teacher').waitFor({ timeout: 15_000 }),
-    student.locator('.error').filter({ hasNotText: 'No classroom matches' }).waitFor({ timeout: 15_000 }).then(async () => { throw new Error('join failed: ' + await student.locator('.error').textContent()); }),
+    student.locator('.error').filter({ hasNotText: 'No CLAN matches' }).waitFor({ timeout: 15_000 }).then(async () => { throw new Error('join failed: ' + await student.locator('.error').textContent()); }),
   ]);
 
   await teacher.getByText('Ashar Khan', { exact: true }).waitFor();

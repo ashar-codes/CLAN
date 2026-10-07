@@ -2,7 +2,8 @@
 // device-key proof. Platform-neutral: the OPAQUE client and the device signer are injected.
 // Full description: docs/PAIRING_AND_TRUST.md.
 import {
-  canonicalBytes, derivePairingKeys, keyFingerprint, macOf, verifyBinding,
+  BleReassembler, bleFrames, canonicalBytes, derivePairingKeys, keyFingerprint, macOf, openDirect, verifyBinding,
+  type BleRequest, type BleResponse, type DirectPackage,
   type JoinProofPayload, type JoinResponse, type PairFinishResponse, type PairStartResponse, type ReconnectChallengeResponse,
   type ReconnectProofPayload, type TlsBinding,
 } from '@classroom/protocol';
@@ -44,31 +45,94 @@ async function postJson<T>(f: (u: string, i?: RequestInit) => Promise<Response>,
   return b as T;
 }
 
+/** How the OPAQUE messages reach the host before any secure channel exists: HTTP on the LAN, or BLE for Direct mode. */
+export type BootstrapCarrier = {
+  /** Host address to use for HTTPS when no Direct package says otherwise (HTTP carrier only). */
+  hostHint: string | null;
+  sessionId(): Promise<string>;
+  start(b: { sessionId: string; startLoginRequest: string }): Promise<PairStartResponse>;
+  finish(b: { pairingId: string; finishLoginRequest: string }): Promise<PairFinishResponse>;
+  abort(b: { pairingId: string }): Promise<void>;
+};
+
+export function httpCarrier(url: string, sid?: string, f: (u: string, i?: RequestInit) => Promise<Response> = (u, i) => fetch(u, i)): BootstrapCarrier {
+  return {
+    hostHint: hostOf(url),
+    sessionId: async () => sid ?? String((await (await f(`${url}/api/info`)).json()).sessionId),
+    start: (b) => postJson(f, `${url}/api/pair/start`, { v: 1, ...b }),
+    finish: (b) => postJson(f, `${url}/api/pair/finish`, { v: 1, ...b }),
+    abort: async (b) => { await f(`${url}/api/pair/abort`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, ...b }) }).catch(() => {}); },
+  };
+}
+
+/** A GATT connection to a host advertising the CLAN bootstrap service (platform BLE code implements this). */
+export type BleLink = { write(frame: Uint8Array): Promise<void>; onFrame(cb: (frame: Uint8Array) => void): () => void; close(): void };
+
+/** Request/response over BLE frames. Carries only the OPAQUE pairing messages; nothing secret is ever in plaintext. */
+export function bleCarrier(link: BleLink, timeoutMs = 15_000): BootstrapCarrier {
+  let id = 0;
+  const waiting = new Map<number, (r: BleResponse) => void>();
+  const re = new BleReassembler();
+  link.onFrame((fr) => {
+    const msg = re.push(fr) as (BleResponse & { id?: number }) | undefined;
+    if (msg && typeof msg.id === 'number') { waiting.get(msg.id)?.(msg); waiting.delete(msg.id); }
+  });
+  const call = async (req: BleRequest): Promise<unknown> => {
+    const mine = (id = (id + 1) & 0xff);
+    const reply = new Promise<BleResponse>((res, rej) => { waiting.set(mine, res); setTimeout(() => { waiting.delete(mine); rej(new TransferError('unreachable', 'The host stopped answering over Bluetooth.')); }, timeoutMs); });
+    for (const fr of bleFrames(mine, { id: mine, ...req })) await link.write(fr);
+    const r = await reply;
+    if (!r.ok) throw new TransferError(r.code, r.message);
+    return r.body;
+  };
+  return {
+    hostHint: null,
+    sessionId: async () => String(((await call({ t: 'hello' })) as { sessionId: string }).sessionId),
+    start: (b) => call({ t: 'start', ...b }) as Promise<PairStartResponse>,
+    finish: (b) => call({ t: 'finish', ...b }) as Promise<PairFinishResponse>,
+    abort: async (b) => { await call({ t: 'abort', ...b }).catch(() => {}); },
+  };
+}
+
+/** Joins the Direct Wi-Fi described by an authenticated package (platform code). Throws if the OS refused. */
+export type DirectAssociator = (pkg: DirectPackage) => Promise<void>;
+
 /**
  * Pair with one bootstrap endpoint. Throws TransferError('bad_code') if OPAQUE fails (wrong code or an impostor),
  * TransferError('mitm') if the binding doesn't authenticate.
  */
 export async function pair(o: {
-  bootstrapUrl: string; sessionId: string; code: string; opaque: OpaqueClient;
+  bootstrapUrl?: string; carrier?: BootstrapCarrier; sessionId: string; code: string; opaque: OpaqueClient;
   plainFetch?: (u: string, i?: RequestInit) => Promise<Response>;
   transportFor(binding: TlsBinding): Transport;
-}): Promise<Paired & { joinKey: Uint8Array }> {
-  const f = o.plainFetch ?? ((u, i) => fetch(u, i));
+  /** Required to use a Direct network; without it a Direct host yields TransferError('direct_manual') carrying the package. */
+  associate?: DirectAssociator;
+}): Promise<Paired & { joinKey: Uint8Array; direct?: DirectPackage }> {
+  const carrier = o.carrier ?? httpCarrier(o.bootstrapUrl!, o.sessionId, o.plainFetch);
   const { clientLoginState, startLoginRequest } = await o.opaque.startLogin({ password: o.code });
-  const start = await postJson<PairStartResponse>(f, `${o.bootstrapUrl}/api/pair/start`, { v: 1, sessionId: o.sessionId, startLoginRequest });
+  const start = await carrier.start({ sessionId: o.sessionId, startLoginRequest });
   const fin = await o.opaque.finishLogin({ clientLoginState, loginResponse: start.loginResponse, password: o.code, identifiers: opaqueIdentifiers(o.sessionId) });
   // undefined: the server could not prove knowledge of the code (wrong code or impostor). Tell it we gave up, so an
   // honest wrong guess is counted at once; nothing secret is sent.
   if (!fin) {
-    await f(`${o.bootstrapUrl}/api/pair/abort`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, pairingId: start.pairingId }) }).catch(() => {});
-    throw new TransferError('bad_code', 'No classroom matches that code.');
+    await carrier.abort({ pairingId: start.pairingId });
+    throw new TransferError('bad_code', 'No CLAN matches that code.');
   }
-  const res = await postJson<PairFinishResponse>(f, `${o.bootstrapUrl}/api/pair/finish`, { v: 1, pairingId: start.pairingId, finishLoginRequest: fin.finishLoginRequest });
+  const res = await carrier.finish({ pairingId: start.pairingId, finishLoginRequest: fin.finishLoginRequest });
   const keys = derivePairingKeys(fin.sessionKey);
   const check = verifyBinding(keys.binding, res, { sessionId: o.sessionId, pairingId: start.pairingId });
   if (!check.ok) throw new TransferError('mitm', `Secure pairing failed: ${check.reason}.`);
-  const url = `https://${hostOf(o.bootstrapUrl).includes(':') ? `[${hostOf(o.bootstrapUrl)}]` : hostOf(o.bootstrapUrl)}:${check.binding.httpsPort}`;
-  return { url, binding: check.binding, transport: o.transportFor(check.binding), joinKey: keys.join };
+  let host = carrier.hostHint, direct: DirectPackage | undefined;
+  if (res.direct) {
+    try { direct = openDirect(keys.direct, res.direct, { sessionId: o.sessionId, pairingId: start.pairingId }); }
+    catch { throw new TransferError('mitm', 'Secure pairing failed: the network package did not authenticate.'); }
+    if (!o.associate) throw Object.assign(new TransferError('direct_manual', `Join the Wi-Fi network ${direct.ssid}, then try again.`), { direct });
+    await o.associate(direct);
+    host = direct.host;
+  }
+  if (!host) throw new TransferError('unreachable', 'The host did not provide a network address.');
+  const url = `https://${host.includes(':') ? `[${host}]` : host}:${check.binding.httpsPort}`;
+  return { url, binding: check.binding, transport: o.transportFor(check.binding), joinKey: keys.join, direct };
 }
 
 export async function joinPaired(p: Paired & { joinKey: Uint8Array }, profile: { fullName: string; rollNo: string; deviceName: string }, device: DeviceSigner): Promise<PairedJoin> {
@@ -91,15 +155,18 @@ export async function joinPaired(p: Paired & { joinKey: Uint8Array }, profile: {
 export async function pairAndJoin(o: {
   candidates: Candidate[]; code: string; profile: { fullName: string; rollNo: string; deviceName: string }; device: DeviceSigner;
   opaque: OpaqueClient; plainFetch?: (u: string, i?: RequestInit) => Promise<Response>; transportFor(binding: TlsBinding): Transport;
+  /** Extra bootstrap carriers (BLE hosts found nearby). Tried in parallel with the LAN candidates; OPAQUE picks ours. */
+  carriers?: BootstrapCarrier[]; associate?: DirectAssociator;
 }): Promise<PairedJoin> {
   if (!/^\d{6}$/.test(o.code)) throw new TransferError('invalid', 'Enter the 6-digit classroom code.');
-  if (o.candidates.length === 0) throw new TransferError('none_found', 'No classrooms found on this network yet. Make sure you are on the same Wi-Fi as the teacher.');
+  if (o.candidates.length === 0 && !o.carriers?.length) throw new TransferError('none_found', 'No classrooms found on this network yet. Make sure you are on the same Wi-Fi as the teacher.');
   const f = o.plainFetch ?? ((u, i) => fetch(u, i));
   const errors: TransferError[] = [];
-  const attempts = o.candidates.map(async (c) => {
+  const carriers = [...o.candidates.map((c) => httpCarrier(c.url, c.sid, f)), ...(o.carriers ?? [])];
+  const attempts = carriers.map(async (carrier) => {
     try {
-      const sid = c.sid ?? (await (await f(`${c.url}/api/info`)).json()).sessionId;
-      const paired = await pair({ bootstrapUrl: c.url, sessionId: String(sid), code: o.code, opaque: o.opaque, plainFetch: f, transportFor: o.transportFor });
+      const sid = await carrier.sessionId();
+      const paired = await pair({ carrier, sessionId: sid, code: o.code, opaque: o.opaque, transportFor: o.transportFor, associate: o.associate });
       return await joinPaired(paired, o.profile, o.device);
     } catch (e) {
       const err = e instanceof TransferError ? e : Object.assign(new TransferError('unreachable', 'Could not reach the classroom securely.'), { cause: e });
@@ -111,10 +178,10 @@ export async function pairAndJoin(o: {
     return await Promise.any(attempts);
   } catch {
     // Most informative first: an attack or lockout matters more than "wrong code at some other classroom".
-    const order = ['mitm', 'throttled', 'locked', 'ended', 'blocked', 'too_many_pending'];
+    const order = ['mitm', 'direct_manual', 'direct_denied', 'throttled', 'locked', 'ended', 'blocked', 'too_many_pending'];
     for (const code of order) { const e = errors.find((x) => x.code === code); if (e) throw e; }
     const meaningful = errors.find((e) => e.code !== 'bad_code' && e.code !== 'unreachable');
-    throw meaningful ?? Object.assign(new TransferError('bad_code', errors.some((e) => e.code === 'bad_code') ? 'No classroom matches that code.' : 'Could not reach any classroom.'),
+    throw meaningful ?? Object.assign(new TransferError('bad_code', errors.some((e) => e.code === 'bad_code') ? 'No CLAN matches that code.' : 'Could not reach any CLAN.'),
       { cause: errors.find((e) => e.cause)?.cause });
   }
 }
