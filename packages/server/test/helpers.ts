@@ -4,7 +4,7 @@ import { pairAndJoin, type DeviceSigner, type Transport } from '@classroom/clien
 import { newEd25519, nodeSigner, pinnedTransport } from '@classroom/client/node';
 
 /** A fresh Ed25519 device identity. */
-export const device = (): DeviceSigner & { privatePkcs8: string } => { const k = newEd25519(); return { ...nodeSigner(k.privatePkcs8), privatePkcs8: k.privatePkcs8 }; };
+export const device = (): { publicKey: string; sign(bytes: Uint8Array): string; privatePkcs8: string } => { const k = newEd25519(); return { ...nodeSigner(k.privatePkcs8), privatePkcs8: k.privatePkcs8 }; };
 export const names = (n = 1) => ({ fullName: `Student ${n}`, rollNo: `FA23-CS-${100 + n}`, deviceName: `Laptop-${n}` });
 export const profile = (n = 1, d: DeviceSigner = device()): StudentProfile => ({ ...names(n), devicePublicKey: d.publicKey });
 
@@ -132,4 +132,51 @@ export async function cuttingProxy(target: string, cutAfter: number, dir: 'down'
     wasCut: () => cut,
     close: () => { socks.forEach((s) => s.destroy()); return new Promise<void>((r) => srv.close(() => r())); },
   };
+}
+
+// ---- Milestone 2.5 attacker tooling ----
+import { request as httpRequest, createServer as createHttpServer } from 'node:http';
+import { createServer as createTlsServer, connect as tlsConnect } from 'node:tls';
+import { createClassroomTls } from '../src/tls.ts';
+
+/**
+ * Attacker HTTP relay in front of a classroom's plaintext bootstrap. `rewrite` may alter JSON responses
+ * (e.g. the TLS binding) before they reach the student.
+ */
+export async function bootstrapRelay(target: string, rewrite: (path: string, body: any) => any = (_p, b) => b) {
+  const t = new URL(target);
+  const srv = createHttpServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const up = httpRequest({ host: t.hostname, port: t.port, path: req.url, method: req.method, headers: req.headers }, (ur) => {
+        const rc: Buffer[] = [];
+        ur.on('data', (c) => rc.push(c));
+        ur.on('end', () => {
+          let body = Buffer.concat(rc).toString();
+          try { body = JSON.stringify(rewrite(req.url!, JSON.parse(body))); } catch {}
+          res.writeHead(ur.statusCode!, { 'content-type': 'application/json' }).end(body);
+        });
+      });
+      up.end(Buffer.concat(chunks));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return { url: `http://127.0.0.1:${(srv.address() as { port: number }).port}`, close: () => new Promise<void>((r) => srv.close(() => r())) };
+}
+
+/** Active MITM: terminates TLS with its OWN certificate and re-encrypts to the real server. */
+export async function tlsInterceptor(target: string) {
+  const t = new URL(target);
+  const fake = await createClassroomTls('attacker');
+  let intercepted = 0;
+  const srv = createTlsServer({ cert: fake.certPem, key: fake.keyPem }, (client) => {
+    const up = tlsConnect({ host: t.hostname, port: Number(t.port), rejectUnauthorized: false });
+    client.pipe(up).pipe(client);
+    const end = () => { client.destroy(); up.destroy(); };
+    client.on('error', end); up.on('error', end);
+  });
+  srv.on('connection', () => { intercepted++; }); // TCP reached the attacker (the TLS handshake then fails client-side)
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return { url: `https://127.0.0.1:${(srv.address() as { port: number }).port}`, fake, intercepted: () => intercepted, close: () => new Promise<void>((r) => srv.close(() => r())) };
 }

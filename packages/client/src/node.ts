@@ -30,7 +30,7 @@ export function pinnedTransport(pin: Pick<TlsBinding, 'certificate' | 'spkiSha25
   const tls = { ca, checkServerIdentity, minVersion: 'TLSv1.3' as const, rejectUnauthorized: true };
   const dispatcher = new Agent({ connect: tls });
   return {
-    fetch: (url, init) => { assertSecureUrl(url); return undiciFetch(url, { ...(init as object), dispatcher }) as unknown as Promise<Response>; },
+    fetch: async (url, init) => { assertSecureUrl(url); return undiciFetch(url, { ...(init as object), dispatcher }) as unknown as Promise<Response>; },
     // @types/ws mistypes checkServerIdentity (boolean); at runtime ws hands these to Node's tls.connect.
     openWebSocket: (url) => { assertSecureUrl(url); return new WebSocket(url, { ...tls, maxPayload: 1 << 20 } as unknown as WebSocket.ClientOptions) as unknown as WebSocketLike; },
   };
@@ -44,7 +44,7 @@ export function newEd25519(): { privatePkcs8: string; publicKey: string } {
 }
 /** Raw 32-byte public key from a KeyObject (the last 32 bytes of the Ed25519 SPKI DER), base64url. */
 export const rawEd25519Public = (k: KeyObject) => b64u.encode(new Uint8Array(k.export({ type: 'spki', format: 'der' }).subarray(-32)));
-export function nodeSigner(privatePkcs8: string): DeviceSigner {
+export function nodeSigner(privatePkcs8: string): { publicKey: string; sign(bytes: Uint8Array): string } {
   const key = createPrivateKey({ key: Buffer.from(privatePkcs8, 'base64'), format: 'der', type: 'pkcs8' });
   return { publicKey: rawEd25519Public(createPublicKey(key)), sign: (bytes) => b64u.encode(new Uint8Array(edSign(null, bytes, key))) };
 }

@@ -53,7 +53,7 @@ export class Classroom extends EventEmitter {
   constructor(db: Db, title: string, networkMode: NetworkMode, opts: { now?: () => number; code?: string } = {}) {
     super();
     this.db = db; this.title = title; this.networkMode = networkMode;
-    this.now = opts.now ?? Date.now;
+    this.now = opts.now ?? (() => Date.now());
     this.code = opts.code ?? newJoinCode();
     this.ipThrottle = new Throttle(5, 5 * 60_000, 5 * 60_000, this.now);
     this.globalThrottle = new Throttle(50, 60_000, 60_000, this.now);
