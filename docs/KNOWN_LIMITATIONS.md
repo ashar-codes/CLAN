@@ -7,7 +7,12 @@
 * Downloads are served by the teacher only (no peer redistribution); throughput is bounded by the teacher's Wi-Fi link.
 * Download progress shown to the teacher is self-reported by students.
 * Strict Range handling: multi-range or malformed `Range` headers get 416 rather than a full 200.
-* LAN traffic (including files and submissions) is unencrypted; device identity is a UUID, not a key; receipts are unsigned (SECURITY.md).
+* **Phones cannot join in this build**: no React Native OPAQUE binding is compatible with the teacher's OPAQUE 1.1, and the pinned native transport isn't written. (Before 2.5 mobile spoke plaintext HTTP; that path no longer exists.)
+* Joining takes ~0.2–0.4 s of client CPU for OPAQUE key stretching (Argon2id); the teacher process holds ~75 MB of extra WASM memory after registering the class code.
+* Replacing a laptop, reinstalling, or losing the OS keychain item creates a new device key: the teacher must approve it again. Likewise a new teacher computer/key triggers a warning for students.
+* A changed LAN IP mid-class needs a class restart (new code, new certificate); students pair again.
+* Classroom certificates last 24 h; a class running longer is ended automatically.
+* Real-Wi-Fi measurements still pending; `lan-bench` measures raw LAN capacity in a browser (it cannot exercise the pinned TLS path).
 * Direct Mode: not implemented on Windows yet; impossible through supported APIs on macOS.
 * Networks with client isolation cannot work in LAN Mode.
 * Session tokens are in memory: restarting the student app means re-entering the code (an already-approved device is

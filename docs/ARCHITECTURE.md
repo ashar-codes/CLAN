@@ -3,7 +3,7 @@
 ```
  Teacher laptop (Electron)                                   Students (Electron / iOS / Android)
  ┌───────────────────────────────────────────┐               ┌─────────────────────────────┐
- │ Renderer (React)  ──IPC──  Main process    │               │ UI                          │
+ │ Renderer (React)  ──IPC──  Main process    │   (pairing, keys, pins, file I/O in main)               │ UI                          │
  │   teacher dashboard        │               │   DNS-SD      │  @classroom/client          │
  │   uses WS w/ teacher token ├─ Fastify HTTP ◄───browse──────┤   joinByCode() ─POST /api/join
  │                            ├─ WebSocket /ws ◄──────────────┤   ClassroomConnection (WS)  │
@@ -28,7 +28,15 @@
   sanitized name for submissions) and re-checked to stay inside the root.
 * **Desktop file I/O is main-process only.** The renderer passes opaque ids (resource ids, dialog pick ids), never paths.
 * **Bind narrowly.** The server listens on the selected classroom interface address only, not `0.0.0.0`.
+* **Two listeners.** Plaintext *bootstrap* (DNS-SD target) serves only OPAQUE pairing; *HTTPS* (TLS 1.3, per-class CA + leaf)
+  serves every classroom API and WSS. Clients learn the HTTPS port, CA and leaf pin only from the OPAQUE-authenticated binding
+  ([PAIRING_AND_TRUST.md](PAIRING_AND_TRUST.md)).
+* **Identities in the OS keystore.** Device key, teacher signing key and OPAQUE server setup are `safeStorage`-encrypted
+  (`apps/desktop/src/main/keystore.ts`). The server package takes the teacher identity as an option and never touches storage.
+* **Pinning in two stacks.** Node-side requests (downloads, uploads, pairing in main) use `pinnedTransport` (undici + ws trusting
+  only the session CA + SPKI pin); renderer WSS goes through Chromium, constrained by `session.setCertificateVerifyProc`
+  (`apps/desktop/src/main/trust.ts`) to the same pins. The `Transport` interface is the seam for the future mobile native transport.
 * **Teacher UI uses the same API as students** (with a teacher token handed over IPC), so there is exactly one
   authorization path.
 
-Planned (not built): LiveKit sidecar for media (M4), Windows Direct Mode (M3), transport encryption + device keys (before M3). See PROGRESS.md.
+Planned (not built): mobile OPAQUE binding + pinned native transport, LiveKit sidecar for media (M4), Windows Direct Mode (M3). See PROGRESS.md.

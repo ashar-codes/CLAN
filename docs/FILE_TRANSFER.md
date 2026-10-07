@@ -1,4 +1,10 @@
-# File transfer (Milestone 2 — implemented)
+# File transfer (Milestone 2, over TLS since Milestone 2.5)
+
+All endpoints below are served only on the HTTPS listener (TLS 1.3, pinned per-class certificate — see PAIRING_AND_TRUST.md).
+The file domain (`resources.ts`, `assignments.ts`) did not change for 2.5; only the transport did. Range/If-Range/ETag,
+`.partial` resume, backpressure, SHA-256 verification, idempotent resumable uploads and rate limits behave exactly as below
+(all 39 Milestone 2 file/assignment tests pass unchanged over TLS, including the 100 MB resume after a TCP cut). TLS adds no
+buffering: responses are still streamed; server RSS stays flat across scenarios (BENCHMARKS.md). Receipts are now signed.
 
 Code: `packages/server/src/{storage,resources,assignments,server}.ts`, `packages/client/src/{index,node}.ts`,
 desktop `apps/desktop/src/main/student.ts`, mobile `apps/mobile/src/transfers.ts`.
@@ -32,7 +38,9 @@ desktop `apps/desktop/src/main/student.ts`, mobile `apps/mobile/src/transfers.ts
    are swept at next start.
 
 Desktop downloads land in `~/Downloads/Classroom LAN/<class>/` (`CLASSROOM_DOWNLOADS_DIR` overrides, used by tests).
-"Open" is offered only for an allowlist of document/media types; everything else is "Show in folder". Concurrency per
+"Open" is offered only for PDF, text/CSV/Markdown, images, audio/video and modern non-macro Office/ODF (`docx pptx xlsx odt odp ods`);
+legacy/macro-enabled Office, executables, scripts, archives and unknown types are "Show in folder" only. A matching hash
+proves integrity (the teacher's exact file), not safety. Concurrency per
 student app: 2 downloads; queue beyond that.
 
 ## Students → teacher (assignment submissions)
@@ -50,7 +58,7 @@ Resumable, idempotent, tus-like protocol (no custom crypto, no base64):
 3. When `offset == size` the server (still holding the per-upload lock) re-hashes the temp file; mismatch → `422`, temp
    deleted, attempt `failed`. Match → atomic rename to `storage/submissions/<session>/<submission>/<sanitized name>`,
    submission row + upload state in one transaction, **server time** as `submittedAt`, `late` computed server-side.
-4. Response contains the **receipt**; desktop stores it in `<userData>/receipts/<submissionId>.json`, mobile in
+4. Response contains the **Ed25519-signed receipt**; the client verifies it against the teacher key from pairing, then stores it in `<userData>/receipts/<submissionId>.json`, mobile in
    `Documents/Classroom LAN/receipts/`. Resubmitting with a new key creates **version n+1**; nothing is overwritten.
 
 Clients persist the idempotency key per intended submission (session + assignment + file + size) before uploading, so a
@@ -70,6 +78,8 @@ re-sends from byte 0** on retry (Expo's `uploadAsync` can't start mid-file) — 
 | Files / assignments per session | 1000 / 200 |
 | Transfer idle timeout (no bytes moving) | 60 s → socket destroyed, slot freed |
 | JSON body / WS message | 16 KB / 64 KB |
+| Unfinished pairing attempts per source address | 4 (`pairInflightPerSource`) |
+| Reconnect challenges per address per minute | 30 |
 
 There is no total-time limit on transfers (`requestTimeout: 0`), so large lecture videos on slow Wi-Fi are fine; only *idle* transfers are cut.
 Open file descriptors are bounded by the concurrency caps (one fd per active transfer).

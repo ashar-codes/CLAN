@@ -2,8 +2,10 @@
 
 ## LAN Mode (implemented, Windows/macOS/Linux teacher)
 1. Teacher picks a network adapter (auto: private IPv4, Wi-Fi first; VPN/virtual adapters skipped).
-2. Server binds that address on a random free port and advertises `_classroomlan._tcp` via DNS-SD on that interface.
-3. Students browse, POST the code to each classroom found, and the matching one answers.
+2. Server binds that address: a plaintext bootstrap port (advertised via DNS-SD, OPAQUE only) and an HTTPS port (learned only
+   from the OPAQUE-authenticated binding).
+3. Students browse and run OPAQUE with the code against each classroom found; the one where OPAQUE succeeds is theirs
+   (discovery is never trusted — see PAIRING_AND_TRUST.md).
 4. Fallback: the student "Can't find the class?" panel explains client isolation / firewall issues and accepts the
    address shown on the teacher's Network card. Ordinary users never need it.
 
