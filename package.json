@@ -14,7 +14,7 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json && tsc -p apps/desktop/tsconfig.json && tsc -p apps/mobile/tsconfig.json",
     "lint": "pnpm typecheck",
-    "benchmark": "node tools/sim/bench.ts",
+    "benchmark": "node tools/sim/bench.ts && node tools/sim/bench-files.ts",
     "build:desktop": "pnpm --filter @classroom/desktop build",
     "dist:desktop": "pnpm --filter @classroom/desktop dist",
     "build:android": "pnpm --filter @classroom/mobile build:android",
