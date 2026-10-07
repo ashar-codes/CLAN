@@ -1,5 +1,32 @@
 # Architecture
 
+## CLAN (modular monolith)
+
+```
+apps/desktop  (shell: Home / CLANs / Study / Saved / Me + classroom flows)
+  renderer ──preload API──► main: registerClan() ─► @clan/core openClan(db)        @classroom/server (classroom protocol)
+                                                     │ composition root                │ sessions, members, resources,
+            core: db (module migrations) · events · identity · permissions ·          │ assignments, submissions …
+                  resources (Resource Store) · search · context (AI) · contracts      │
+            modules: clans · files · notes · saved · diary · reminders · share        │
+                     (+ contracts.ts: chat, tasks, courses, exams, flashcards, …)     │
+            ──────────────── one SQLite file per device (teacher.db) ────────────────┘
+packages/design (tokens + components, no data access) · packages/world (lazy 3D scenes, view models only)
+```
+
+* **Dependency rules** (enforced by `packages/clan/test/boundaries.test.ts`): core never imports modules; a module imports
+  core and other modules' `index.ts` only; a module's SQL names only its own `<prefix>_` tables (migrations refuse anything
+  else); the only readers of classroom tables are `clans/classroom-import.ts` and `files/classroom-adopt.ts`, read-only;
+  UI packages never import backend packages; the renderer reaches CLAN only through the preload API.
+* **Composition root** `packages/clan/src/index.ts` is the one file that knows every module.
+* **Communication**: direct calls to public APIs for queries/commands, typed domain events for reactions
+  ([EVENTS.md](EVENTS.md)), explicit references for shared content ([RESOURCE_STORE.md](RESOURCE_STORE.md)), permission-aware
+  queries everywhere ([PRIVACY_MODEL.md](PRIVACY_MODEL.md)). Module list and legacy names: [MODULES.md](MODULES.md).
+* **The classroom stack is unchanged.** CLAN reads its history; the classroom server still owns sessions, pairing, TLS,
+  transfers, assignments and receipts.
+
+## Classroom transport (milestones 0–2.75)
+
 ```
  Teacher laptop (Electron)                                   Students (Electron / iOS / Android)
  ┌───────────────────────────────────────────┐               ┌─────────────────────────────┐

@@ -1,0 +1,8 @@
+{
+  "name": "@clan/core",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@classroom/protocol": "workspace:*", "zod": "^4.6.5" },
+  "devDependencies": { "@classroom/server": "workspace:*" }
+}

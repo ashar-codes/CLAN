@@ -8,6 +8,9 @@
 | 2.5 — secure pairing (OPAQUE), TLS bound to the PAKE, Ed25519 device + teacher identity, signed receipts | ✅ done for desktop (dev + packaged macOS E2E); mobile blocked on a compatible OPAQUE binding (documented) |
 | 2.6 — secure mobile join (official OPAQUE WASM in isolated WebView, native pinned TLS) | ✅ implemented; bridge verified in Chromium, iOS trust code verified on Apple Security; **no device run** |
 | 2.75 — multi-mode architecture, peer-assisted distribution (control vs data plane) | ✅ done: manifests, endorsements, capabilities, swarm, Teacher-only ↔ Peer-assisted switching; 3-app desktop E2E (dev + packaged); 60/100-client benchmarks; real-Wi-Fi not yet measured |
+| CLAN rename | ✅ product-facing name CLAN; legacy identifiers kept and listed in MODULES.md |
+| CLAN Phase 1 — visual exploration | ✅ Visual Lab, 8 screens, design system, lazy 3D, screenshots, perf (design/VISUAL-LAB.md) |
+| CLAN Phase 2 — modular foundation | ✅ @clan/core: core services, 6 product modules + contracts, classroom→CLAN migration, privacy/AI context, shell (Home/CLANs/Study/Saved/Me) |
 | 3 — Windows Direct Mode, auto Wi-Fi join | not started |
 | 4 — LiveKit, screen/window sharing, student presenting | not started |
 | 5 — PDF sync presentation, notes, bookmarks | not started |

@@ -102,7 +102,7 @@ describe('classroom membership', () => {
     // Distributed guessing: 50 failures across many sources locks the classroom briefly.
     for (let i = 0; i < 50; i++) { try { attempt('000001', `bot${i}`); } catch {} }
     expect(() => attempt('123456', 'fresh-ip')).toThrowError(expect.objectContaining({ code: 'throttled' }));
-  });
+  }, 60_000); // ~70 real OPAQUE logins: CPU-bound, slow when every test file runs in parallel
 
   it('policies: open auto-approves, known approves previously approved devices', () => {
     const { c } = setup();

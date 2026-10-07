@@ -1,0 +1,70 @@
+// CLAN services for the desktop shell. Every call acts as this device's local user; the renderer never chooses a user.
+import { ipcMain } from 'electron';
+import { z } from 'zod';
+import { openClan, CLAN_TYPES, AI_GRANTEE, type ClanApp } from '@clan/core';
+import type { HomeView } from '../shared.ts';
+
+const Id = z.uuid();
+const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const ACTIVITY: Record<string, string> = { CLANCreated: 'CLAN created', MemberJoined: 'CLAN membership added', NoteCreated: 'Note written', NoteShared: 'Note shared', SavedItemAdded: 'Link saved', SavedItemShared: 'Link shared', ResourceShared: 'File added', ReminderCreated: 'Reminder set' };
+
+export function registerClan(db: Parameters<typeof openClan>[0], storageDir: string, localName: () => string | undefined): ClanApp {
+  const c = openClan(db, { storageDir, localName: localName() });
+  const me = { kind: 'user' as const, userId: c.me };
+  const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
+
+  handle('clan:home', (): HomeView => {
+    const now = Date.now();
+    const recent = c.db.prepare(`SELECT type, ts FROM core_events WHERE type IN (${Object.keys(ACTIVITY).map(() => '?').join(',')}) ORDER BY seq DESC LIMIT 8`).all(...Object.keys(ACTIVITY)) as { type: string; ts: number }[];
+    return {
+      me: { name: c.identity.displayName(c.me) ?? 'Me' },
+      clans: c.clans.list(c.me).map((x) => ({ id: x.id, name: x.name, type: x.type, members: c.clans.members(x.id).filter((m) => m.status === 'active').length })),
+      continueNotes: c.notes.mine(me, 3).map((n) => ({ id: n.id, title: n.title, updatedAt: n.updatedAt })),
+      deadlines: c.reminders.upcoming(me, now + 14 * 86_400_000),
+      inbox: c.saved.items(me, c.saved.inbox(me)).slice(0, 5),
+      activity: recent.map((r) => ({ label: ACTIVITY[r.type]!, ts: r.ts })),
+      aiProvider: null,
+    };
+  });
+
+  handle('clan:list', () => c.clans.list(c.me));
+  handle('clan:create', (raw) => {
+    const a = z.object({ type: z.enum(CLAN_TYPES).exclude(['CLASSROOM']), name: z.string(), expiresAt: z.number().int().optional() }).parse(raw);
+    return c.clans.create({ ...a, createdBy: c.me });
+  });
+  handle('clan:detail', (id) => {
+    const clan = c.clans.get(Id.parse(id));
+    if (!clan || !c.clans.isActiveMember(clan.id, c.me)) throw new Error('Not found.');
+    return {
+      clan, members: c.clans.members(clan.id).filter((m) => m.status === 'active').map((m) => ({ userId: m.userId, name: m.displayName ?? 'Someone', role: m.role })),
+      sessions: c.clans.sessionsOf(clan.id).length, files: c.files.list(me, { kind: 'clan', clanId: clan.id }),
+      notes: c.notes.inClan(me, clan.id).map((n) => ({ id: n.id, title: n.title, mine: n.ownerId === c.me })), saved: c.saved.inClan(me, clan.id),
+    };
+  });
+
+  handle('notes:mine', () => c.notes.mine(me, 200));
+  handle('notes:create', (raw) => c.notes.create(me, z.object({ title: z.string(), body: z.string().optional() }).parse(raw)));
+  handle('notes:update', (id, raw) => c.notes.update(me, Id.parse(id), z.object({ title: z.string().optional(), body: z.string().optional() }).parse(raw)));
+  handle('notes:remove', (id) => c.notes.remove(me, Id.parse(id)));
+  handle('notes:share', (id, clanId, on) => c.notes.share(me, Id.parse(id), Id.parse(clanId), z.boolean().parse(on)));
+
+  handle('saved:collections', () => c.saved.collections(me));
+  handle('saved:items', () => c.saved.items(me));
+  handle('saved:add', (raw) => c.saved.add(me, z.object({ url: z.string(), title: z.string().optional(), note: z.string().optional(), tags: z.array(z.string()).optional(), collectionId: Id.optional() }).parse(raw)));
+  handle('saved:collection', (name) => c.saved.createCollection(me, z.string().parse(name)));
+  handle('saved:move', (id, col) => c.saved.move(me, Id.parse(id), Id.parse(col)));
+  handle('saved:share', (id, clanId, on) => c.saved.share(me, Id.parse(id), Id.parse(clanId), z.boolean().parse(on)));
+
+  handle('diary:day', (day) => c.diary.day(me, Day.parse(day)));
+  handle('diary:write', (raw) => c.diary.write(me, z.object({ day: Day, body: z.string(), mood: z.string().nullable().optional() }).parse(raw) as never));
+  handle('diary:recent', () => c.diary.recent(me, 14));
+
+  handle('reminders:create', (raw) => c.reminders.create(me, z.object({ text: z.string(), dueAt: z.number().int(), target: z.object({ module: z.string(), id: z.string() }).optional() }).parse(raw)));
+  handle('reminders:done', (id) => c.reminders.done(me, Id.parse(id)));
+
+  handle('search', (q) => c.search.query(me, z.string().max(200).parse(q)));
+  handle('me:rename', (name) => c.identity.rename(c.me, z.string().trim().min(1).max(80).parse(name)));
+  handle('privacy:get', () => ({ aiDiary: c.permissions.hasGrant(c.me, AI_GRANTEE, 'diary') }));
+  handle('privacy:aiDiary', (on) => (z.boolean().parse(on) ? c.permissions.grant(c.me, AI_GRANTEE, 'diary') : c.permissions.revoke(c.me, AI_GRANTEE, 'diary')));
+  return c;
+}

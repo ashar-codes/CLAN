@@ -58,3 +58,25 @@ is kept as `legacyDeviceId` and ignored), `paired-sessions.json` (session id →
 
 Student devices: desktop stores the profile + persistent random `deviceId` in `<userData>/profile.json`; mobile stores
 them in `expo-secure-store`. Session tokens are held in memory only.
+
+## CLAN tables (same device database, owned per module)
+
+| Entity | Table | Source of truth / notes |
+|---|---|---|
+| User | `identity_users` | display name; the local user is `identity_local` |
+| Device | `identity_devices` | key fingerprint (or `legacy-device:<uuid>` for pre-2.5 members) → user |
+| CLAN | `clans_clans` | id, type, name, expiry. CLASSROOM CLANs keep the id of the course's first session |
+| Membership | `clans_memberships` | role + status; classroom participants linked row-by-row in `clans_classroom_members` |
+| Resource | `resources_objects` + `resources_refs` | content once (SHA-256); uses are refs with a scope |
+| Note | `notes_notes` (+ `notes_shares` references) | |
+| SavedItem / SavedCollection | `saved_items` / `saved_collections` (+ `saved_shares`) | links + metadata only |
+| Reminder | `reminders_reminders` | target = (module, id) reference |
+| Diary entry | `diary_entries` | owner only |
+| AIContextReference | not stored | returned by the ContextBroker |
+| Course, Exam, Task, Recording, ChatThread, Message | — | contracts only (`modules/contracts.ts`) |
+| Search index | `search_docs` | projection; `SearchIndex.rebuild()` recreates it from module providers |
+| Event log | `core_events`, `core_consumed` | append-only; consumer progress |
+
+**No duplicated business data**: classroom facts stay in classroom tables (file names are read from `resources`, never
+copied); a CLASSROOM CLAN's `name` starts as the course title and is the CLAN's own name thereafter (session titles remain
+the historical title of each meeting). Events carry ids, never note/diary text.

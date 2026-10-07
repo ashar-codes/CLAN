@@ -15,6 +15,7 @@ import { candidateInterfaces, openDb, startClassroomServer, type RunningServer }
 import { browse } from '@classroom/server/discovery';
 import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroom } from '../shared.ts';
 import { StudentFiles } from './student.ts';
+import { registerClan } from './clan.ts';
 import type { ResourceView } from '@classroom/protocol';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,8 @@ let server: RunningServer | null = null;
 let keystore: Keystore;
 let trust: Trust;
 const db = () => (dbHandle ??= openDb(join(app.getPath('userData'), 'teacher.db')));
-let dbHandle: ReturnType<typeof openDb> | undefined;
+let dbHandle: ReturnType<typeof openDb> | undefined; // legacy file name; it is this device's database
+let clan: ReturnType<typeof registerClan>;
 
 function capabilities(): Capabilities {
   const directReason: Record<string, string> = {
@@ -124,7 +126,7 @@ function registerIpc() {
     server.classroom.setPolicy(a.policy);
     return { url: server.url, code: server.classroom.code, teacherToken: server.classroom.teacherToken, title: a.title, host, iface: ifaces.find((i) => i.address === host)!.name };
   });
-  ipcMain.handle('teacher:stop', async () => { await server?.close(); server = null; });
+  ipcMain.handle('teacher:stop', async () => { await server?.close(); server = null; clan.syncClassrooms(); });
 
   ipcMain.handle('teacher:addFiles', async (e) => {
     if (!server) throw new Error('Start a class first.');
@@ -204,6 +206,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
   process.on('uncaughtException', (e) => logError('main', e));
   registerIpc();
+  clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

@@ -6,6 +6,13 @@ network with a 6-digit code — is the CLASSROOM CLAN type. **No internet is req
 
 Internal identifiers that still say `classroom` are kept on purpose — see [Legacy names](docs/MODULES.md#legacy-names).
 
+**CLAN layer** (`packages/clan`, modular monolith on the device database): CLANs of five types, Personal Space, notes, saved
+links, a private diary, reminders, a content-addressed Resource Store, typed events, permission-filtered search and an AI
+Context API that denies Diary unless granted. Existing classrooms are imported as CLASSROOM CLANs with their ids and history.
+Docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [MODULES](docs/MODULES.md) · [DATA_MODEL](docs/DATA_MODEL.md) ·
+[EVENTS](docs/EVENTS.md) · [RESOURCE_STORE](docs/RESOURCE_STORE.md) · [PRIVACY_MODEL](docs/PRIVACY_MODEL.md) ·
+[PROGRESS](docs/PROGRESS.md) · [Visual language](design/VISUAL-LANGUAGE.md) · Visual Lab: `pnpm lab`.
+
 > Status: Milestones 0–2.75. Desktop: LAN Mode, secure pairing (OPAQUE + pinned TLS + Ed25519 identities), files and
 > assignments with signed receipts, and **peer-assisted distribution** (teacher-signed manifests; the teacher stays the only
 > authority — [docs/PEER_ASSISTED_MODE.md](docs/PEER_ASSISTED_MODE.md)). Mobile: secure join and peer downloads implemented,

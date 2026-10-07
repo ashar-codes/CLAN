@@ -2,6 +2,8 @@ import type { DiscoveredClassroom } from '@classroom/server/discovery';
 import type { Iface } from '@classroom/server';
 import type { ClassroomInfo, JoinPolicy, MemberStatus, Receipt, ResourceView, StudentProfile, TransferState } from '@classroom/protocol';
 import type { KeystoreStatus } from './main/keystore.ts';
+import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem } from '@clan/core';
+export type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem };
 
 export type Capabilities = {
   platform: string;
@@ -28,8 +30,53 @@ export type FileState = { resourceId: string; state: TransferState; bytes: numbe
 export type Conn = { url: string; token: string; sessionId: string; classTitle: string };
 export type PastClass = { sessionId: string; title: string; startedAt: number; endedAt: number | null; files: number; submissions: number };
 
+export type HomeView = {
+  me: { name: string };
+  clans: { id: string; name: string; type: ClanType; members: number }[];
+  continueNotes: { id: string; title: string; updatedAt: number }[];
+  deadlines: Reminder[];
+  inbox: SavedItem[];
+  activity: { label: string; ts: number }[];
+  /** No AI provider ships yet; the Guide entry says so instead of pretending. */
+  aiProvider: null;
+};
+export type ClanDetail = {
+  clan: Clan; members: { userId: string; name: string; role: string }[]; sessions: number; files: FileView[];
+  notes: { id: string; title: string; mine: boolean }[]; saved: SavedItem[];
+};
+export type SearchHit = { module: string; entityId: string; title: string; snippet: string };
+
+/** CLAN services (window.classroom.clan). */
+export type ClanApi = {
+  home(): Promise<HomeView>;
+  list(): Promise<Clan[]>;
+  create(a: { type: Exclude<ClanType, 'CLASSROOM'>; name: string; expiresAt?: number }): Promise<Clan>;
+  detail(id: string): Promise<ClanDetail>;
+  notes(): Promise<Note[]>;
+  createNote(a: { title: string; body?: string }): Promise<Note>;
+  updateNote(id: string, a: { title?: string; body?: string }): Promise<Note>;
+  removeNote(id: string): Promise<void>;
+  shareNote(id: string, clanId: string, on: boolean): Promise<void>;
+  collections(): Promise<Collection[]>;
+  savedItems(): Promise<SavedItem[]>;
+  save(a: { url: string; title?: string; note?: string; tags?: string[]; collectionId?: string }): Promise<SavedItem>;
+  createCollection(name: string): Promise<string>;
+  moveSaved(id: string, collectionId: string): Promise<void>;
+  shareSaved(id: string, clanId: string, on: boolean): Promise<void>;
+  diaryDay(day: string): Promise<DiaryEntry | null>;
+  writeDiary(a: { day: string; body: string; mood?: string | null }): Promise<DiaryEntry>;
+  diaryRecent(): Promise<DiaryEntry[]>;
+  remind(a: { text: string; dueAt: number; target?: { module: string; id: string } }): Promise<Reminder>;
+  reminderDone(id: string): Promise<void>;
+  search(q: string): Promise<SearchHit[]>;
+  rename(name: string): Promise<void>;
+  privacy(): Promise<{ aiDiary: boolean }>;
+  setAiDiary(on: boolean): Promise<void>;
+};
+
 /** API exposed by the preload as window.classroom. */
 export type DesktopApi = {
+  clan: ClanApi;
   capabilities(): Promise<Capabilities>;
   getProfile(): Promise<OwnProfile>;
   saveProfile(p: Pick<StudentProfile, 'fullName' | 'rollNo' | 'deviceName'>): Promise<OwnProfile>;
