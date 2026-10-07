@@ -42,6 +42,22 @@ describe('active MITM on pairing and transport', () => {
     await expect(pairVia(s.bootstrapUrl, s)).rejects.toMatchObject({ code: 'throttled' });
   });
 
+  it('guessing without finishing: concurrent attempts are capped and unfinished ones count when they expire', async () => {
+    const s = await start();
+    await opaque.ready;
+    const startOnly = async () => {
+      const l = opaque.client.startLogin({ password: '000000' });
+      return fetch(`${s.bootstrapUrl}/api/pair/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, sessionId: s.classroom.id, startLoginRequest: l.startLoginRequest }) });
+    };
+    for (let i = 0; i < 4; i++) expect((await startOnly()).status).toBe(200); // attacker tests guesses offline from KE2, never finishes
+    expect((await startOnly()).status).toBe(429); // 5th concurrent unfinished attempt refused
+    const t0 = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(t0 + 61_000);
+    expect((await startOnly()).status).toBe(200); // the 4 expired attempts were counted as failures (4 < 5)
+    vi.spyOn(Date, 'now').mockReturnValue(t0 + 122_000);
+    await expect(secureJoin(s)).rejects.toMatchObject({ code: 'throttled' }); // 5th failure counted on expiry -> locked out
+  });
+
   it('discovery points at a fake classroom: it cannot complete pairing without the code', async () => {
     const real = await start('482915');
     const fake = await start('999999', 'Operating Systems'); // attacker's own server, same name

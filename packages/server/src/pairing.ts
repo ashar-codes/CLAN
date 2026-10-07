@@ -12,6 +12,8 @@ import { JoinError } from './classroom.ts';
 export const PAIR_STATE_TTL_MS = 60_000;
 export const BINDING_TTL_MS = 2 * 60_000;
 const MAX_INFLIGHT = 500;
+/** Unfinished pairing attempts allowed per source address at once (each is a potential guess). */
+export const DEFAULT_PAIR_INFLIGHT_PER_SOURCE = 4;
 
 const identifiers = (sessionId: string) => ({ client: `classroom-lan/v1/student/${sessionId}`, server: `classroom-lan/v1/classroom/${sessionId}` });
 const nonce = () => b64u.encode(new Uint8Array(randomBytes(32)));
@@ -25,8 +27,8 @@ export type BindingInfo = Pick<TlsBinding, 'httpsPort' | 'spkiSha256' | 'certifi
 /**
  * One instance per classroom session. At creation the 6-digit code is registered as an OPAQUE "password" for
  * userIdentifier = sessionId under the teacher's long-lived OPAQUE server setup; afterwards only the registration
- * record is kept. Each /pair/start is one online guess and is counted by the classroom throttles; a completed
- * pairing is forgiven.
+ * record is kept. Every attempt that does not complete (wrong code -> client aborts, finish fails, or it simply
+ * expires) is counted by the classroom throttles.
  */
 export class Pairing {
   private classroom: Classroom; private setup: string; private record: string; private info: () => BindingInfo; private now: () => number;
@@ -48,9 +50,17 @@ export class Pairing {
     return new Pairing(classroom, opaqueServerSetup, registrationRecord, info, now);
   }
 
+  inflightPerSource = DEFAULT_PAIR_INFLIGHT_PER_SOURCE;
+
+  private failed(source: string) {
+    this.classroom.ipThrottle.fail(source);
+    this.classroom.globalThrottle.fail('*');
+  }
+
   private sweep() {
     const t = this.now();
-    for (const [k, v] of this.started) if (v.expires < t) this.started.delete(k);
+    // An attempt that never finished counts as a guess: the client can test a code from the KE2 response alone.
+    for (const [k, v] of this.started) if (v.expires < t) { this.started.delete(k); this.failed(v.source); }
     for (const [k, v] of this.finished) if (v.expires < t) this.finished.delete(k);
     for (const [k, v] of this.challenges) if (v.expires < t) this.challenges.delete(k);
   }
@@ -60,14 +70,19 @@ export class Pairing {
     if (lock > 0) throw new JoinError(429, 'throttled', 'Too many attempts. Wait and try again.', lock);
   }
 
-  /** OPAQUE KE1 -> KE2. Counts as one guess until the pairing completes. */
+  /**
+   * OPAQUE KE1 -> KE2. Each start is one potential guess: it is counted as a failure if it is not completed
+   * (finish fails or it expires). Concurrent unfinished attempts are capped per source and globally, so guesses
+   * can't be parallelised beyond that before they start counting.
+   */
   start(source: string, sessionId: string, startLoginRequest: string): PairStartResponse {
     this.sweep();
     this.throttleCheck(source);
     this.classroom.assertJoinable();
     if (this.started.size >= MAX_INFLIGHT) throw new JoinError(429, 'busy', 'Too many people are joining right now. Try again shortly.');
-    this.classroom.ipThrottle.fail(source);
-    this.classroom.globalThrottle.fail('*');
+    let mine = 0;
+    for (const v of this.started.values()) if (v.source === source) mine++;
+    if (mine >= this.inflightPerSource) throw new JoinError(429, 'throttled', 'Too many attempts at once. Wait and try again.', PAIR_STATE_TTL_MS);
     // A wrong session id behaves exactly like a wrong code (OPAQUE fails on the client); no oracle either way.
     let res: { serverLoginState: string; loginResponse: string };
     try {
@@ -84,6 +99,14 @@ export class Pairing {
     return { pairingId, loginResponse };
   }
 
+  /** Honest client saw OPAQUE fail (wrong code): count it now and free the slot. */
+  abort(source: string, pairingId: string) {
+    const st = this.started.get(pairingId);
+    if (!st || st.source !== source) return;
+    this.started.delete(pairingId);
+    this.failed(source);
+  }
+
   /** OPAQUE KE3 -> authenticated TLS binding + device challenge. */
   finish(source: string, pairingId: string, finishLoginRequest: string): PairFinishResponse {
     this.sweep();
@@ -94,10 +117,9 @@ export class Pairing {
     try {
       ({ sessionKey } = opaque.server.finishLogin({ finishLoginRequest, serverLoginState: st.serverLoginState, identifiers: identifiers(this.classroom.id) }));
     } catch {
-      throw new JoinError(403, 'bad_code', 'Pairing failed.'); // the guess stays counted
+      this.failed(source);
+      throw new JoinError(403, 'bad_code', 'Pairing failed.');
     }
-    this.classroom.ipThrottle.forgive(source);
-    this.classroom.globalThrottle.forgive('*');
     const keys = derivePairingKeys(sessionKey);
     const t = this.now();
     const binding: TlsBinding = {

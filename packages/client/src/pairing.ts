@@ -45,8 +45,12 @@ export async function pair(o: {
   const { clientLoginState, startLoginRequest } = o.opaque.startLogin({ password: o.code });
   const start = await postJson<PairStartResponse>(f, `${o.bootstrapUrl}/api/pair/start`, { v: 1, sessionId: o.sessionId, startLoginRequest });
   const fin = o.opaque.finishLogin({ clientLoginState, loginResponse: start.loginResponse, password: o.code, identifiers: opaqueIdentifiers(o.sessionId) });
-  // undefined: the server could not prove knowledge of the code. Send nothing more; the attempt expires server-side.
-  if (!fin) throw new TransferError('bad_code', 'No classroom matches that code.');
+  // undefined: the server could not prove knowledge of the code (wrong code or impostor). Tell it we gave up, so an
+  // honest wrong guess is counted at once; nothing secret is sent.
+  if (!fin) {
+    await f(`${o.bootstrapUrl}/api/pair/abort`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, pairingId: start.pairingId }) }).catch(() => {});
+    throw new TransferError('bad_code', 'No classroom matches that code.');
+  }
   const res = await postJson<PairFinishResponse>(f, `${o.bootstrapUrl}/api/pair/finish`, { v: 1, pairingId: start.pairingId, finishLoginRequest: fin.finishLoginRequest });
   const keys = derivePairingKeys(fin.sessionKey);
   const check = verifyBinding(keys.binding, res, { sessionId: o.sessionId, pairingId: start.pairingId });

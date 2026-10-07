@@ -28,11 +28,6 @@ export class Throttle {
     if (this.hits.size > 10_000) this.prune();
   }
 
-  /** Undo the most recent failure for `key` (a pairing attempt that turned out to be legitimate). */
-  forgive(key: string): void {
-    this.hits.get(key)?.fails.pop();
-  }
-
   private prune() {
     const t = this.now();
     for (const [k, e] of this.hits) if (e.lockedUntil < t && e.fails.every((f) => t - f >= this.windowMs)) this.hits.delete(k);

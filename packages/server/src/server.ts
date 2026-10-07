@@ -9,7 +9,7 @@ import type { WebSocket } from '@fastify/websocket';
 import { generateKeyPairSync, sign as edSign, createPublicKey, type KeyObject } from 'node:crypto';
 import * as opaque from '@serenity-kit/opaque';
 import {
-  b64u, ClientMessage, JoinRequest, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
+  b64u, ClientMessage, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
   UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, type ServerMessage,
 } from '@classroom/protocol';
 import { Pairing } from './pairing.ts';
@@ -77,10 +77,11 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const tls = await createClassroomTls(classroom.id);
   db.prepare('UPDATE sessions SET teacher_key = ?, tls_spki = ? WHERE id = ?').run(teacherPublicKey, tls.spkiSha256, classroom.id);
   let httpsPort = 0;
+  const limits: Limits = { ...DEFAULT_LIMITS, ...opts.limits };
   const pairing = await Pairing.create(classroom, identity.opaqueServerSetup, classroom.code, () => ({
     httpsPort, spkiSha256: tls.spkiSha256, certificate: tls.certificate, teacherPublicKey, title: classroom.title,
   }));
-  const limits: Limits = { ...DEFAULT_LIMITS, ...opts.limits };
+  pairing.inflightPerSource = limits.pairInflightPerSource;
   const storage = new Storage(opts.storageDir ?? mkdtempSync(join(tmpdir(), 'classroom-storage-')));
   await storage.init();
   const resources = new Resources(db, classroom, storage, limits);
@@ -129,6 +130,11 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   boot.post('/api/pair/start', async (req) => {
     const b = parse(PairStart, req.body);
     return pairing.start(req.ip, b.sessionId, b.startLoginRequest);
+  });
+  boot.post('/api/pair/abort', async (req, reply) => {
+    const b = parse(PairAbort, req.body);
+    pairing.abort(req.ip, b.pairingId);
+    return reply.code(204).send();
   });
   boot.post('/api/pair/finish', async (req) => {
     const b = parse(PairFinish, req.body);

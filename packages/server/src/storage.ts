@@ -23,6 +23,8 @@ export type Limits = {
   maxAssignmentsPerSession: number;
   /** Idle socket timeout for transfers; a stalled student frees its slot. */
   transferIdleMs: number;
+  /** Unfinished OPAQUE pairing attempts per source address at once. */
+  pairInflightPerSource: number;
 };
 
 export const DEFAULT_LIMITS: Limits = {
@@ -37,6 +39,7 @@ export const DEFAULT_LIMITS: Limits = {
   maxResourcesPerSession: 1000,
   maxAssignmentsPerSession: 200,
   transferIdleMs: 60_000,
+  pairInflightPerSource: 4,
 };
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

@@ -28,6 +28,7 @@ export type StudentProfile = z.infer<typeof StudentProfile>;
 export const PairStart = z.object({ v: z.literal(PROTOCOL_VERSION), sessionId: z.uuid(), startLoginRequest: b64url(1, 4096) });
 export const PairFinish = z.object({ v: z.literal(PROTOCOL_VERSION), pairingId: z.uuid(), finishLoginRequest: b64url(1, 4096) });
 export type PairStartResponse = { pairingId: string; loginResponse: string };
+export const PairAbort = z.object({ v: z.literal(PROTOCOL_VERSION), pairingId: z.uuid() });
 
 /** Sent by the server after OPAQUE succeeds; authenticated with HMAC under a key derived from the OPAQUE session key. */
 export type TlsBinding = {

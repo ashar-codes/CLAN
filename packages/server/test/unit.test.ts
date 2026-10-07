@@ -88,7 +88,7 @@ describe('classroom membership', () => {
       const l = opaque.client.startLogin({ password: code });
       const r = pairing.start(src, c.id, l.startLoginRequest);
       const f = opaque.client.finishLogin({ clientLoginState: l.clientLoginState, loginResponse: r.loginResponse, password: code, identifiers: opaqueIdentifiers(c.id) });
-      if (!f) throw new Error('Wrong classroom code');
+      if (!f) { pairing.abort(src, r.pairingId); throw new Error('Wrong classroom code'); }
       return pairing.finish(src, r.pairingId, f.finishLoginRequest);
     };
     for (let i = 0; i < 5; i++) expect(() => attempt('000000', 'ip1')).toThrow(/Wrong classroom code/);
@@ -97,7 +97,7 @@ describe('classroom membership', () => {
     expect(attempt('123456', 'ip2').binding.sessionId).toBe(c.id);
     clock.advance(5 * 60_000 + 1);
     expect(attempt('123456', 'ip1').binding.sessionId).toBe(c.id);
-    // Successful pairings are forgiven, so a full class can join without tripping the limits.
+    // Successful pairings never count, so a full class can join without tripping the limits.
     for (let i = 0; i < 12; i++) attempt('123456', 'ip3'); // > the 5-per-source limit
     // Distributed guessing: 50 failures across many sources locks the classroom briefly.
     for (let i = 0; i < 50; i++) { try { attempt('000001', `bot${i}`); } catch {} }
