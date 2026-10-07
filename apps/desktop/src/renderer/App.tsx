@@ -29,7 +29,7 @@ function Screens({ screen, setScreen, caps }: { screen: Screen; setScreen(s: Scr
     case 'home':
       return (
         <main className="center">
-          <h1 className="brand">Classroom LAN</h1>
+          <h1 className="brand">CLAN</h1>
           <p className="muted">Works with no internet. Everyone just needs to be on the same network.</p>
           <div className="choices">
             <button className="choice" onClick={() => setScreen({ s: 'teacher-setup' })}><b>Create Classroom</b><span>I'm the teacher</span></button>

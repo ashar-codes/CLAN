@@ -1,4 +1,4 @@
-// macOS harness: drives PinnedTrust (the exact iOS trust code) against a real Classroom LAN HTTPS server.
+// macOS harness: drives PinnedTrust (the exact iOS trust code) against a real CLAN HTTPS server.
 // Usage: pinned-trust-check <url> <caDerB64> <pinB64>   -> prints "ok <status>" or "rejected"
 import Foundation
 import Security

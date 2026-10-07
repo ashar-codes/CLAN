@@ -28,7 +28,7 @@ export class Keystore {
     } else if (!app.isPackaged && process.env.CLASSROOM_DEV_INSECURE_KEYSTORE === '1') {
       this.status.insecureDev = true;
     } else {
-      this.status.error = 'This computer has no secure key storage available (OS keychain). Classroom LAN cannot protect its identity keys.';
+      this.status.error = 'This computer has no secure key storage available (OS keychain). CLAN cannot protect its identity keys.';
     }
   }
 

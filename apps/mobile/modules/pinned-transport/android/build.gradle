@@ -1,4 +1,4 @@
-// Classroom LAN pinned transport (Android). NOT compiled on the development machine (no Android SDK) — see docs/TESTING.md.
+// CLAN pinned transport (Android). NOT compiled on the development machine (no Android SDK) — see docs/TESTING.md.
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 

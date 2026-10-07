@@ -35,7 +35,7 @@ export async function createClassroomTls(sessionId: string, now = Date.now(), li
   const notBefore = new Date(now - 5 * 60_000), notAfter = new Date(now + lifetimeMs);
   const caKeys = (await webcrypto.subtle.generateKey(ALG, false, ['sign', 'verify'])) as unknown as CryptoKeyPair;
   const ca = await x509.X509CertificateGenerator.createSelfSigned({
-    serialNumber: serial(), name: `CN=Classroom LAN session CA ${sessionId}`, notBefore, notAfter, keys: caKeys, signingAlgorithm: ALG,
+    serialNumber: serial(), name: `CN=CLAN session CA ${sessionId}`, notBefore, notAfter, keys: caKeys, signingAlgorithm: ALG,
     extensions: [
       new x509.BasicConstraintsExtension(true, 0, true),
       new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
@@ -43,7 +43,7 @@ export async function createClassroomTls(sessionId: string, now = Date.now(), li
   });
   const leafKeys = (await webcrypto.subtle.generateKey(ALG, true, ['sign', 'verify'])) as unknown as CryptoKeyPair;
   const leaf = await x509.X509CertificateGenerator.create({
-    serialNumber: serial(), subject: `CN=Classroom LAN ${sessionId}`, issuer: ca.subject, notBefore, notAfter,
+    serialNumber: serial(), subject: `CN=CLAN ${sessionId}`, issuer: ca.subject, notBefore, notAfter,
     publicKey: leafKeys.publicKey, signingKey: caKeys.privateKey, signingAlgorithm: ALG,
     extensions: [
       new x509.BasicConstraintsExtension(false, undefined, true),

@@ -1,4 +1,4 @@
-// Classroom LAN pinned transport (Android). NOT compiled or run on the development machine — see docs/TESTING.md.
+// CLAN pinned transport (Android). NOT compiled or run on the development machine — see docs/TESTING.md.
 //
 // Trust rule (the only one): the server chain must validate against a trust store containing ONLY the per-class CA
 // from the OPAQUE-authenticated binding (no system or user CAs), AND the leaf SubjectPublicKeyInfo SHA-256 must equal

@@ -1,7 +1,10 @@
-# Classroom LAN
+# CLAN
 
-Offline-first classroom collaboration. One teacher laptop hosts the classroom; students join from desktop or phone
-over the local network with a 6-digit code. **No internet is required at runtime.**
+Offline-first academic life: your own space, the people near you, and the CLANs you belong to (classes, study groups,
+project teams). The original classroom flow — one teacher laptop hosts, students join from desktop or phone over the local
+network with a 6-digit code — is the CLASSROOM CLAN type. **No internet is required at runtime.**
+
+Internal identifiers that still say `classroom` are kept on purpose — see [Legacy names](docs/MODULES.md#legacy-names).
 
 > Status: Milestones 0–2.75. Desktop: LAN Mode, secure pairing (OPAQUE + pinned TLS + Ed25519 identities), files and
 > assignments with signed receipts, and **peer-assisted distribution** (teacher-signed manifests; the teacher stays the only

@@ -1,4 +1,4 @@
-// Classroom LAN pinned trust (iOS; also compiles on macOS, where it is exercised by tests/pinned-trust-check).
+// CLAN pinned trust (iOS; also compiles on macOS, where it is exercised by tests/pinned-trust-check).
 //
 // Trust rule (the only one): the server chain must validate with the per-class CA from the OPAQUE-authenticated
 // binding as the SOLE anchor (system and user-installed roots are ignored), AND the leaf's SubjectPublicKeyInfo

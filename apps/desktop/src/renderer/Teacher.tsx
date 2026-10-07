@@ -139,7 +139,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         <TeacherAssignments assignments={assignments} send={send} />
         <div className="card">
           <h3>Waiting to join {pending.length > 0 && <span className="badge">{pending.length}</span>}</h3>
-          {pending.length === 0 && <p className="muted">Students enter <b>{started.code}</b> in the Classroom LAN app on the same network.</p>}
+          {pending.length === 0 && <p className="muted">Students enter <b>{started.code}</b> in the CLAN app on the same network.</p>}
           {pending.map((m) => (
             <div key={m.id} className="person">
               <Who m={m} />

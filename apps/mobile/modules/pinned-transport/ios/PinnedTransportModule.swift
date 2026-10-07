@@ -1,4 +1,4 @@
-// Classroom LAN pinned transport (iOS Expo module). The trust decision lives in PinnedTrust.swift.
+// CLAN pinned transport (iOS Expo module). The trust decision lives in PinnedTrust.swift.
 // This file is NOT compiled on the development machine (needs ExpoModulesCore/Xcode) — see docs/TESTING.md.
 import ExpoModulesCore
 import Foundation

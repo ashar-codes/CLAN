@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Classroom LAN",
+    "name": "CLAN",
     "slug": "classroom-lan",
     "version": "0.1.0",
     "orientation": "default",
@@ -9,7 +9,7 @@
       "bundleIdentifier": "app.classroomlan.student",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "Classroom LAN finds and connects to your teacher's classroom on this Wi-Fi network. No internet is used.",
+        "NSLocalNetworkUsageDescription": "CLAN finds and connects to nearby CLANs on this Wi-Fi network. No internet is used.",
         "NSBonjourServices": [
           "_classroomlan._tcp"
         ],

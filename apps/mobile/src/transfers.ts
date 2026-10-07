@@ -21,6 +21,7 @@ export type Conn = { url: string; token: string; sessionId: string; classTitle: 
 export type FileState = { resourceId: string; state: TransferState; bytes: number; size: number; error?: string; uri?: string; resumedFrom?: number };
 export type StoredReceipt = { receipt: Receipt; verified: boolean; reason?: string };
 
+// Legacy on-device folder name kept so existing downloads/receipts stay where they are (not user-visible).
 const root = () => new Directory(Paths.document, 'Classroom LAN');
 const classDir = (c: Conn) => new Directory(root(), safeFileName(c.classTitle));
 const partialDir = (c: Conn) => new Directory(classDir(c), '.partial');

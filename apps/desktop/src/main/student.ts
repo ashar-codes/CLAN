@@ -91,7 +91,7 @@ export class StudentFiles {
   }
 
   private destDir(c: Conn) {
-    const root = process.env.CLASSROOM_DOWNLOADS_DIR ?? join(app.getPath('downloads'), 'Classroom LAN');
+    const root = process.env.CLASSROOM_DOWNLOADS_DIR ?? join(app.getPath('downloads'), 'CLAN');
     return join(root, safeFileName(c.classTitle));
   }
   private completedPath() { return join(this.dataDir, 'downloads.json'); }

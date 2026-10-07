@@ -1,5 +1,5 @@
 // Compiles the iOS trust code (PinnedTrust.swift — the exact file the iOS module uses) for macOS and runs it against
-// a real Classroom LAN HTTPS server. Apple's Security framework is shared by macOS and iOS; this is not a device test.
+// a real CLAN HTTPS server. Apple's Security framework is shared by macOS and iOS; this is not a device test.
 import { describe, expect, it } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';

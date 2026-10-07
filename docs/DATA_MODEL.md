@@ -54,7 +54,7 @@ is kept as `legacyDeviceId` and ignored), `paired-sessions.json` (session id →
 `paired-teacher-keys.json` (append-only receipt trust anchors), `known-teachers.json` (class name → teacher key),
 `downloads.json`, `pending-uploads.json`, `receipts/*.json` (signed receipts). Teacher desktop additionally:
 `keys/teacher-ed25519.enc`, `keys/opaque-server-setup.enc`. Mobile: device seed and profile in `expo-secure-store`; files under
-`Documents/Classroom LAN/`.
+`Documents/CLAN/`.
 
 Student devices: desktop stores the profile + persistent random `deviceId` in `<userData>/profile.json`; mobile stores
 them in `expo-secure-store`. Session tokens are held in memory only.

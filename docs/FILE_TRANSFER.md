@@ -37,7 +37,7 @@ desktop `apps/desktop/src/main/student.ts`, mobile `apps/mobile/src/transfers.ts
    never touches students' downloaded copies or the teacher's original. Bytes locked by an open download on Windows
    are swept at next start.
 
-Desktop downloads land in `~/Downloads/Classroom LAN/<class>/` (`CLASSROOM_DOWNLOADS_DIR` overrides, used by tests).
+Desktop downloads land in `~/Downloads/CLAN/<class>/` (`CLASSROOM_DOWNLOADS_DIR` overrides, used by tests).
 "Open" is offered only for PDF, text/CSV/Markdown, images, audio/video and modern non-macro Office/ODF (`docx pptx xlsx odt odp ods`);
 legacy/macro-enabled Office, executables, scripts, archives and unknown types are "Show in folder" only. A matching hash
 proves integrity (the teacher's exact file), not safety. Concurrency per
@@ -59,7 +59,7 @@ Resumable, idempotent, tus-like protocol (no custom crypto, no base64):
    deleted, attempt `failed`. Match → atomic rename to `storage/submissions/<session>/<submission>/<sanitized name>`,
    submission row + upload state in one transaction, **server time** as `submittedAt`, `late` computed server-side.
 4. Response contains the **Ed25519-signed receipt**; the client verifies it against the teacher key from pairing, then stores it in `<userData>/receipts/<submissionId>.json`, mobile in
-   `Documents/Classroom LAN/receipts/`. Resubmitting with a new key creates **version n+1**; nothing is overwritten.
+   `Documents/CLAN/receipts/`. Resubmitting with a new key creates **version n+1**; nothing is overwritten.
 
 Clients persist the idempotency key per intended submission (session + assignment + file + size) before uploading, so a
 retry after a lost response or an app restart returns the same receipt. Desktop resumes from the server offset; **mobile

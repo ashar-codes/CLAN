@@ -2,7 +2,13 @@
 // Every inbound message is parsed with these schemas at the trust boundary.
 import { z } from 'zod';
 
-export const PRODUCT_NAME = 'Classroom LAN';
+export const PRODUCT_NAME = 'CLAN';
+/**
+ * Legacy internal identifiers kept for compatibility (see docs/MODULES.md › Legacy names). Never shown to users.
+ * The desktop's OS-level storage identity (Keychain item "<name> Safe Storage" and the userData folder) derives from the
+ * app name at startup; renaming it would orphan existing data and make every stored key undecryptable (verified).
+ */
+export const LEGACY_STORAGE_NAME = 'Classroom LAN';
 export const PROTOCOL_VERSION = 1;
 /** mDNS/DNS-SD service type. The join code is deliberately NOT advertised. */
 export const SERVICE_TYPE = 'classroomlan';

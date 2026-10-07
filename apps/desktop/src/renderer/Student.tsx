@@ -80,7 +80,7 @@ function JoinForm({ profile, onJoined, onEditProfile, onBack }: { profile: OwnPr
         <ul className="muted">
           <li>Make sure you are on the same Wi-Fi as the teacher (internet is not needed).</li>
           <li>Some guest/university networks block devices from seeing each other ("client isolation"). Ask the teacher to use a classroom router.</li>
-          <li>If your firewall asked about Classroom LAN, choose Allow.</li>
+          <li>If your firewall asked about CLAN, choose Allow.</li>
         </ul>
         <label>Teacher address (shown on the teacher's screen under Network)<input value={manual} placeholder="192.168.1.20:52345" onChange={(e) => setManual(e.target.value.trim())} /></label>
         <p className="muted small-text">The address only helps find the teacher's computer. Your code still proves you're talking to the real classroom.</p>

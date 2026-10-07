@@ -5,7 +5,7 @@ import { hostname } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { JoinPolicy, keyFingerprint, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
+import { JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
 import { pairAndJoin, reconnect, type Candidate } from '@classroom/client';
 import { pinnedTransport } from '@classroom/client/node';
 import { logError } from '@classroom/server';
@@ -18,11 +18,12 @@ import { StudentFiles } from './student.ts';
 import type { ResourceView } from '@classroom/protocol';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Storage identity first (before anything reads userData or touches safeStorage); the user-visible name is set after ready.
+app.setName(LEGACY_STORAGE_NAME);
 // `--profile=name` gives a separate data dir so one machine can run teacher + students during development.
 const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10);
 if (profileArg && /^[\w-]{1,32}$/.test(profileArg)) app.setPath('userData', join(app.getPath('userData'), `profile-${profileArg}`));
 if (process.env.CLASSROOM_USER_DATA) app.setPath('userData', process.env.CLASSROOM_USER_DATA); // tests
-app.setName(PRODUCT_NAME);
 
 let server: RunningServer | null = null;
 let keystore: Keystore;
@@ -195,7 +196,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  keystore = new Keystore();
+  keystore = new Keystore(); // initialise OS key storage under the legacy storage identity…
+  app.setName(PRODUCT_NAME); // …then present as CLAN
   trust = new Trust(keystore, app.getPath('userData'));
   trust.installVerifyProc(session.defaultSession);
   // Nothing needs camera/mic/notifications yet; grant capabilities explicitly as features land.

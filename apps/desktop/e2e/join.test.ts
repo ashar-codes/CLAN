@@ -16,7 +16,7 @@ const chooseFiles = (app: ElectronApplication, paths: string[]) =>
 let lastApp: ElectronApplication;
 async function launch(env: Record<string, string> = {}, userData = mkdtempSync(join(tmpdir(), 'clan-'))): Promise<Page> {
   if (!userDataDirs.includes(userData)) userDataDirs.push(userData);
-  // E2E_EXECUTABLE=release/mac-arm64/Classroom LAN.app/Contents/MacOS/Classroom LAN tests the packaged build instead.
+  // E2E_EXECUTABLE=release/mac-arm64/CLAN.app/Contents/MacOS/CLAN tests the packaged build instead.
   const exe = process.env.E2E_EXECUTABLE;
   const app = await electron.launch({ ...(exe ? { executablePath: exe, args: [] } : { args: ['.'] }), cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData, ...env } });
   apps.push(app);
