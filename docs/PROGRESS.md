@@ -4,7 +4,7 @@
 |---|---|
 | 0 — repo, shells, tests, local server | ✅ done |
 | 1 — LAN Mode, classroom creation, discovery, 6-digit pairing, identity, approval | ✅ done (desktop verified E2E; mobile code-complete, not device-tested) |
-| 2 — file repository, resumable transfer, assignments | not started |
+| 2 — file repository, resumable transfer, assignments | ✅ done (desktop verified E2E dev + packaged; mobile code-complete, not device-tested) |
 | 3 — Windows Direct Mode, auto Wi-Fi join | not started |
 | 4 — LiveKit, screen/window sharing, student presenting | not started |
 | 5 — PDF sync presentation, notes, bookmarks | not started |
@@ -24,6 +24,17 @@
   migrations.
 * Tests: 25 unit/integration/security + 1 two-app Electron E2E (also against packaged app). Benchmarks recorded.
 
+## Milestone 2 delivered
+* Teacher: add files (hash + progress), list with size/type/time/SHA, per-file Completed/Downloading/Queued/Paused/Failed/Not
+  started counts and per-student states, Send to Everyone, Hide/Make available, Remove, live transfer stats; assignments
+  (title, instructions, due, allowed types, max size) with Submitted/Late/Missing/Uploading/Failed per student, "Show file",
+  close; previous classes list.
+* Student desktop: file list with Download/Pause/Resume/Retry/Open (safe types)/Show in folder, queued/verifying/resumed states,
+  auto-download on Send to Everyone, assignments with submit / new version, upload progress, receipts on disk.
+* Protocol: streamed Range downloads with ETag/If-Range/Repr-Digest, resumable idempotent uploads, server-side hash checks,
+  atomic finalization, configurable limits, idle watchdogs.
+* Tools: file benchmark (server in its own process), browser-based real-network benchmark.
+* Mobile: same flows on Expo (unverified on device).
+
 ## Next
-Milestone 2: file repository (teacher-local storage, streamed Range downloads, resume, SHA-256, per-student transfer
-state, assignment submission with server-time receipts, idempotent uploads) + transfer benchmarks.
+Before Milestone 3: transport security + trusted device identity (see SECURITY.md known gaps). Then Milestone 3.

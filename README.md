@@ -3,8 +3,9 @@
 Offline-first classroom collaboration. One teacher laptop hosts the classroom; students join from desktop or phone
 over the local network with a 6-digit code. **No internet is required at runtime.**
 
-> Status: Milestones 0 and 1 are complete (LAN Mode, discovery, 6-digit pairing, identity, approval, roster,
-> presence, timeline). Everything else in the V1 spec is not built yet — see [docs/PROGRESS.md](docs/PROGRESS.md).
+> Status: Milestones 0–2 are complete (LAN Mode, discovery, 6-digit pairing, approval, roster, presence, timeline,
+> classroom files with resumable verified downloads, assignments with idempotent resumable submissions and receipts).
+> Everything else in the V1 spec is not built yet — see [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Quick start (development)
 
@@ -13,7 +14,8 @@ pnpm install          # needs internet once, for dependencies
 pnpm dev              # desktop app (teacher or student) with hot reload
 pnpm test             # unit + integration + security tests
 pnpm test:e2e         # launches two real Electron apps and joins over your LAN
-pnpm benchmark        # load simulator; rewrites docs/BENCHMARKS.md
+pnpm benchmark        # join + file-transfer benchmarks; rewrites docs/BENCHMARKS.md
+node tools/sim/lan-bench.ts   # real-Wi-Fi benchmark: students open the printed URL in any browser
 pnpm typecheck
 ```
 
