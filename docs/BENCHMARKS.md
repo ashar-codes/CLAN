@@ -182,8 +182,10 @@ teacher-direct. (`--threshold-sweep`.)
   upload, serving peers.
 Results are appended to `docs/lan-bench/`. **No real-network results have been recorded yet.**
 
-Direct Network (Host Only / Peer Assisted) vs Existing LAN, 1/10/100 MB, 1→5→10→15→20 clients: **not run** — needs a Windows
-host and real client devices. Localhost/mock numbers are deliberately not reported as Direct results.
+Direct Network (Host Only / Peer Assisted) vs Existing LAN (Host Only / Peer Assisted), 1/10/100 MB, 1→5→10→15→20 clients:
+**not run (validation phase, 2026-10-08)** — only one Mac is available: no Windows host, no phones, no second laptop, no
+separate AP. No physical client count has been tested. Localhost/mock numbers are deliberately not reported as network results.
+Procedure: WINDOWS_DIRECT_MODE.md › Validation package + `tools/sim/lan-bench.ts --mode classroom`.
 
 ## Not yet measured
 

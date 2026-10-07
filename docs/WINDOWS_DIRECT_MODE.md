@@ -39,6 +39,25 @@ Start: probe → fresh credentials → AP up → server bound to it → firewall
 (credentials die with it) → rules removed → state file deleted. Crash: `direct-state.json` (no passphrase) → next launch stops
 the AP and removes rules. Sleep/resume: same SSID/passphrase restarted; members reconnect with their device keys.
 
+## Validation package (run on real Windows)
+`native/windows-direct/validate-direct.ps1` (PowerShell 7, .NET 8 SDK; Windows SDK + one admin prompt for the identity step):
+1. `dotnet publish` the helper → `bin/publish/CLAN.DirectHelper.exe` (self-contained win-x64; the same artifact also builds on
+   macOS/Linux with `EnableWindowsTargeting`, 94 MB self-contained single file, PE32+ x86-64).
+2. Records Windows build, Wi-Fi adapter + driver version/date, `netsh wlan show drivers` (read-only), internet reachability, Bluetooth.
+3. **Unpackaged run**: probe → start (fresh `CLAN-XXXX` + random passphrase) → status → pause for a second device to join →
+   status → one scoped firewall rule add/list/remove → stop → status (network must be gone).
+4. **Package-identity run**: builds/signs/registers the sparse package `package/AppxManifest.xml` (`wiFiControl`, `bluetooth`,
+   `location`, `runFullTrust`, external location = the publish dir) and repeats step 3; then unregisters it.
+5. Writes `validation-<date>.json` (gitignored); copy the relevant rows into the log below.
+Then the app-level test: disconnect Ethernet/Wi-Fi upstream → CLAN → existing Study Group → Host again → Direct Network →
+member joins with the code (BLE) / QR → approve → file → End → SSID gone. Repeat at 1/5/10/15/20 members with
+`tools/sim/lan-bench.ts --mode classroom` for 1/10/100 MB.
+
+## Validation log
+| Date | Windows / adapter / driver | Backend | Identity | Zero-internet | Clients | Result |
+|---|---|---|---|---|---|---|
+| — | **no Windows hardware available yet** | — | — | — | — | UNVERIFIED |
+
 ## Not verified / limits
 Real AP start, client association (Windows/macOS/iOS/Android), member↔member reachability on Wi-Fi Direct, client counts,
 stability, throughput, package-identity requirement. No client-count claim is made; Existing LAN stays the recommended mode

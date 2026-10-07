@@ -56,6 +56,7 @@ export class Pairing {
   inflightPerSource = DEFAULT_PAIR_INFLIGHT_PER_SOURCE;
 
   private failed(source: string) {
+    this.stats.failed++;
     this.classroom.ipThrottle.fail(source);
     this.classroom.globalThrottle.fail('*');
   }
@@ -68,9 +69,19 @@ export class Pairing {
     for (const [k, v] of this.challenges) if (v.expires < t) this.challenges.delete(k);
   }
 
+  /** Throttle metrics (diagnostics): refused attempts by carrier, and failed guesses. */
+  readonly stats = { failed: 0, throttled: { network: 0, bluetooth: 0 } };
+  private lastThrottleLog = 0;
+
   private throttleCheck(source: string) {
     const lock = Math.max(this.classroom.ipThrottle.lockedFor(source), this.classroom.globalThrottle.lockedFor('*'));
-    if (lock > 0) throw new JoinError(429, 'throttled', 'Too many attempts. Wait and try again.', lock);
+    if (lock > 0) {
+      const via = source.startsWith('ble:') ? 'bluetooth' : 'network';
+      this.stats.throttled[via]++;
+      // One host-visible note per lockout minute (no source addresses: BLE ids rotate and are not identities).
+      if (this.now() - this.lastThrottleLog > 60_000) { this.lastThrottleLog = this.now(); this.classroom.log('pairing.throttled', null, { via, global: this.classroom.globalThrottle.lockedFor('*') > 0 }); }
+      throw new JoinError(429, 'throttled', 'Too many attempts. Wait and try again.', lock);
+    }
   }
 
   /**

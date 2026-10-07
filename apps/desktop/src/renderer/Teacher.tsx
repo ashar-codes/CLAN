@@ -99,7 +99,7 @@ function describe(e: TimelineEvent, names: Map<string, string>, L: ReturnType<ty
   const m: Record<string, string> = {
     'class.started': `${L.session[0]!.toUpperCase()}${L.session.slice(1)} started`, 'class.ended': `${L.session[0]!.toUpperCase()}${L.session.slice(1)} ended`, 'class.locked': 'Joining locked', 'class.unlocked': 'Joining unlocked',
     'class.policy': `Join rule changed to "${L.policy[e.data.policy as JoinPolicy]}"`,
-    'member.bootstrap': 'A device paired over Bluetooth', 'network.p2p': e.data.p2p === 'isolated' ? 'Network keeps members apart: Peer Assistance off' : 'Members can reach each other: Peer Assistance available',
+    'member.bootstrap': 'A device paired over Bluetooth', 'pairing.throttled': 'Joining paused briefly after many wrong codes', 'network.p2p': e.data.p2p === 'isolated' ? 'Network keeps members apart: Peer Assistance off' : 'Members can reach each other: Peer Assistance available',
     'member.requested': `${who} asked to join`, 'member.joined': `${who} joined`, 'member.approved': `${who} approved`,
     'member.rejected': `${who} rejected`, 'member.removed': `${who} removed`, 'member.blocked': `${who} blocked`,
     'resource.added': `${e.data.name} added`, 'resource.pushed': `${e.data.name} sent to everyone`, 'resource.removed': `${e.data.name} removed`,

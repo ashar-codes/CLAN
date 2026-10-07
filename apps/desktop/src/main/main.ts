@@ -13,7 +13,7 @@ import { logError } from '@classroom/server';
 import { Keystore } from './keystore.ts';
 import { Trust } from './trust.ts';
 import { candidateInterfaces, openDb, startClassroomServer, type RunningServer } from '@classroom/server';
-import { browse } from '@classroom/server/discovery';
+import { browse, dlog } from '@classroom/server/discovery';
 import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroom } from '../shared.ts';
 import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
@@ -107,9 +107,12 @@ function registerIpc() {
     }
     // Nearby Direct hosts over BLE are tried alongside LAN hosts; the code (OPAQUE) decides which one is ours.
     let ble: Awaited<ReturnType<DesktopDirect['bleCarriers']>> | null = manual ? [] : null;
-    const bleP = manual ? Promise.resolve([]) : direct.bleCarriers().then((c) => (ble = c));
+    const t0 = Date.now();
+    dlog('join: discovery', { known: candidates.length, ble: !manual });
+    const bleP = manual ? Promise.resolve([]) : direct.bleCarriers().then((c) => { dlog('join: ble scan', { hosts: c.length, ms: Date.now() - t0 }); return (ble = c); });
     // Multicast discovery can take several seconds on busy Wi-Fi: wait up to 10 s, unless BLE already found a host.
     for (let i = 0; i < 40 && candidates.length === 0 && !(ble?.length); i++) { await new Promise((r) => setTimeout(r, 250)); candidates = discovered; }
+    dlog('join: candidates', { lan: candidates.length, ms: Date.now() - t0 });
     const carriers = candidates.length ? await Promise.race([bleP, new Promise<[]>((r) => setTimeout(() => r([]), 500))]) : await bleP;
     await opaque.ready;
     const r = await pairAndJoin({

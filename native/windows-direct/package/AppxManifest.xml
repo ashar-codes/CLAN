@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sparse package: gives the unpackaged CLAN.DirectHelper.exe package identity so restricted WinRT capabilities
+     (wiFiControl, bluetooth) can be granted. Used only if validate-direct.ps1 shows the unpackaged run is refused. -->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap10 rescap">
+  <Identity Name="CLAN.DirectHelper" Publisher="CN=CLAN Validation" Version="0.1.0.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>CLAN Direct Helper</DisplayName>
+    <PublisherDisplayName>CLAN</PublisherDisplayName>
+    <Logo>logo.png</Logo>
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+  </Properties>
+  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
+  <Resources><Resource Language="en-us" /></Resources>
+  <Applications>
+    <Application Id="DirectHelper" Executable="CLAN.DirectHelper.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+      <uap:VisualElements AppListEntry="none" DisplayName="CLAN Direct Helper" Description="CLAN Direct Network helper"
+        BackgroundColor="transparent" Square150x150Logo="logo.png" Square44x44Logo="logo.png" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="wiFiControl" />
+    <DeviceCapability Name="bluetooth" />
+    <DeviceCapability Name="location" />
+  </Capabilities>
+</Package>

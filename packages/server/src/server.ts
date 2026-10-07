@@ -72,6 +72,7 @@ export type RunningServer = {
   storage: Storage;
   port: number;
   bootstrap(source: string, req: unknown): BleResponse;
+  pairingStats(): { failed: number; throttled: { network: number; bluetooth: number } };
   close(): Promise<void>;
 };
 
@@ -471,6 +472,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const port = (boot.server.address() as { port: number }).port;
   bootPort = port;
   const stopAdvertising = opts.advertise ? advertise({ host: opts.host, port, sid: classroom.id, title: classroom.title, type: classroom.clan.type }) : null;
+  await stopAdvertising?.ready; // deterministic: the session is discoverable when start returns
   // The certificate is short-lived; the class ends just before it expires rather than switching keys mid-session.
   const certTimer = setTimeout(() => classroom.end(), Math.max(0, tls.notAfter - Date.now() - 60_000));
   certTimer.unref();
@@ -486,6 +488,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     url: `https://${hostPart}:${httpsPort}`,
     bootstrapUrl: `http://${hostPart}:${port}`,
     /** Transport-neutral pairing (BLE bridge). Same Pairing object, throttles and messages as the HTTP bootstrap. */
+    pairingStats: () => ({ ...pairing.stats, throttled: { ...pairing.stats.throttled } }),
     bootstrap: (source: string, raw: unknown): BleResponse => {
       const r = BleRequest.safeParse(raw);
       if (!r.success) return { ok: false, code: 'invalid', message: 'Invalid request.' };

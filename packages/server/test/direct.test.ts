@@ -12,7 +12,7 @@ import {
   b64u, BleReassembler, bleFrames, decodeDirectQr, derivePairingKeys, encodeDirectQr, newDirectCredentials, openDirect, sealDirect, type DirectPackage,
 } from '@classroom/protocol';
 import {
-  bridgeBle, chooseStrategy, createDirectBackend, DirectNetwork, firewallRules, HelperRequest, MockBackend, mockBleConnect, mockBleScan,
+  bridgeBle, chooseStrategy, vpnInterfaces, createDirectBackend, DirectNetwork, firewallRules, HelperRequest, MockBackend, mockBleConnect, mockBleScan,
   startClassroomServer, type RunningServer,
 } from '../src/index.ts';
 import { device, names, tmp, trustServer } from './helpers.ts';
@@ -73,6 +73,22 @@ describe('Direct bootstrap over BLE', () => {
     for (let i = 0; i < 4; i++) await join6([bleCarrier(mockBleConnect(radio, d.bleTag))], '222222').catch(() => {});
     // per-BLE-connection sources rotate, so the CLAN-wide limit is what bounds guessing over the air
     expect(s.classroom.globalThrottle.lockedFor('*')).toBe(0); // 5 < 50 failures/min
+  });
+
+  it('rotating BLE connections cannot escape the CLAN-wide guess limit; throttling is counted and shown once', async () => {
+    const { s } = await directHost({ code: '111111' });
+    await opaque.ready;
+    for (let i = 0; i < 50; i++) { // each attempt from a brand-new BLE connection id
+      const st = opaque.client.startLogin({ password: '222222' });
+      const r = s.bootstrap(`conn-${i}`, { t: 'start', sessionId: s.classroom.id, startLoginRequest: st.startLoginRequest }) as { ok: boolean; body: { pairingId: string } };
+      expect(r.ok).toBe(true);
+      s.bootstrap(`conn-${i}`, { t: 'abort', pairingId: r.body.pairingId });
+    }
+    const fresh = opaque.client.startLogin({ password: '111111' }); // even the right code, from a new connection
+    expect(s.bootstrap('conn-new', { t: 'start', sessionId: s.classroom.id, startLoginRequest: fresh.startLoginRequest })).toMatchObject({ ok: false, code: 'throttled' });
+    await expect(pair({ bootstrapUrl: s.bootstrapUrl, sessionId: s.classroom.id, code: '111111', opaque: opaque.client, transportFor: pinnedTransport })).rejects.toThrow(/Too many attempts/);
+    expect(s.pairingStats()).toMatchObject({ failed: 50, throttled: { bluetooth: 1, network: 1 } });
+    expect(s.classroom.timeline().filter((e) => e.type === 'pairing.throttled')).toHaveLength(1);
   });
 
   it('a fake BLE host (other code) cannot complete OPAQUE; with both nearby the real one is chosen', async () => {
@@ -222,6 +238,13 @@ describe('backend selection and lifecycle', () => {
     const n = new DirectNetwork(backend, join(tmp('state-'), 'direct.json'));
     await expect(n.start({ sessionId: randomUUID() })).rejects.toThrow(/refused/);
     expect(n.active).toBeNull();
+  });
+
+  it('VPN warning: VPN-style interfaces and overlay (CGNAT) addresses are reported; normal Wi-Fi is not', () => {
+    const a = (address: string) => [{ address, family: 'IPv4' as const, internal: false, netmask: '255.255.255.0', mac: '', cidr: null }];
+    expect(vpnInterfaces({ en0: a('192.168.1.5'), utun4: a('10.8.0.2'), 'Ethernet 3': a('100.101.4.7'), 'ProtonVPN': a('10.2.0.2') } as never).sort())
+      .toEqual(['Ethernet 3', 'ProtonVPN', 'utun4']);
+    expect(vpnInterfaces({ en0: a('192.168.1.5'), 'Wi-Fi': a('10.0.0.4') } as never)).toEqual([]);
   });
 
   it('helper IPC accepts only the narrow, validated command set', () => {
