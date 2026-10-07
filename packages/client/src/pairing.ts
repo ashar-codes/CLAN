@@ -90,7 +90,7 @@ export async function pairAndJoin(o: {
       const paired = await pair({ bootstrapUrl: c.url, sessionId: String(sid), code: o.code, opaque: o.opaque, plainFetch: f, transportFor: o.transportFor });
       return await joinPaired(paired, o.profile, o.device);
     } catch (e) {
-      const err = e instanceof TransferError ? e : new TransferError('unreachable', 'Could not reach the classroom securely.');
+      const err = e instanceof TransferError ? e : Object.assign(new TransferError('unreachable', 'Could not reach the classroom securely.'), { cause: e });
       errors.push(err);
       throw err;
     }
@@ -102,7 +102,8 @@ export async function pairAndJoin(o: {
     const order = ['mitm', 'throttled', 'locked', 'ended', 'blocked', 'too_many_pending'];
     for (const code of order) { const e = errors.find((x) => x.code === code); if (e) throw e; }
     const meaningful = errors.find((e) => e.code !== 'bad_code' && e.code !== 'unreachable');
-    throw meaningful ?? new TransferError('bad_code', errors.some((e) => e.code === 'bad_code') ? 'No classroom matches that code.' : 'Could not reach any classroom.');
+    throw meaningful ?? Object.assign(new TransferError('bad_code', errors.some((e) => e.code === 'bad_code') ? 'No classroom matches that code.' : 'Could not reach any classroom.'),
+      { cause: errors.find((e) => e.cause)?.cause });
   }
 }
 

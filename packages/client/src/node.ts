@@ -17,14 +17,13 @@ import { assertSecureUrl, initUpload, resourceContentPath, sleep, TransferError,
 export const spkiSha256OfDer = (der: Buffer) => createHash('sha256').update(new X509Certificate(der).publicKey.export({ type: 'spki', format: 'der' })).digest('base64');
 
 /**
- * Trusts exactly the classroom certificate from the PAKE-authenticated binding (as the only CA, so normal chain
- * validation still runs) AND requires the server's SPKI to equal the pinned hash. Host names/IPs are not trusted or
+ * Trusts exactly the classroom's per-session CA from the PAKE-authenticated binding (as the only CA, so normal chain
+ * validation still runs) AND requires the server leaf's SPKI to equal the pinned hash. Host names/IPs are not trusted or
  * checked: the pin is the identity, so the teacher's address may change without weakening anything.
  */
 export function pinnedTransport(pin: Pick<TlsBinding, 'certificate' | 'spkiSha256'>): Transport {
-  const der = Buffer.from(pin.certificate, 'base64');
-  const ca = new X509Certificate(der).toString();
-  if (spkiSha256OfDer(der) !== pin.spkiSha256) throw new TransferError('mitm', 'Pinned certificate does not match its pin.');
+  // The per-session CA from the PAKE-authenticated binding is the ONLY trust anchor (normal chain validation runs).
+  const ca = new X509Certificate(Buffer.from(pin.certificate, 'base64')).toString();
   const checkServerIdentity = (_host: string, cert: PeerCertificate) =>
     cert.raw && spkiSha256OfDer(cert.raw) === pin.spkiSha256 ? undefined : new TransferError('pin_mismatch', 'The classroom certificate does not match the securely paired one.');
   const tls = { ca, checkServerIdentity, minVersion: 'TLSv1.3' as const, rejectUnauthorized: true };

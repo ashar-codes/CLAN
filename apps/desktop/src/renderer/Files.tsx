@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatBytes } from '@classroom/client';
 import type {
-  ClientMessage, ResourceView, StudentAssignmentView, TeacherAssignmentView, TeacherResourceView, TransferState, TransferStats, Receipt,
+  ClientMessage, ResourceView, StudentAssignmentView, TeacherAssignmentView, TeacherResourceView, TransferState, TransferStats,
 } from '@classroom/protocol';
-import type { Conn, FileState } from '../shared.ts';
+import type { Conn, FileState, StoredReceipt } from '../shared.ts';
 import { api } from './App.tsx';
 
 const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -194,8 +194,16 @@ export function StudentFiles({ conn, resources, pushed, send }: { conn: Conn; re
 export function StudentAssignments({ conn, assignments }: { conn: Conn; assignments: StudentAssignmentView[] }) {
   const [uploading, setUploading] = useState<Record<string, { sent: number; size: number; name: string }>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [receipts, setReceipts] = useState<StoredReceipt[]>([]);
+  // Verification of the server's "latest" receipt per assignment, done by main against the PAKE-learned teacher key.
+  const [checks, setChecks] = useState<Record<string, StoredReceipt>>({});
   useEffect(() => { api.receipts(conn.sessionId).then(setReceipts); }, [conn.sessionId]);
+  useEffect(() => {
+    for (const a of assignments) if (a.latest && !checks[a.latest.payload.submissionId]) {
+      const id = a.latest.payload.submissionId;
+      api.verifyReceipt(a.latest).then((r) => setChecks((x) => ({ ...x, [id]: r })));
+    }
+  }, [assignments]);
   useEffect(() => api.onUploadProgress((p) => setUploading((x) => (x[p.assignmentId] ? { ...x, [p.assignmentId]: { ...x[p.assignmentId]!, sent: p.sent, size: p.size } } : x))), []);
 
   const submit = async (a: StudentAssignmentView) => {
@@ -206,7 +214,8 @@ export function StudentAssignments({ conn, assignments }: { conn: Conn; assignme
     setUploading((x) => ({ ...x, [a.id]: { sent: 0, size: pick.size, name: pick.name } }));
     try {
       const r = await api.submit(conn, a.id, pick.pickId);
-      setReceipts((x) => [r, ...x.filter((y) => y.submissionId !== r.submissionId)]);
+      setReceipts((x) => [r, ...x.filter((y) => y.receipt.payload.submissionId !== r.receipt.payload.submissionId)]);
+      setChecks((x) => ({ ...x, [r.receipt.payload.submissionId]: r }));
     } catch (e) {
       setErrors((x) => ({ ...x, [a.id]: errText(e) + ' You can retry; nothing will be submitted twice.' }));
     } finally {
@@ -220,16 +229,18 @@ export function StudentAssignments({ conn, assignments }: { conn: Conn; assignme
       {assignments.length === 0 && <p className="muted">No assignments yet.</p>}
       {assignments.map((a) => {
         const up = uploading[a.id];
-        const latest = a.latest;
+        const latest = a.latest?.payload;
+        const check = latest && checks[latest.submissionId];
         return (
           <div key={a.id} className="assignment" data-testid={`assignment-${a.title}`}>
             <b>{a.title}</b> {a.closed && <span className="tag">closed</span>}
             <div className="muted small-text">{a.dueAt ? `Due ${dateTime(a.dueAt)}` : 'No due time'} · {a.allowedExtensions.length ? a.allowedExtensions.map((e) => '.' + e).join(' ') : 'any file type'} · up to {formatBytes(a.maxBytes)}</div>
             {a.instructions && <p className="instructions">{a.instructions}</p>}
             {latest && (
-              <div className="receipt" data-testid="receipt">
-                ✓ <b>Submitted</b>{latest.late && <span className="warn"> (late)</span>} {latest.fileName} · {formatBytes(latest.size)} · {dateTime(latest.submittedAt)}{latest.version > 1 && ` · version ${latest.version}`}<br />
-                <small className="muted">Receipt {latest.submissionId.slice(0, 8)} · SHA-256 {latest.sha256.slice(0, 16)}… · accepted by the teacher's computer</small>
+              <div className={`receipt${check && !check.verified ? ' bad' : ''}`} data-testid="receipt">
+                <span data-testid="receipt-verification">{!check ? 'Checking receipt…' : check.verified ? 'Verified ✓' : `Verification failed — ${check.reason}`}</span><br />
+                <b>Submitted</b>{latest.late && <span className="warn"> (late)</span>} {latest.fileName} · {formatBytes(latest.size)} · {dateTime(latest.submittedAt)}{latest.version > 1 && ` · version ${latest.version}`}<br />
+                <small className="muted">Receipt {latest.submissionId.slice(0, 8)} · SHA-256 {latest.sha256.slice(0, 16)}… · signed by the teacher's computer</small>
               </div>
             )}
             {up && <div><small>Uploading {up.name}… {up.size ? Math.floor((up.sent / up.size) * 100) : 0}%</small><progress max={up.size || 1} value={up.sent} /></div>}
@@ -240,7 +251,9 @@ export function StudentAssignments({ conn, assignments }: { conn: Conn; assignme
       })}
       {receipts.length > 0 && (
         <details><summary className="muted">Receipts saved on this device ({receipts.length})</summary>
-          <table className="mini"><tbody>{receipts.map((r) => <tr key={r.submissionId}><td>{r.assignmentTitle}</td><td>{r.fileName}</td><td className="muted">{dateTime(r.submittedAt)}</td><td className="muted">{r.sha256.slice(0, 10)}…</td></tr>)}</tbody></table>
+          <table className="mini"><tbody>{receipts.map(({ receipt: { payload: r }, verified, reason }) => (
+            <tr key={r.submissionId}><td>{r.assignmentTitle}</td><td>{r.fileName}</td><td className="muted">{dateTime(r.submittedAt)}</td><td className="muted">{r.sha256.slice(0, 10)}…</td><td className={verified ? '' : 'error'}>{verified ? 'Verified ✓' : `Verification failed (${reason})`}</td></tr>
+          ))}</tbody></table>
         </details>
       )}
     </div>

@@ -35,9 +35,9 @@ export type TlsBinding = {
   type: 'classroom-lan/tls-binding'; v: 1;
   sessionId: string; pairingId: string; title: string;
   httpsPort: number;
-  /** base64 SHA-256 of the certificate's DER SubjectPublicKeyInfo. */
+  /** base64 SHA-256 of the server leaf certificate's DER SubjectPublicKeyInfo (the pin). */
   spkiSha256: string;
-  /** The (self-signed) certificate itself, base64 DER; clients trust exactly this certificate. */
+  /** The per-session CA certificate, base64 DER; clients trust exactly this CA (and then check the pin). */
   certificate: string;
   teacherPublicKey: string;
   /** Fresh nonce the device must sign to prove key possession. */

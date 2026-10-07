@@ -34,5 +34,10 @@ const api: DesktopApi = {
   submit: (c, a, p) => ipcRenderer.invoke('student:submit', c, a, p),
   onUploadProgress: (cb) => listen('student:upload', cb),
   receipts: (sid) => ipcRenderer.invoke('student:receipts', sid),
+  verifyReceipt: (r) => ipcRenderer.invoke('student:verifyReceipt', r),
+  joinClass: (code, manual) => ipcRenderer.invoke('student:join', code, manual),
+  rejoin: (sid) => ipcRenderer.invoke('student:rejoin', sid),
+  lastSession: () => ipcRenderer.invoke('student:lastSession'),
+  trustTeacher: (title, key) => ipcRenderer.invoke('student:trustTeacher', title, key),
 };
 contextBridge.exposeInMainWorld('classroom', api);

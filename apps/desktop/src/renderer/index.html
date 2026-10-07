@@ -2,8 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- LAN servers have dynamic addresses/ports, so connect-src must allow http:/ws: on any host. No remote scripts. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: ws:" />
+    <!-- Classroom servers have dynamic LAN addresses/ports, so connect-src allows any wss:/https: host; Chromium then
+         accepts only the PAKE-pinned certificate (main-process verify proc). No plaintext, no remote scripts. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: wss:" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Classroom LAN</title>
   </head>

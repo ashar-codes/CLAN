@@ -5,15 +5,19 @@ import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { downloadResource, partPaths, uploadSubmission } from '@classroom/client/node';
-import { safeFileName, type Receipt, type ResourceView } from '@classroom/protocol';
-import type { FileState } from '../shared.ts';
-
-type Conn = { url: string; token: string; sessionId: string; classTitle: string };
+import { safeFileName, verifyReceipt, type Receipt, type ResourceView } from '@classroom/protocol';
+import type { Conn, FileState, StoredReceipt } from '../shared.ts';
+import type { Trust } from './trust.ts';
 type Job = { conn: Conn; resource: ResourceView; ctl?: AbortController; state: FileState };
 
-// Formats that are opened by viewer apps, never executed. Everything else is "show in folder" only.
+// "Open" hands a file to the OS default viewer. Allowed only for formats without macros/active content in their
+// normal form. Legacy (.doc/.xls/.ppt) and macro-enabled Office formats (.docm/.xlsm/.pptm/.dotm/.xlam/.ppam…),
+// executables, scripts, archives, HTML and everything unknown are "Show in folder" only. A matching SHA-256 proves
+// the file is the teacher's copy (integrity), not that it is safe to open; opening still runs the viewer app and
+// inherits its vulnerabilities.
 const SAFE_TO_OPEN = new Set(['pdf', 'txt', 'md', 'csv', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'mov', 'webm', 'mp3', 'wav', 'm4a',
-  'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'odp', 'ods', 'rtf']);
+  'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods']);
+export const canOpen = (path: string) => SAFE_TO_OPEN.has(extname(path).slice(1).toLowerCase());
 const CONCURRENCY = 2;
 
 const json = <T>(p: string, fallback: T): Promise<T> => readFile(p, 'utf8').then(JSON.parse, () => fallback);
@@ -23,9 +27,17 @@ export class StudentFiles {
   private jobs = new Map<string, Job>();
   private picks = new Map<string, { path: string; name: string; size: number }>();
   private win: () => BrowserWindow | undefined;
+  private trust: Trust;
   private dataDir = app.getPath('userData');
 
-  constructor(win: () => BrowserWindow | undefined) { this.win = win; }
+  constructor(win: () => BrowserWindow | undefined, trust: Trust) { this.win = win; this.trust = trust; }
+
+  /** The paired session's own URL + pinned transport; renderer-supplied URLs are never used. */
+  private route(c: Conn) {
+    const s = this.trust.session(c.sessionId);
+    if (!s) throw new Error('This class is no longer paired on this device. Join again with the code.');
+    return s;
+  }
 
   private destDir(c: Conn) {
     const root = process.env.CLASSROOM_DOWNLOADS_DIR ?? join(app.getPath('downloads'), 'Classroom LAN');
@@ -47,7 +59,7 @@ export class StudentFiles {
       const job = this.jobs.get(r.id);
       if (job) return job.state;
       const d = done[`${c.sessionId}:${r.id}`];
-      if (d && d.sha256 === r.sha256 && (await exists(d.path))) return { resourceId: r.id, state: 'completed', bytes: r.size, size: r.size, canOpen: SAFE_TO_OPEN.has(extname(d.path).slice(1).toLowerCase()) } satisfies FileState;
+      if (d && d.sha256 === r.sha256 && (await exists(d.path))) return { resourceId: r.id, state: 'completed', bytes: r.size, size: r.size, canOpen: canOpen(d.path) } satisfies FileState;
       const p = partPaths(this.destDir(c), r.id);
       const part = await stat(p.part).then((s) => s.size, () => 0);
       return { resourceId: r.id, state: part > 0 ? 'paused' : 'not_started', bytes: part, size: r.size } satisfies FileState;
@@ -83,14 +95,15 @@ export class StudentFiles {
     job.ctl = ctl;
     this.set(job, { state: 'downloading', error: undefined });
     try {
+      const route = this.route(job.conn);
       const out = await downloadResource({
-        url: job.conn.url, token: job.conn.token, resource: job.resource, destDir: this.destDir(job.conn), signal: ctl.signal,
+        transport: route.transport, url: route.url, token: job.conn.token, resource: job.resource, destDir: this.destDir(job.conn), signal: ctl.signal,
         onProgress: (p) => this.set(job, { state: p.state, bytes: p.bytes, resumedFrom: p.resumedFrom || undefined }),
       });
       const done = await this.completed();
       done[`${job.conn.sessionId}:${job.resource.id}`] = { path: out.path, sha256: job.resource.sha256! };
       await writeFile(this.completedPath(), JSON.stringify(done));
-      this.set(job, { state: 'completed', bytes: job.resource.size, canOpen: SAFE_TO_OPEN.has(extname(out.path).slice(1).toLowerCase()) });
+      this.set(job, { state: 'completed', bytes: job.resource.size, canOpen: canOpen(out.path) });
     } catch (e) {
       if (ctl.signal.aborted) return this.set(job, { state: 'paused' });
       this.set(job, { state: 'failed', error: (e as Error).message });
@@ -105,7 +118,7 @@ export class StudentFiles {
   async show(c: Pick<Conn, 'sessionId'>, resourceId: string) { shell.showItemInFolder(await this.pathOf(c, resourceId)); }
   async open(c: Pick<Conn, 'sessionId'>, resourceId: string) {
     const p = await this.pathOf(c, resourceId);
-    if (!SAFE_TO_OPEN.has(extname(p).slice(1).toLowerCase())) throw new Error('This type of file is not opened automatically. Use Show in folder.');
+    if (!canOpen(p)) throw new Error('This type of file is not opened directly (it can contain macros or run code). Use Show in folder.');
     const err = await shell.openPath(p);
     if (err) throw new Error(err);
   }
@@ -129,7 +142,7 @@ export class StudentFiles {
   private pendingPath() { return join(this.dataDir, 'pending-uploads.json'); }
   private receiptsDir() { return join(this.dataDir, 'receipts'); }
 
-  async submit(c: Conn, assignmentId: string, pickId: string): Promise<Receipt> {
+  async submit(c: Conn, assignmentId: string, pickId: string): Promise<StoredReceipt> {
     const pick = this.picks.get(pickId);
     if (!pick) throw new Error('Choose the file again.');
     // The same intended submission (same class, assignment, file and size) reuses its idempotency key, even across
@@ -138,22 +151,34 @@ export class StudentFiles {
     const k = `${c.sessionId}:${assignmentId}:${pick.path}:${pick.size}`;
     pending[k] ??= randomUUID();
     await writeFile(this.pendingPath(), JSON.stringify(pending));
+    const route = this.route(c);
     const receipt = await uploadSubmission({
-      url: c.url, token: c.token, assignmentId, path: pick.path, fileName: pick.name, idempotencyKey: pending[k]!,
+      transport: route.transport, url: route.url, token: c.token, assignmentId, path: pick.path, fileName: pick.name, idempotencyKey: pending[k]!,
       onProgress: (sent, size) => this.win()?.webContents.send('student:upload', { assignmentId, sent, size }),
     });
     await mkdir(this.receiptsDir(), { recursive: true });
-    await writeFile(join(this.receiptsDir(), `${receipt.submissionId}.json`), JSON.stringify(receipt, null, 2), { flag: 'w' });
+    // Kept even if verification fails (it is evidence), but never presented as verified.
+    await writeFile(join(this.receiptsDir(), `${receipt.payload.submissionId}.json`), JSON.stringify(receipt, null, 2), { flag: 'w' });
     delete pending[k];
     await writeFile(this.pendingPath(), JSON.stringify(pending));
     this.picks.delete(pickId);
-    return receipt;
+    return this.check(receipt, route.binding.teacherPublicKey);
+  }
+
+  /** Verified only against a teacher key this device learned through a PAKE-authenticated pairing. */
+  check(receipt: Receipt, expectedTeacherKey?: string): StoredReceipt {
+    const anchors = this.trust.pairedTeacherKeys();
+    const key = expectedTeacherKey ?? (anchors.has(receipt.teacherPublicKey) ? receipt.teacherPublicKey : undefined);
+    if (!key) return { receipt, verified: false, reason: 'signed by a teacher key this device never paired with' };
+    const r = verifyReceipt(receipt, { trustedTeacherKey: key });
+    return r.ok ? { receipt, verified: true } : { receipt, verified: false, reason: r.reason };
   }
 
   /** Locally stored receipts (durable, independent of the teacher). */
-  async receipts(sessionId?: string): Promise<Receipt[]> {
+  async receipts(sessionId?: string): Promise<StoredReceipt[]> {
     const files = await readdir(this.receiptsDir()).catch(() => [] as string[]);
     const all = await Promise.all(files.filter((f) => f.endsWith('.json')).map((f) => json<Receipt | null>(join(this.receiptsDir(), f), null)));
-    return all.filter((r): r is Receipt => !!r && (!sessionId || r.sessionId === sessionId)).sort((a, b) => b.submittedAt - a.submittedAt);
+    return all.filter((r): r is Receipt => !!r?.payload && (!sessionId || r.payload.sessionId === sessionId))
+      .map((r) => this.check(r)).sort((a, b) => b.receipt.payload.submittedAt - a.receipt.payload.submittedAt);
   }
 }

@@ -14,8 +14,17 @@ export function App() {
   const [caps, setCaps] = useState<Capabilities | null>(null);
   useEffect(() => { api.capabilities().then(setCaps); }, []);
   if (!caps) return null;
-  const home = () => setScreen({ s: 'home' });
 
+  const ks = caps.keystore;
+  const keyBanner = ks.insecureDev
+    ? <div className="danger-banner">Development mode: identity keys are stored WITHOUT OS protection (CLASSROOM_DEV_INSECURE_KEYSTORE). Never use this for real classes.</div>
+    : ks.regenerated.length ? <div className="warning-banner">Stored keys could not be unlocked and were replaced ({ks.regenerated.join(', ')}). Teachers will see this as a new device and must approve it again.</div> : null;
+  if (keyBanner) return <>{keyBanner}<Screens screen={screen} setScreen={setScreen} caps={caps} /></>;
+  return <Screens screen={screen} setScreen={setScreen} caps={caps} />;
+}
+
+function Screens({ screen, setScreen, caps }: { screen: Screen; setScreen(s: Screen): void; caps: Capabilities }) {
+  const home = () => setScreen({ s: 'home' });
   switch (screen.s) {
     case 'home':
       return (

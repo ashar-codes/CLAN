@@ -73,3 +73,9 @@ textarea { font: inherit; padding: .55rem .7rem; border-radius: var(--radius); b
 summary { cursor: pointer; }
 .assignment > button, .file .row > button { align-self: flex-start; }
 .assignment > button { width: auto; }
+.receipt.bad { border-color: var(--danger); }
+.warning-banner { border: 2px solid var(--warn); border-radius: var(--radius); padding: .8rem 1rem; margin-bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.trust { font-size: .75rem; border-radius: 6px; padding: .05rem .4rem; border: 1px solid var(--border); }
+.trust.known { color: var(--ok); border-color: var(--ok); }
+.trust.new_device { color: var(--warn); border-color: var(--warn); }
+.danger-banner { background: var(--danger); color: #fff; padding: .5rem 1rem; }

@@ -32,8 +32,9 @@ export const canonicalBytes = (value: unknown) => enc.encode(canonical(value));
 
 /** Device / teacher identity: SHA-256 of the raw Ed25519 public key, base64url. */
 export const keyFingerprint = (publicKeyB64: string) => b64u.encode(sha256(b64u.decode(publicKeyB64)));
-/** "AB12-CD34-EF56-GH78" for people to compare. */
-export const shortFingerprint = (fp: string) => fp.slice(0, 16).match(/.{4}/g)!.join('-');
+/** "3F9A-12C4-7B0E-D551" (first 64 bits, hex) for people to compare out loud. */
+export const shortFingerprint = (fp: string) =>
+  Array.from(b64u.decode(fp).slice(0, 8), (x) => x.toString(16).padStart(2, '0')).join('').toUpperCase().match(/.{4}/g)!.join('-');
 
 export function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;

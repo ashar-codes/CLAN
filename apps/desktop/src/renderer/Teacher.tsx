@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { ClassroomConnection, type Quality } from '@classroom/client';
-import type { ClassroomInfo, JoinPolicy, Member, TeacherAssignmentView, TeacherResourceView, TimelineEvent, TransferStats } from '@classroom/protocol';
+import { shortFingerprint, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats } from '@classroom/protocol';
 import { TeacherAssignments, TeacherFiles } from './Files.tsx';
 import type { Capabilities, PastClass, StartedClassroom } from '../shared.ts';
 import { api } from './App.tsx';
 
 const POLICIES: { v: JoinPolicy; label: string }[] = [
   { v: 'approval', label: 'I approve everyone' },
-  { v: 'known', label: 'Auto-approve students I approved before' },
+  { v: 'known', label: 'Auto-approve devices I approved before' },
   { v: 'open', label: 'Anyone with the code' },
 ];
 
@@ -189,10 +189,12 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   );
 }
 
+const TRUST: Record<Member['trust'], string> = { known: 'Known device ✓', new_device: 'New device for this roll number', first: 'First time', legacy: '' };
+
 function Who({ m }: { m: Member }) {
   return (
     <div>
-      <b>{m.fullName}</b> <span className="muted">{m.rollNo}</span><br />
+      <b>{m.fullName}</b> <span className="muted">{m.rollNo}</span> {TRUST[m.trust] && <span className={`trust ${m.trust}`} title={`Device key ${shortFingerprint(m.deviceFingerprint)}`}>{TRUST[m.trust]}</span>}<br />
       <small className="muted"><span className={`dot ${m.connected ? 'excellent' : 'disconnected'}`} /> {m.deviceName} · {m.connected ? 'Connected' : 'Disconnected'}</small>
     </div>
   );
