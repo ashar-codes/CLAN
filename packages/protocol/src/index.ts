@@ -1,6 +1,7 @@
 // Wire protocol shared by teacher server, desktop, mobile and the load simulator.
 // Every inbound message is parsed with these schemas at the trust boundary.
 import { z } from 'zod';
+import type { ClanCapability, ClanType } from './clan.ts';
 
 export const PRODUCT_NAME = 'CLAN';
 /**
@@ -82,9 +83,16 @@ export type JoinResponse = { memberId: string; token: string; status: MemberStat
 /** Physical connectivity (how devices reach each other). Direct and mesh are interfaces only for now. */
 export type Connectivity = 'lan' | 'direct' | 'mesh_experimental';
 
+/** Live CLAN session state (historical name). */
 export type ClassroomInfo = {
   sessionId: string;
   title: string;
+  /** Canonical CLAN this session belongs to, and its type. */
+  clanId: string | null;
+  clanType: ClanType;
+  description: string;
+  /** Temporary CLANs end at this time (null = no expiry). */
+  expiresAt: number | null;
   connectivity: Connectivity;
   /** Data plane: teacher only (false) or peer-assisted (true). The control plane is always the teacher. */
   peerAssist: boolean;
@@ -115,7 +123,8 @@ export type Member = {
 export type TimelineEvent = { id: number; ts: number; type: string; actor: string | null; data: Record<string, unknown> };
 
 /** TXT record published over DNS-SD. */
-export type Advertisement = { v: string; sid: string; title: string };
+/** DNS-SD TXT. Untrusted hint only: name + type, nothing else before pairing. */
+export type Advertisement = { v: string; sid: string; title: string; type?: string };
 
 // ---- Files & assignments ----
 export const TransferState = z.enum(['not_started', 'queued', 'downloading', 'paused', 'verifying', 'completed', 'failed']);
@@ -234,7 +243,10 @@ export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.
 
 // ---- WebSocket: server -> client ----
 export type ServerMessage =
-  | { t: 'hello'; role: 'teacher' | 'student'; memberId: string | null; status: MemberStatus | null; classroom: ClassroomInfo; serverTime: number }
+  /** `role` keeps its legacy wire values: 'teacher' = host, 'student' = member. */
+  | { t: 'hello'; role: 'teacher' | 'student'; memberId: string | null; status: MemberStatus | null; classroom: ClassroomInfo; serverTime: number; capabilities: ClanCapability[] }
+  /** Member-visible roster (names only) for CLANs that grant VIEW_MEMBERS. */
+  | { t: 'members'; members: { name: string; host: boolean; connected: boolean }[] }
   | { t: 'pong'; n: number; serverTime: number }
   | { t: 'class.state'; classroom: ClassroomInfo }
   | { t: 'roster'; members: Member[] }
@@ -255,3 +267,4 @@ export const WS_CLOSE = { authFailed: 4001, removed: 4003, ended: 4004, badMessa
 export * from './trust.ts';
 export * from './peer.ts';
 export * from './network.ts';
+export * from './clan.ts';

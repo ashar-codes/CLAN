@@ -35,7 +35,7 @@ it('secure join, approve, files, assignment + signed receipt, MITM/downgrade/clo
   await teacher.getByText('Create Classroom').click();
   await teacher.getByLabel('Class name').fill('Operating Systems');
   await teacher.getByRole('button', { name: 'Start Classroom' }).click();
-  const code = (await teacher.getByLabel('Classroom code').textContent())!.replace(/\D/g, '');
+  const code = (await teacher.getByLabel('Join code').textContent())!.replace(/\D/g, '');
   expect(code).toMatch(/^\d{6}$/);
 
   const downloads = join(scratch, 'downloads');

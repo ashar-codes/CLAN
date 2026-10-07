@@ -4,11 +4,12 @@ import { TeacherSetup, TeacherDashboard } from './Teacher.tsx';
 import { StudentFlow } from './Student.tsx';
 import { Shell } from './Shell.tsx';
 import type { StartedClassroom } from '../shared.ts';
+import type { ClanType } from '@classroom/protocol';
 
 declare global { interface Window { classroom: DesktopApi } }
 export const api = window.classroom;
 
-type Screen = { s: 'home' } | { s: 'teacher-setup' } | { s: 'teacher'; started: StartedClassroom } | { s: 'student' };
+type Screen = { s: 'home' } | { s: 'teacher-setup'; type?: ClanType } | { s: 'teacher'; started: StartedClassroom } | { s: 'student' };
 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ s: 'home' });
@@ -28,9 +29,9 @@ function Screens({ screen, setScreen, caps }: { screen: Screen; setScreen(s: Scr
   const home = () => setScreen({ s: 'home' });
   switch (screen.s) {
     case 'home':
-      return <Shell onCreateClassroom={() => setScreen({ s: 'teacher-setup' })} onJoinClassroom={() => setScreen({ s: 'student' })} />;
+      return <Shell onCreate={(type) => setScreen({ s: 'teacher-setup', type })} onJoin={() => setScreen({ s: 'student' })} />;
     case 'teacher-setup':
-      return <TeacherSetup caps={caps} onBack={home} onStarted={(started) => setScreen({ s: 'teacher', started })} />;
+      return <TeacherSetup caps={caps} initialType={screen.type} onBack={home} onStarted={(started) => setScreen({ s: 'teacher', started })} />;
     case 'teacher':
       return <TeacherDashboard caps={caps} started={screen.started} onEnded={home} />;
     case 'student':

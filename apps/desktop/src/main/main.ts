@@ -5,7 +5,7 @@ import { hostname } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
+import { ClanType, JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
 import { pairAndJoin, reconnect, type Candidate } from '@classroom/client';
 import { pinnedTransport } from '@classroom/client/node';
 import { logError } from '@classroom/server';
@@ -62,7 +62,9 @@ function loadProfile(): OwnProfile {
 
 const ConnArgs = z.object({ url: z.string().regex(/^https:\/\/[\w.:[\]-]+$/), token: z.string().min(16).max(128), sessionId: z.uuid(), classTitle: z.string().max(200) });
 const ResourceArgs = z.object({ id: z.uuid(), name: z.string().max(300), size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/), mime: z.string().max(200), addedAt: z.number(), status: z.literal('ready'), available: z.boolean(), pushed: z.boolean() });
-const StartArgs = z.object({ title: z.string().trim().min(1).max(80), policy: JoinPolicy, host: z.ipv4().optional() });
+const StartArgs = z.object({ title: z.string().trim().min(1).max(80), policy: JoinPolicy, host: z.ipv4().optional(), type: ClanType.default('CLASSROOM'),
+  description: z.string().max(500).default(''), hours: z.number().min(0.25).max(72).optional() });
+let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 
 function registerIpc() {
   ipcMain.handle('caps', () => capabilities());
@@ -120,13 +122,25 @@ function registerIpc() {
     const ifaces = candidateInterfaces();
     const host = a.host && ifaces.some((i) => i.address === a.host) ? a.host : ifaces[0]?.address;
     if (!host) throw new Error('No network connection found. Connect this computer to the classroom Wi-Fi or router first.');
-    server = await startClassroomServer({ title: a.title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: 'lan', identity: await trust.teacherIdentity() });
+    // Every hosted session belongs to a canonical CLAN: classrooms reuse their course's CLAN, other types are created here.
+    const expiresAt = a.type === 'TEMPORARY' ? Date.now() + (a.hours ?? 2) * 3600_000 : null;
+    const clanId = a.type === 'CLASSROOM' ? clan.classroomClanFor(a.title) : clan.clans.create({ type: a.type, name: a.title, createdBy: clan.me, expiresAt: expiresAt ?? undefined }).id;
+    server = await startClassroomServer({ title: a.title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: 'lan', identity: await trust.teacherIdentity(),
+      clan: { type: a.type, id: clanId, description: a.description, expiresAt } });
+    clan.syncClassrooms();
+    clearTimeout(expiryTimer);
+    if (expiresAt) expiryTimer = setTimeout(() => server?.classroom.end(), expiresAt - Date.now()); // the session also refuses joins/tokens after expiry
     trust.pin(server.url, server.tls.spkiSha256); // the teacher's own dashboard uses WSS too
     server.resources.on('progress', (resourceId: string, bytes: number, size: number) => e.sender.send('teacher:import', { resourceId, bytes, size }));
     server.classroom.setPolicy(a.policy);
     return { url: server.url, code: server.classroom.code, teacherToken: server.classroom.teacherToken, title: a.title, host, iface: ifaces.find((i) => i.address === host)!.name };
   });
-  ipcMain.handle('teacher:stop', async () => { await server?.close(); server = null; clan.syncClassrooms(); });
+  ipcMain.handle('teacher:stop', async () => {
+    const ended = server?.classroom.clan;
+    await server?.close(); server = null; clearTimeout(expiryTimer);
+    clan.syncClassrooms();
+    if (ended?.type === 'TEMPORARY' && ended.id) clan.clans.archive(ended.id); // ending a Temporary CLAN ends the CLAN; downloaded files stay
+  });
 
   ipcMain.handle('teacher:addFiles', async (e) => {
     if (!server) throw new Error('Start a class first.');

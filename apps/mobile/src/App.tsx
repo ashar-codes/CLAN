@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
 import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
-import { shortFingerprint, StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
+import { clanLabels, shortFingerprint, StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
@@ -50,7 +50,7 @@ function ProfileForm({ c, initial, onSaved }: { c: C; initial: OwnProfile; onSav
   return (
     <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
       <Text style={[s.h1, { color: c.text }]}>Your details</Text>
-      <Text style={{ color: c.muted }}>Shown to your teacher so they know who is joining. Saved on this phone only.</Text>
+      <Text style={{ color: c.muted }}>Shown to the CLAN host so they know who is joining. Saved on this phone only.</Text>
       <Field c={c} label="Full name" value={p.fullName} placeholder="Ashar Khan" onChange={(v) => setP({ ...p, fullName: v })} />
       <Field c={c} label="Student / roll number" value={p.rollNo} placeholder="FA23-CS-114" onChange={(v) => setP({ ...p, rollNo: v })} />
       <Field c={c} label="Device name" value={p.deviceName} placeholder="Ashar-iPhone" onChange={(v) => setP({ ...p, deviceName: v })} />
@@ -82,7 +82,7 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
 
   return (
     <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
-      <Text style={[s.h1, { color: c.text }]}>Join Classroom</Text>
+      <Text style={[s.h1, { color: c.text }]}>Join CLAN</Text>
       <Pressable onPress={onEdit}><Text style={{ color: c.muted }}>Joining as <Text style={{ fontWeight: '600', color: c.text }}>{profile.fullName}</Text> · <Text style={{ color: c.accent }}>edit</Text></Text></Pressable>
       <TextInput
         style={[s.code, { color: c.text, borderColor: c.border, backgroundColor: c.surface }]}
@@ -93,7 +93,7 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
       {!!error && <Text style={{ color: c.danger }}>{error}</Text>}
       <Button c={c} primary label={busy ? 'Finding classroom…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
       <Text style={{ color: c.muted, marginTop: 24 }}>
-        {found.length ? `Classrooms nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for classrooms on this Wi-Fi… Make sure you are on the same network as your teacher. Internet is not needed.'}
+        {found.length ? `Nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for CLANs on this Wi-Fi… Make sure you are on the same network as the host. Internet is not needed.'}
       </Text>
     </ScrollView>
   );
@@ -137,16 +137,18 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
   const conn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title,
     transport: joined.transport as PinnedNativeTransport, teacherPublicKey: joined.binding.teacherPublicKey, peerAssist: info.peerAssist, device }), [joined, info.peerAssist, device]);
 
-  const over = info.ended ? 'The class has ended.' : status === 'rejected' ? 'The teacher declined your request.' : status === 'removed' ? 'You were removed from the class.'
-    : status === 'blocked' ? 'This device was blocked from the class.' : closed ? 'Your session expired. Join again with the code.' : '';
+  const L = clanLabels(info.clanType);
+  const over = info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
+    : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
 
   return (
     <ScrollView contentContainerStyle={s.page}>
       <Text style={[s.h1, { color: c.text }]}>{info.title}</Text>
+      <Text style={{ color: c.muted }}>{L.type}</Text>
       {over ? (
         <><Text style={{ color: c.text, fontSize: 17 }}>{over}</Text><Button c={c} primary label="OK" onPress={onLeave} /></>
       ) : status === 'pending' ? (
-        <><ActivityIndicator size="large" /><Text style={{ color: c.text, fontSize: 17, textAlign: 'center' }}>Waiting for the teacher to let you in…</Text><Button c={c} label="Cancel" onPress={onLeave} /></>
+        <><ActivityIndicator size="large" /><Text style={{ color: c.text, fontSize: 17, textAlign: 'center' }}>Waiting for the {L.host.toLowerCase()} to let you in…</Text><Button c={c} label="Cancel" onPress={onLeave} /></>
       ) : (
         <>
           <View style={[s.pill, { borderColor: c.border }]}>
@@ -154,7 +156,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
             <Text style={{ color: c.text }}>{QUALITY[quality]}</Text>
           </View>
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
-          <Button c={c} label="Leave class" onPress={onLeave} />
+          <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
         </>
       )}
     </ScrollView>

@@ -10,7 +10,7 @@ const listen = <T>(channel: string, cb: (v: T) => void) => {
 const inv = (ch: string) => (...a: unknown[]) => ipcRenderer.invoke(ch, ...a);
 const api: DesktopApi = {
   clan: {
-    home: inv('clan:home'), list: inv('clan:list'), create: inv('clan:create'), detail: inv('clan:detail'),
+    home: inv('clan:home'), joined: inv('clan:joined'), list: inv('clan:list'), detail: inv('clan:detail'),
     notes: inv('notes:mine'), createNote: inv('notes:create'), updateNote: inv('notes:update'), removeNote: inv('notes:remove'), shareNote: inv('notes:share'),
     collections: inv('saved:collections'), savedItems: inv('saved:items'), save: inv('saved:add'), createCollection: inv('saved:collection'),
     moveSaved: inv('saved:move'), shareSaved: inv('saved:share'),

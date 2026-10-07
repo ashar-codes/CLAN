@@ -163,6 +163,13 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE resources ADD COLUMN chunk_size INTEGER;
   ALTER TABLE resources ADD COLUMN manifest TEXT;
   `,
+  // 5: CLAN sessions — any CLAN type is hosted by the same session machinery. Old rows are classrooms.
+  `
+  ALTER TABLE sessions ADD COLUMN clan_type TEXT NOT NULL DEFAULT 'CLASSROOM';
+  ALTER TABLE sessions ADD COLUMN clan_id TEXT;
+  ALTER TABLE sessions ADD COLUMN description TEXT NOT NULL DEFAULT '';
+  ALTER TABLE sessions ADD COLUMN expires_at INTEGER;
+  `,
 ];
 
 export type Db = DatabaseSync;

@@ -120,3 +120,4 @@ button.on { background: var(--ink); color: var(--paper); }
 .link-row.on { background: var(--paper-2); color: var(--ink); }
 .stack > .back { justify-self: start; }
 @media (max-width: 760px) { .study-grid, .me-grid { grid-template-columns: 1fr; } .shell-top { flex-wrap: wrap; } }
+.seg-types { display: flex; gap: .3rem; flex-wrap: wrap; }

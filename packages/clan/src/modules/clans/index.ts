@@ -92,6 +92,20 @@ export class Clans implements MembershipQuery {
   }
   clansOf(userId: string) { return this.list(userId).map((c) => c.id); }
 
+  /** A member device records a CLAN it joined (same id as on the host). The host's device key identifies the host user. */
+  recordJoined(o: { id: string; type: ClanType; name: string; hostDeviceId: string; hostName: string; expiresAt?: number | null; me: string }) {
+    return tx(this.db, () => {
+      if (!this.get(o.id)) {
+        const host = this.identity.userForDevice(o.hostDeviceId, o.hostName);
+        this.create({ id: o.id, type: o.type, name: o.name, createdBy: host, expiresAt: o.expiresAt ?? undefined });
+      }
+      this.addMember(o.id, o.me, 'member');
+      return this.get(o.id)!;
+    });
+  }
+  /** Ended CLANs (e.g. a finished Temporary session) leave "My CLANs"; their history and files stay. */
+  archive(id: string) { this.db.prepare('UPDATE clans_clans SET archived_at = ? WHERE id = ? AND archived_at IS NULL').run(this.now(), id); }
+
   /** Classroom sessions (meetings) of a CLASSROOM CLAN, oldest first. */
   sessionsOf(clanId: string): string[] { return classroomSessions(this.db, clanId); }
   clanOfSession(sessionId: string) { return (this.db.prepare('SELECT clan_id c FROM clans_classroom_sessions WHERE session_id = ?').get(sessionId) as { c: string } | undefined)?.c ?? null; }

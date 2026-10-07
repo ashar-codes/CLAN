@@ -42,7 +42,7 @@ it('teacher + two students: peer transfer, signature verified, teacher-only swit
   await teacher.getByText('Create Classroom').click();
   await teacher.getByLabel('Class name').fill('Networks');
   await teacher.getByRole('button', { name: 'Start Classroom' }).click();
-  const code = (await teacher.getByLabel('Classroom code').textContent())!.replace(/\D/g, '');
+  const code = (await teacher.getByLabel('Join code').textContent())!.replace(/\D/g, '');
   await teacher.getByTestId('peer-assist-toggle').click();
   await expect.poll(() => teacher.getByTestId('distribution').textContent()).toContain('Peer Assistance ON');
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClassroomConnection, type Candidate, type Quality } from '@classroom/client';
-import { shortFingerprint, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
+import { clanLabels, shortFingerprint, type ClanCapability, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import type { Joined, OwnProfile } from '../shared.ts';
 import { StudentAssignments, StudentFiles as FilesCard } from './Files.tsx';
 import { api } from './App.tsx';
@@ -67,23 +67,23 @@ function JoinForm({ profile, onJoined, onEditProfile, onBack }: { profile: OwnPr
   return (
     <main className="center narrow">
       <button className="link back" onClick={onBack}>← Back</button>
-      <h2>Join Classroom</h2>
+      <h2>Join CLAN</h2>
       <p className="muted">Joining as <b>{profile.fullName}</b> ({profile.rollNo}) · <button className="link" onClick={onEditProfile}>edit</button></p>
-      <input className="code-input" autoFocus inputMode="numeric" autoComplete="off" maxLength={6} placeholder="••••••" value={code} aria-label="Classroom code"
+      <input className="code-input" autoFocus inputMode="numeric" autoComplete="off" maxLength={6} placeholder="••••••" value={code} aria-label="Join code"
         onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={(e) => e.key === 'Enter' && code.length === 6 && run(() => api.joinClass(code, manual))} />
       {error && <p className="error">{error}</p>}
       <button className="primary" disabled={code.length !== 6 || busy} onClick={() => run(() => api.joinClass(code, manual))}>{busy ? 'Connecting securely…' : 'Join'}</button>
       {last && <button disabled={busy} onClick={() => run(() => api.rejoin(last.sessionId))}>Rejoin {last.title} (no code needed)</button>}
       <details className="diag">
-        <summary className="muted">Can't find the class?</summary>
-        <p className="muted">{found.length === 0 ? 'No classrooms found on this network yet.' : `Classrooms visible on this network: ${found.map((f) => f.title).join(', ')}`}</p>
+        <summary className="muted">Can't find it?</summary>
+        <p className="muted">{found.length === 0 ? 'No CLANs found on this network yet.' : `Visible on this network: ${found.map((f) => f.title).join(', ')}`}</p>
         <ul className="muted">
-          <li>Make sure you are on the same Wi-Fi as the teacher (internet is not needed).</li>
-          <li>Some guest/university networks block devices from seeing each other ("client isolation"). Ask the teacher to use a classroom router.</li>
+          <li>Make sure you are on the same Wi-Fi as the host (internet is not needed).</li>
+          <li>Some guest/university networks block devices from seeing each other ("client isolation"). Ask the host to use a local router.</li>
           <li>If your firewall asked about CLAN, choose Allow.</li>
         </ul>
-        <label>Teacher address (shown on the teacher's screen under Network)<input value={manual} placeholder="192.168.1.20:52345" onChange={(e) => setManual(e.target.value.trim())} /></label>
-        <p className="muted small-text">The address only helps find the teacher's computer. Your code still proves you're talking to the real classroom.</p>
+        <label>Host address (shown on the host's screen under Network)<input value={manual} placeholder="192.168.1.20:52345" onChange={(e) => setManual(e.target.value.trim())} /></label>
+        <p className="muted small-text">The address only helps find the teacher's computer. Your code still proves you're talking to the real CLAN.</p>
       </details>
     </main>
   );
@@ -99,6 +99,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [resources, setResources] = useState<ResourceView[]>([]);
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
   const [pushed, setPushed] = useState<string | null>(null);
+  const [can, setCan] = useState<ClanCapability[]>([]);
+  const [people, setPeople] = useState<{ name: string; host: boolean; connected: boolean }[]>([]);
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
   const revoked = useRef<string[]>([]);
   const connRef = useRef<ClassroomConnection | null>(null);
@@ -108,7 +110,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
     // Renderer WSS: Chromium accepts only the PAKE-pinned certificate (main-process verify proc).
     const c = new ClassroomConnection(session.url, session.token, {
       onMessage: (m) => {
-        if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); }
+        if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
+        if (m.t === 'members') setPeople(m.members);
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') setStatus(m.status);
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
@@ -134,8 +137,14 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const send = useCallback((m: ClientMessage) => connRef.current?.send(m), []);
   const conn = useMemo(() => ({ url: session.url, token: session.token, sessionId: session.classroom.sessionId, classTitle: session.classroom.title }), [session]);
 
-  const over = info.ended ? 'The class has ended.' : status === 'rejected' ? 'The teacher declined your request.' : status === 'removed' ? 'You were removed from the class.'
-    : status === 'blocked' ? 'This device was blocked from the class.' : closed ? 'Your session expired. Join again with the code.' : '';
+  // Approved: this device now holds a canonical membership in that CLAN (profile and identity are not copied).
+  useEffect(() => {
+    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt }).catch(() => {});
+  }, [status, info.sessionId, info.clanId, info.clanType, info.title, info.expiresAt, joined.teacherPublicKey]);
+  const L = clanLabels(info.clanType);
+
+  const over = info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
+    : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
   if (over) return <main className="center narrow"><h2>{info.title}</h2><p>{over}</p><button className="primary" onClick={onLeave}>OK</button></main>;
 
   const banner = teacherWarn && (
@@ -150,7 +159,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       {banner}
       <h2>{info.title}</h2>
       <div className="spinner" aria-hidden />
-      <p>Waiting for the teacher to let you in…</p>
+      <p>Waiting for the {L.host.toLowerCase()} to let you in…</p>
       <button onClick={onLeave}>Cancel</button>
     </main>
   );
@@ -159,15 +168,22 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
     <div className="dash">
       {banner}
       {offlineSince !== null ? (
-        <div className="warning-banner" role="status" data-testid="teacher-offline">Teacher temporarily disconnected. Previously published resources remain available.</div>
+        <div className="warning-banner" role="status" data-testid="teacher-offline">{L.host} temporarily disconnected. Previously published resources remain available.</div>
       ) : null}
       <header className="bar">
-        <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · teacher {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span></div>
+        <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.description && <p className="muted small-text">{info.description}</p>}</div>
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>
       </header>
       <section className="grid">
-        <FilesCard conn={conn} resources={resources} pushed={pushed} send={send} />
-        <StudentAssignments conn={conn} assignments={assignments} />
+        <FilesCard conn={conn} resources={resources} pushed={pushed} send={send} host={L.host.toLowerCase()} />
+        {can.includes('SUBMIT_ASSIGNMENT') && <StudentAssignments conn={conn} assignments={assignments} />}
+        {can.includes('VIEW_MEMBERS') && (
+          <div className="card" data-testid="clan-members">
+            <h3>{L.members} ({people.length})</h3>
+            {people.map((p, i) => <div key={i} className="person"><span><span className={`dot ${p.connected ? 'excellent' : 'disconnected'}`} /> {p.host ? `${L.host} (host)` : p.name}</span></div>)}
+          </div>
+        )}
+        {info.clanType !== 'CLASSROOM' && <div className="card"><h3>Chat</h3><p className="muted">Coming in the next update. Your membership here is already set up for it.</p></div>}
       </section>
     </div>
   );

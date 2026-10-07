@@ -20,7 +20,7 @@ function useLoad<T>(f: () => Promise<T>) {
   return [v, reload, err] as const;
 }
 
-export function Shell({ onCreateClassroom, onJoinClassroom }: { onCreateClassroom(): void; onJoinClassroom(): void }) {
+export function Shell({ onCreate, onJoin }: { onCreate(type?: ClanType): void; onJoin(): void }) {
   const [tab, setTab] = useState<Tab>('home');
   return (
     <div className="shell">
@@ -31,8 +31,8 @@ export function Shell({ onCreateClassroom, onJoinClassroom }: { onCreateClassroo
         </nav>
       </header>
       <main className="shell-body">
-        {tab === 'home' && <Home go={setTab} onCreateClassroom={onCreateClassroom} onJoinClassroom={onJoinClassroom} />}
-        {tab === 'clans' && <Clans onCreateClassroom={onCreateClassroom} onJoinClassroom={onJoinClassroom} />}
+        {tab === 'home' && <Home go={setTab} onCreate={onCreate} onJoin={onJoin} />}
+        {tab === 'clans' && <Clans onCreate={onCreate} onJoin={onJoin} />}
         {tab === 'study' && <Study />}
         {tab === 'saved' && <Saved />}
         {tab === 'me' && <Me />}
@@ -41,9 +41,9 @@ export function Shell({ onCreateClassroom, onJoinClassroom }: { onCreateClassroo
   );
 }
 
-function Home({ go, onCreateClassroom, onJoinClassroom }: { go(t: Tab): void; onCreateClassroom(): void; onJoinClassroom(): void }) {
+function Home({ go, onCreate, onJoin }: { go(t: Tab): void; onCreate(type?: ClanType): void; onJoin(): void }) {
   const [h] = useLoad<HomeView>(api.clan.home);
-  const [nearby, setNearby] = useState<{ title: string }[]>([]);
+  const [nearby, setNearby] = useState<{ sid: string; title: string; type: string }[]>([]);
   const [guide, setGuide] = useState(false);
   useEffect(() => api.discover((l) => setNearby(l)), []);
   if (!h) return null;
@@ -55,14 +55,13 @@ function Home({ go, onCreateClassroom, onJoinClassroom }: { go(t: Tab): void; on
         <div className="row">
           <button className="primary" onClick={() => go('study')}>New note</button>
           <button onClick={() => go('saved')}>Save a link</button>
-          <button onClick={() => go('clans')}>New CLAN</button>
-          <button className="choice-inline" onClick={onCreateClassroom}>Create Classroom</button>
-          <button className="choice-inline" onClick={onJoinClassroom}>Join Classroom</button>
+          <button onClick={() => onCreate('STUDY_GROUP')}>New CLAN</button>
+          <button className="choice-inline" onClick={() => onCreate('CLASSROOM')}>Create Classroom</button>
+          <button className="choice-inline" onClick={onJoin}>Join Classroom</button>
         </div>
       </section>
-      <section className="card"><span className="eyebrow">Nearby</span>
-        {nearby.length ? nearby.map((n) => <div key={n.title} className="line"><CLANBeacon state="available" size={16} /> {n.title}<button className="small" onClick={onJoinClassroom}>Join</button></div>)
-          : <p className="muted">No classrooms on this network right now.</p>}
+      <section className="card"><span className="eyebrow">Nearby CLANs</span>
+        <NearbyList list={nearby} onJoin={onJoin} />
       </section>
       <section className="card"><span className="eyebrow">Continue studying</span>
         {h.continueNotes.length ? h.continueNotes.map((n) => <button key={n.id} className="line link-row" onClick={() => go('study')}>{n.title}<span className="muted">{ago(n.updatedAt)}</span></button>)
@@ -93,34 +92,30 @@ function Home({ go, onCreateClassroom, onJoinClassroom }: { go(t: Tab): void; on
   );
 }
 
-function Clans({ onCreateClassroom, onJoinClassroom }: { onCreateClassroom(): void; onJoinClassroom(): void }) {
-  const [list, reload] = useLoad(api.clan.list);
+/** Active CLAN sessions advertised on this network. Names come from untrusted discovery; the code + OPAQUE decide. */
+function NearbyList({ list, onJoin }: { list: { sid: string; title: string; type: string }[]; onJoin(): void }) {
+  if (!list.length) return <p className="muted">No CLAN sessions on this network right now.</p>;
+  return <>{list.map((n) => <div key={n.sid} className="line"><span><CLANBeacon state="available" size={16} /> {n.title} <span className="muted">· {TYPE_LABEL[n.type as ClanType] ?? 'CLAN'}</span></span><button className="small" onClick={onJoin}>Join</button></div>)}</>;
+}
+
+function Clans({ onCreate, onJoin }: { onCreate(type?: ClanType): void; onJoin(): void }) {
+  const [list] = useLoad(api.clan.list);
   const [open, setOpen] = useState<string | null>(null);
-  const [form, setForm] = useState({ type: 'STUDY_GROUP' as Exclude<ClanType, 'CLASSROOM'>, name: '', hours: 4 });
-  const [err, setErr] = useState('');
-  const create = async (e: FormEvent) => {
-    e.preventDefault(); setErr('');
-    try { await api.clan.create({ type: form.type, name: form.name, expiresAt: form.type === 'TEMPORARY' ? Date.now() + form.hours * 3600_000 : undefined }); setForm({ ...form, name: '' }); reload(); } catch (x) { setErr(errText(x)); }
-  };
+  const [nearby, setNearby] = useState<{ sid: string; title: string; type: string }[]>([]);
+  useEffect(() => api.discover((l) => setNearby(l)), []);
   if (open) return <ClanView id={open} onBack={() => setOpen(null)} />;
   return (
     <div className="stack">
       <div className="row between"><h1 className="title">CLANs</h1>
-        <div className="row"><button onClick={onCreateClassroom}>Create Classroom</button><button onClick={onJoinClassroom}>Join Classroom</button></div></div>
-      <div className="clan-grid">
-        {list?.map((c) => <button key={c.id} className="card clan-card" onClick={() => setOpen(c.id)}><span className="eyebrow">{TYPE_LABEL[c.type]}</span><b>{c.name}</b>{c.expiresAt && <span className="muted">until {new Date(c.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}</button>)}
-        {list?.length === 0 && <p className="muted">No CLANs yet. Classrooms you teach appear here automatically.</p>}
-      </div>
-      <form className="card row" onSubmit={create}>
-        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as typeof form.type })} aria-label="Type">
-          {(['STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'] as const).map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
-        </select>
-        <input placeholder="Name" value={form.name} maxLength={80} onChange={(e) => setForm({ ...form, name: e.target.value })} aria-label="CLAN name" />
-        {form.type === 'TEMPORARY' && <label className="inline">for <input type="number" min={1} max={72} value={form.hours} onChange={(e) => setForm({ ...form, hours: Number(e.target.value) })} /> h</label>}
-        <button className="primary" disabled={!form.name.trim()}>New CLAN</button>
-        {err && <span className="error">{err}</span>}
-      </form>
-      <p className="muted small-text">Inviting people into a new CLAN uses the same secure pairing as classrooms and arrives in the next phase; for now a CLAN collects your own notes, links and files.</p>
+        <div className="row"><button className="primary" onClick={() => onCreate('STUDY_GROUP')}>Create CLAN</button><button onClick={onJoin}>Join by Code</button></div></div>
+      <div className="row">{(['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'] as const).map((t) => <button key={t} className="small" onClick={() => onCreate(t)}>+ {TYPE_LABEL[t]}</button>)}</div>
+      <section><span className="eyebrow">My CLANs</span>
+        <div className="clan-grid">
+          {list?.map((c) => <button key={c.id} className="card clan-card" onClick={() => setOpen(c.id)}><span className="eyebrow">{TYPE_LABEL[c.type]}</span><b>{c.name}</b>{c.expiresAt && <span className="muted">until {new Date(c.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}</button>)}
+          {list?.length === 0 && <p className="muted">No CLANs yet. Create one or join with a code.</p>}
+        </div>
+      </section>
+      <section className="card"><span className="eyebrow">Nearby CLANs</span><NearbyList list={nearby} onJoin={onJoin} /></section>
     </div>
   );
 }

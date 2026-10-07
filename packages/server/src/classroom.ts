@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { keyFingerprint, type ClassroomInfo, type Connectivity, type DeviceTrust, type JoinPolicy, type Member, type MemberStatus, type StudentProfile, type TimelineEvent } from '@classroom/protocol';
+import { capabilitiesFor, ClanType, keyFingerprint, type ClanCapability, type ClassroomInfo, type Connectivity, type DeviceTrust, type JoinPolicy, type Member, type MemberStatus, type StudentProfile, type TimelineEvent } from '@classroom/protocol';
 import type { Db } from './db.ts';
 import { Throttle } from './throttle.ts';
 
@@ -10,7 +10,9 @@ export const TOKEN_MAX_MS = 8 * 60 * 60_000;
 const MAX_PENDING = 200;
 
 export type NetworkMode = 'lan' | 'direct';
+/** 'teacher' = the CLAN host (legacy name kept on the wire and in tests); 'student' = a member. */
 export type Principal = { role: 'teacher' } | { role: 'student'; memberId: string };
+export type ClanSession = { type: ClanType; id?: string | null; description?: string; expiresAt?: number | null };
 
 export class JoinError extends Error {
   status: number; code: string; retryAfterMs: number;
@@ -49,29 +51,43 @@ export class Classroom extends EventEmitter {
   private now: () => number;
   readonly title: string;
   readonly networkMode: NetworkMode;
+  readonly clan: Required<ClanSession>;
 
-  constructor(db: Db, title: string, networkMode: NetworkMode, opts: { now?: () => number; code?: string } = {}) {
+  constructor(db: Db, title: string, networkMode: NetworkMode, opts: { now?: () => number; code?: string; clan?: ClanSession } = {}) {
     super();
     this.db = db; this.title = title; this.networkMode = networkMode;
+    const c = opts.clan ?? { type: 'CLASSROOM' };
+    this.clan = { type: ClanType.parse(c.type), id: c.id ?? null, description: (c.description ?? '').slice(0, 500), expiresAt: c.expiresAt ?? null };
+    if (this.clan.type === 'TEMPORARY' && !this.clan.expiresAt) throw new Error('A temporary CLAN needs an end time.');
     this.now = opts.now ?? (() => Date.now());
     this.code = opts.code ?? newJoinCode();
     this.ipThrottle = new Throttle(5, 5 * 60_000, 5 * 60_000, this.now);
     this.globalThrottle = new Throttle(50, 60_000, 60_000, this.now);
-    db.prepare('INSERT INTO sessions (id, title, join_code, network_mode, started_at) VALUES (?, ?, ?, ?, ?)')
-      .run(this.id, title, '', networkMode, this.now());
-    this.log('class.started', null, { title, networkMode });
+    db.prepare('INSERT INTO sessions (id, title, join_code, network_mode, started_at, clan_type, clan_id, description, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(this.id, title, '', networkMode, this.now(), this.clan.type, this.clan.id, this.clan.description, this.clan.expiresAt);
+    this.log('class.started', null, { title, networkMode, clanType: this.clan.type });
   }
 
   info(): ClassroomInfo {
     const r = this.db.prepare('SELECT title, locked, join_policy, started_at, ended_at, connectivity, peer_assist FROM sessions WHERE id = ?').get(this.id) as
       { title: string; locked: number; join_policy: JoinPolicy; started_at: number; ended_at: number | null; connectivity: Connectivity; peer_assist: number };
-    return { sessionId: this.id, title: r.title, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null, connectivity: r.connectivity, peerAssist: !!r.peer_assist };
+    if (r.ended_at === null && this.clan.expiresAt !== null && this.clan.expiresAt <= this.now()) { this.end(); return this.info(); } // expiry ends the session
+    return { sessionId: this.id, title: r.title, clanId: this.clan.id, clanType: this.clan.type, description: this.clan.description, expiresAt: this.clan.expiresAt, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null, connectivity: r.connectivity, peerAssist: !!r.peer_assist };
   }
+
+  /** Server-side authority: what this principal may do in this CLAN. */
+  capabilities(p: Principal): readonly ClanCapability[] {
+    return capabilitiesFor(this.clan.type, p.role === 'teacher' ? 'host' : 'member');
+  }
+  can(p: Principal, cap: ClanCapability) { return this.capabilities(p).includes(cap); }
+
+  /** Known-member trust is scoped per course (classrooms, by title as before) or per CLAN id (other types). */
+  private get trustScope() { return this.clan.type === 'CLASSROOM' || !this.clan.id ? this.title : `clan:${this.clan.id}`; }
 
   /** Pre-checks shared by pairing and joining (no secrets involved). */
   assertJoinable() {
     const info = this.info();
-    if (info.ended) throw new JoinError(410, 'ended', 'This class has ended.');
+    if (info.ended) throw new JoinError(410, 'ended', 'This CLAN session has ended.');
     if (info.locked) throw new JoinError(423, 'locked', 'The teacher has locked joining.');
   }
 
@@ -116,8 +132,8 @@ export class Classroom extends EventEmitter {
 
   /** Cryptographic trust: only an exact previously approved device key counts as known. */
   private trustOf(fingerprint: string, rollNo: string): DeviceTrust {
-    if (this.db.prepare('SELECT 1 FROM trusted_devices WHERE course = ? AND fingerprint = ?').get(this.title, fingerprint)) return 'known';
-    if (this.db.prepare('SELECT 1 FROM trusted_devices WHERE course = ? AND lower(roll_no) = lower(?)').get(this.title, rollNo)) return 'new_device';
+    if (this.db.prepare('SELECT 1 FROM trusted_devices WHERE course = ? AND fingerprint = ?').get(this.trustScope, fingerprint)) return 'known';
+    if (this.db.prepare('SELECT 1 FROM trusted_devices WHERE course = ? AND lower(roll_no) = lower(?)').get(this.trustScope, rollNo)) return 'new_device';
     return 'first';
   }
 
@@ -144,6 +160,7 @@ export class Classroom extends EventEmitter {
     const t = this.now();
     const r = this.db.prepare('SELECT id, status, token_expires, token_issued_at FROM members WHERE token_hash = ? AND session_id = ?').get(h.toString('hex'), this.id) as
       { id: string; status: MemberStatus; token_expires: number; token_issued_at: number } | undefined;
+    if (this.info().ended) return null; // an ended (or expired) CLAN accepts no member tokens
     if (!r || r.token_expires < t || r.token_issued_at + TOKEN_MAX_MS < t || r.status === 'blocked' || r.status === 'removed' || r.status === 'rejected') return null;
     this.touch(r.id);
     return { role: 'student', memberId: r.id };
@@ -194,7 +211,7 @@ export class Classroom extends EventEmitter {
   }
 
   end() {
-    if (this.info().ended) return;
+    if ((this.db.prepare('SELECT ended_at e FROM sessions WHERE id = ?').get(this.id) as { e: number | null }).e !== null) return;
     this.db.prepare('UPDATE sessions SET ended_at = ? WHERE id = ?').run(this.now(), this.id);
     this.log('class.ended', null, {});
     this.emit('state');
@@ -238,7 +255,7 @@ export class Classroom extends EventEmitter {
     this.db.prepare(`INSERT INTO trusted_devices (course, fingerprint, public_key, full_name, roll_no, first_approved_at, last_approved_at)
       SELECT ?, device_id, device_key, full_name, roll_no, ?, ? FROM members WHERE id = ? AND device_key IS NOT NULL
       ON CONFLICT (course, fingerprint) DO UPDATE SET full_name = excluded.full_name, roll_no = excluded.roll_no, last_approved_at = excluded.last_approved_at`)
-      .run(this.title, t, t, memberId);
+      .run(this.trustScope, t, t, memberId);
   }
 
   log(type: string, actor: string | null, data: Record<string, unknown>) {

@@ -22,8 +22,11 @@ packages/design (tokens + components, no data access) · packages/world (lazy 3D
 * **Communication**: direct calls to public APIs for queries/commands, typed domain events for reactions
   ([EVENTS.md](EVENTS.md)), explicit references for shared content ([RESOURCE_STORE.md](RESOURCE_STORE.md)), permission-aware
   queries everywhere ([PRIVACY_MODEL.md](PRIVACY_MODEL.md)). Module list and legacy names: [MODULES.md](MODULES.md).
-* **The classroom stack is unchanged.** CLAN reads its history; the classroom server still owns sessions, pairing, TLS,
-  transfers, assignments and receipts.
+* **Universal join.** The classroom server is the generic CLAN session host: `startClassroomServer({ clan: { type, id } })`.
+  The desktop creates the canonical CLAN first (or reuses a course's CLASSROOM CLAN) and passes its id; members' devices
+  record the CLAN they joined (`clans.recordJoined`). Capabilities, not types, decide authority ([PROTOCOL.md](PROTOCOL.md#clan-sessions-universal-join)).
+* **The classroom server owns live sessions** (pairing, TLS, transfers, assignments, receipts) for every CLAN type; CLAN
+  modules own the canonical CLAN, membership and personal data.
 
 ## Classroom transport (milestones 0–2.75)
 

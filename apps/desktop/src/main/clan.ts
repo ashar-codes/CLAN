@@ -1,14 +1,17 @@
 // CLAN services for the desktop shell. Every call acts as this device's local user; the renderer never chooses a user.
 import { ipcMain } from 'electron';
 import { z } from 'zod';
-import { openClan, CLAN_TYPES, AI_GRANTEE, type ClanApp } from '@clan/core';
+import { openClan, AI_GRANTEE, type ClanApp } from '@clan/core';
+import { ClanType, keyFingerprint } from '@classroom/protocol';
 import type { HomeView } from '../shared.ts';
 
 const Id = z.uuid();
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const ACTIVITY: Record<string, string> = { CLANCreated: 'CLAN created', MemberJoined: 'CLAN membership added', NoteCreated: 'Note written', NoteShared: 'Note shared', SavedItemAdded: 'Link saved', SavedItemShared: 'Link shared', ResourceShared: 'File added', ReminderCreated: 'Reminder set' };
 
-export function registerClan(db: Parameters<typeof openClan>[0], storageDir: string, localName: () => string | undefined): ClanApp {
+export type DesktopClan = ClanApp & { classroomClanFor(title: string): string | null };
+
+export function registerClan(db: Parameters<typeof openClan>[0], storageDir: string, localName: () => string | undefined): DesktopClan {
   const c = openClan(db, { storageDir, localName: localName() });
   const me = { kind: 'user' as const, userId: c.me };
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
@@ -28,9 +31,10 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   });
 
   handle('clan:list', () => c.clans.list(c.me));
-  handle('clan:create', (raw) => {
-    const a = z.object({ type: z.enum(CLAN_TYPES).exclude(['CLASSROOM']), name: z.string(), expiresAt: z.number().int().optional() }).parse(raw);
-    return c.clans.create({ ...a, createdBy: c.me });
+  /** Called by the member UI once the host approved it. Values come from the authenticated session (hello) + the paired host key. */
+  handle('clan:joined', (raw) => {
+    const a = z.object({ sessionId: Id, clanId: Id.nullable(), type: ClanType, name: z.string().trim().min(1).max(80), hostKey: z.string().max(64), expiresAt: z.number().int().nullable() }).parse(raw);
+    c.clans.recordJoined({ id: a.clanId ?? a.sessionId, type: a.type, name: a.name, hostDeviceId: keyFingerprint(a.hostKey), hostName: `${a.name} host`, expiresAt: a.expiresAt, me: c.me });
   });
   handle('clan:detail', (id) => {
     const clan = c.clans.get(Id.parse(id));
@@ -66,5 +70,9 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   handle('me:rename', (name) => c.identity.rename(c.me, z.string().trim().min(1).max(80).parse(name)));
   handle('privacy:get', () => ({ aiDiary: c.permissions.hasGrant(c.me, AI_GRANTEE, 'diary') }));
   handle('privacy:aiDiary', (on) => (z.boolean().parse(on) ? c.permissions.grant(c.me, AI_GRANTEE, 'diary') : c.permissions.revoke(c.me, AI_GRANTEE, 'diary')));
-  return c;
+  const courseKey = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
+  return Object.assign(c, {
+    /** The CLASSROOM CLAN for a course title, if one exists (keeps every meeting of a course in one CLAN). */
+    classroomClanFor: (title: string) => c.clans.list(c.me).find((x) => x.type === 'CLASSROOM' && courseKey(x.name) === courseKey(title))?.id ?? null,
+  });
 }

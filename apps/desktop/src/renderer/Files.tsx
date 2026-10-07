@@ -128,7 +128,8 @@ export function TeacherAssignments({ assignments, send }: { assignments: Teacher
 
 // ---------------- Student ----------------
 
-export function StudentFiles({ conn, resources, pushed, send }: { conn: Conn; resources: ResourceView[]; pushed: string | null; send(m: ClientMessage): void }) {
+/** `host` is the product word for the CLAN authority ('teacher' in classrooms); transfer text from main uses the legacy word. */
+export function StudentFiles({ conn, resources, pushed, send, host = 'teacher' }: { conn: Conn; resources: ResourceView[]; pushed: string | null; send(m: ClientMessage): void; host?: string }) {
   const [states, setStates] = useState<Record<string, FileState>>({});
   const [error, setError] = useState('');
   const autoQueued = useRef(new Set<string>());
@@ -167,7 +168,7 @@ export function StudentFiles({ conn, resources, pushed, send }: { conn: Conn; re
         <button className="link small" onClick={() => setDetails(!details)}>{details ? 'Hide details' : 'Details'}</button>
       </h3>
       {error && <p className="error">{error}</p>}
-      {resources.length === 0 && <p className="muted">Your teacher hasn't shared any files yet.</p>}
+      {resources.length === 0 && <p className="muted">Your {host} hasn't shared any files yet.</p>}
       {resources.map((r) => {
         const s = states[r.id] ?? { state: 'not_started' as const, bytes: 0, size: r.size, resourceId: r.id };
         const pct = r.size ? Math.floor((s.bytes / r.size) * 100) : 100;
@@ -179,7 +180,7 @@ export function StudentFiles({ conn, resources, pushed, send }: { conn: Conn; re
                 <b>{r.name}</b> <span className="muted">{formatBytes(r.size)}</span><br />
                 <small className={s.state === 'failed' ? 'error' : 'muted'} data-testid="file-state">
                   {STATE_LABEL[s.state]}{(s.state === 'downloading' || s.state === 'paused') && ` · ${pct}%`}{s.resumedFrom ? ' · resumed' : ''}{s.error ? ` — ${s.error}` : ''}
-                  {details && s.via ? <span data-testid="file-via"> · via {s.via}</span> : null}
+                  {details && s.via ? <span data-testid="file-via"> · via {s.via.replace(/teacher/g, host)}</span> : null}
                 </small>
                 {(s.state === 'downloading' || s.state === 'paused' || s.state === 'verifying') && <progress max={100} value={pct} />}
               </div>

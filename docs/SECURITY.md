@@ -99,6 +99,19 @@ may request are all decided by teacher-signed objects verified against the teach
 
 Out of scope: a removed student keeps files it already downloaded; peers learn which classmates fetch which resources from them.
 
+## Universal CLAN join
+
+* Authority is a server-side capability check (`MESSAGE_CAPABILITY`, `capabilitiesFor(type, role)` in
+  `protocol/src/clan.ts`) on top of the existing host-token check; members never receive authority capabilities, and only
+  CLASSROOM hosts get `CREATE_ASSIGNMENT` (uploads also require `SUBMIT_ASSIGNMENT`). Tests: `server/test/clan.test.ts`.
+* Network/security code never branches on `CLASSROOM` (architecture test); the one exception is the known-device trust scope,
+  which stays keyed by course title for classrooms (compatibility) and by `clan:<id>` for other types, so trust never leaks
+  between CLANs that share a name.
+* Cross-CLAN isolation: tokens are bound to one session (`members.session_id`), also when several CLANs share a database.
+* Host impersonation: authority data is verified against the PAKE-learned host key only; member- or peer-signed manifests,
+  endorsements and capabilities are rejected; relaying peers gain no capabilities.
+* Temporary CLANs: after `expiresAt` (or End) joins are refused and member tokens stop working; downloaded files are not touched.
+
 ## Known gaps (tracked)
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
   code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.

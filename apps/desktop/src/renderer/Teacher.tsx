@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { ClassroomConnection, formatBytes, recommendDistribution, type Quality } from '@classroom/client';
-import { shortFingerprint, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats } from '@classroom/protocol';
+import { clanLabels, shortFingerprint, type ClanCapability, type ClanType, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats } from '@classroom/protocol';
 import { TeacherAssignments, TeacherFiles } from './Files.tsx';
 import type { Capabilities, PastClass, StartedClassroom } from '../shared.ts';
 import { api } from './App.tsx';
 
-const POLICIES: { v: JoinPolicy; label: string }[] = [
-  { v: 'approval', label: 'I approve everyone' },
-  { v: 'known', label: 'Auto-approve devices I approved before' },
-  { v: 'open', label: 'Anyone with the code' },
-];
+const POLICY_ORDER: JoinPolicy[] = ['approval', 'known', 'open'];
+const TYPES: ClanType[] = ['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'];
+const PLACEHOLDER: Record<ClanType, string> = { CLASSROOM: 'Operating Systems', STUDY_GROUP: 'OS study group', PROJECT_TEAM: 'Project Alpha', FRIENDS: 'Weekend crew', TEMPORARY: 'Library study session' };
 
-export function TeacherSetup({ caps, onBack, onStarted }: { caps: Capabilities; onBack(): void; onStarted(s: StartedClassroom): void }) {
+/** Create CLAN: one flow for every type; the host device runs the session. */
+export function TeacherSetup({ caps, onBack, onStarted, initialType = 'CLASSROOM' }: { caps: Capabilities; onBack(): void; onStarted(s: StartedClassroom): void; initialType?: ClanType }) {
+  const [type, setType] = useState<ClanType>(initialType);
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [hours, setHours] = useState(2);
   const [policy, setPolicy] = useState<JoinPolicy>('approval');
+  const L = clanLabels(type);
   const [host, setHost] = useState(caps.interfaces[0]?.address ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -21,7 +24,7 @@ export function TeacherSetup({ caps, onBack, onStarted }: { caps: Capabilities; 
 
   const start = async () => {
     setBusy(true); setError('');
-    try { onStarted(await api.startClassroom({ title: title.trim(), policy, host: host || undefined })); }
+    try { onStarted(await api.startClassroom({ title: title.trim(), policy, host: host || undefined, type, description: description.trim(), hours: type === 'TEMPORARY' ? hours : undefined })); }
     catch (e) { setError(String((e as Error).message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
     finally { setBusy(false); }
   };
@@ -29,8 +32,13 @@ export function TeacherSetup({ caps, onBack, onStarted }: { caps: Capabilities; 
   return (
     <main className="center narrow">
       <button className="link back" onClick={onBack}>← Back</button>
-      <h2>Create Classroom</h2>
-      <label>Class name<input autoFocus value={title} maxLength={80} placeholder="Operating Systems" onChange={(e) => setTitle(e.target.value)} /></label>
+      <h2>{type === 'CLASSROOM' ? 'Create Classroom' : 'Create CLAN'}</h2>
+      <div className="seg-types" role="radiogroup" aria-label="CLAN type">
+        {TYPES.map((t) => <button key={t} role="radio" aria-checked={type === t} className={type === t ? 'on small' : 'small'} onClick={() => setType(t)}>{clanLabels(t).type}</button>)}
+      </div>
+      <label>{type === 'CLASSROOM' ? 'Class name' : 'Name'}<input autoFocus value={title} maxLength={80} placeholder={PLACEHOLDER[type]} onChange={(e) => setTitle(e.target.value)} /></label>
+      <label>Description <span className="muted">(optional, shown only after joining)</span><input value={description} maxLength={500} onChange={(e) => setDescription(e.target.value)} /></label>
+      {type === 'TEMPORARY' && <label>Ends after<select value={hours} onChange={(e) => setHours(Number(e.target.value))}>{[0.5, 1, 2, 3, 4, 8].map((h) => <option key={h} value={h}>{h < 1 ? '30 minutes' : `${h} hour${h > 1 ? 's' : ''}`}</option>)}</select></label>}
 
       <fieldset>
         <legend>Network</legend>
@@ -38,7 +46,7 @@ export function TeacherSetup({ caps, onBack, onStarted }: { caps: Capabilities; 
         <label className="radio disabled"><input type="radio" disabled /> <span><b>Direct Mode</b> — create a classroom Wi-Fi<br /><small className="muted">{caps.directMode.reason}</small></span></label>
       </fieldset>
 
-      <label>Who can join<select value={policy} onChange={(e) => setPolicy(e.target.value as JoinPolicy)}>{POLICIES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}</select></label>
+      <label>Who can join<select value={policy} onChange={(e) => setPolicy(e.target.value as JoinPolicy)}>{POLICY_ORDER.map((p) => <option key={p} value={p}>{L.policy[p]}</option>)}</select></label>
 
       {caps.interfaces.length > 1 && (
         <details><summary className="muted">Advanced: network adapter</summary>
@@ -47,8 +55,8 @@ export function TeacherSetup({ caps, onBack, onStarted }: { caps: Capabilities; 
       )}
       {noNetwork && <p className="error">This computer isn't connected to any network. Join the classroom Wi-Fi or plug in a cable, then come back.</p>}
       {error && <p className="error">{error}</p>}
-      <button className="primary" disabled={!title.trim() || busy || noNetwork} onClick={start}>{busy ? 'Starting…' : 'Start Classroom'}</button>
-      <PastClasses />
+      <button className="primary" disabled={!title.trim() || busy || noNetwork} onClick={start}>{busy ? 'Starting…' : type === 'CLASSROOM' ? 'Start Classroom' : 'Start CLAN'}</button>
+      {type === 'CLASSROOM' && <PastClasses />}
     </main>
   );
 }
@@ -70,11 +78,11 @@ function PastClasses() {
 
 const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-function describe(e: TimelineEvent, names: Map<string, string>) {
-  const who = (e.actor && names.get(e.actor)) || String(e.data.name ?? 'A student');
+function describe(e: TimelineEvent, names: Map<string, string>, L: ReturnType<typeof clanLabels>) {
+  const who = (e.actor && names.get(e.actor)) || String(e.data.name ?? `A ${L.member.toLowerCase()}`);
   const m: Record<string, string> = {
-    'class.started': 'Class started', 'class.ended': 'Class ended', 'class.locked': 'Joining locked', 'class.unlocked': 'Joining unlocked',
-    'class.policy': `Join rule changed to "${POLICIES.find((p) => p.v === e.data.policy)?.label}"`,
+    'class.started': `${L.session[0]!.toUpperCase()}${L.session.slice(1)} started`, 'class.ended': `${L.session[0]!.toUpperCase()}${L.session.slice(1)} ended`, 'class.locked': 'Joining locked', 'class.unlocked': 'Joining unlocked',
+    'class.policy': `Join rule changed to "${L.policy[e.data.policy as JoinPolicy]}"`,
     'member.requested': `${who} asked to join`, 'member.joined': `${who} joined`, 'member.approved': `${who} approved`,
     'member.rejected': `${who} rejected`, 'member.removed': `${who} removed`, 'member.blocked': `${who} blocked`,
     'resource.added': `${e.data.name} added`, 'resource.pushed': `${e.data.name} sent to everyone`, 'resource.removed': `${e.data.name} removed`,
@@ -94,11 +102,13 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const [resources, setResources] = useState<TeacherResourceView[]>([]);
   const [assignments, setAssignments] = useState<TeacherAssignmentView[]>([]);
   const [stats, setStats] = useState<TransferStats | null>(null);
+  const [can, setCan] = useState<ClanCapability[]>([]);
   const conn = useRef<ClassroomConnection | null>(null);
 
   useEffect(() => {
     const c = new ClassroomConnection(started.url, started.teacherToken, {
       onMessage: (m) => {
+        if (m.t === 'hello') setCan(m.capabilities);
         if (m.t === 'hello' || m.t === 'class.state') setInfo(m.classroom);
         else if (m.t === 'roster') setMembers(m.members);
         else if (m.t === 'timeline') setTimeline(m.events);
@@ -119,27 +129,28 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const roster = members.filter((m) => m.status === 'approved');
   const gone = members.filter((m) => m.status === 'removed' || m.status === 'blocked' || m.status === 'rejected');
   const names = new Map(members.map((m) => [m.id, m.fullName]));
-  const end = async () => { if (confirm('End class for everyone?')) { await api.stopClassroom(); onEnded(); } };
+  const L = clanLabels(info?.clanType ?? 'CLASSROOM');
+  const end = async () => { if (confirm(`End this ${L.session} for everyone?`)) { await api.stopClassroom(); onEnded(); } };
 
-  if (!info) return <main className="center"><p className="muted">Starting classroom…</p></main>;
+  if (!info) return <main className="center"><p className="muted">Starting…</p></main>;
   return (
     <div className="dash">
       <header className="bar">
-        <div><h2>{info.title}</h2><span className="muted">Started {time(info.startedAt)}</span></div>
-        <div className="code" aria-label="Classroom code">{started.code.slice(0, 3)} {started.code.slice(3)}</div>
+        <div><h2>{info.title}</h2><span className="muted">{L.type} · you are the {L.host.toLowerCase()} · started {time(info.startedAt)}{info.expiresAt ? ` · ends ${time(info.expiresAt)}` : ''}</span></div>
+        <div className="code" aria-label="Join code">{started.code.slice(0, 3)} {started.code.slice(3)}</div>
         <div className="row">
           <label className="toggle"><input type="checkbox" checked={info.locked} onChange={(e) => send({ t: 'class.lock', locked: e.target.checked })} /> Lock joining</label>
-          <button className="danger" onClick={end}>End class</button>
+          <button className="danger" onClick={end}>End {L.session}</button>
         </div>
       </header>
       {notice && <p className="error" onClick={() => setNotice('')}>{notice}</p>}
 
       <section className="grid">
         <TeacherFiles resources={resources} stats={stats} send={send} />
-        <TeacherAssignments assignments={assignments} send={send} />
+        {can.includes('CREATE_ASSIGNMENT') && <TeacherAssignments assignments={assignments} send={send} />}
         <div className="card">
           <h3>Waiting to join {pending.length > 0 && <span className="badge">{pending.length}</span>}</h3>
-          {pending.length === 0 && <p className="muted">Students enter <b>{started.code}</b> in the CLAN app on the same network.</p>}
+          {pending.length === 0 && <p className="muted">{L.members} enter <b>{started.code}</b> in the CLAN app on the same network.</p>}
           {pending.map((m) => (
             <div key={m.id} className="person">
               <Who m={m} />
@@ -153,14 +164,14 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         </div>
 
         <div className="card">
-          <h3>Students ({roster.filter((m) => m.connected).length}/{roster.length} connected)</h3>
+          <h3>{L.members} ({roster.filter((m) => m.connected).length}/{roster.length} connected)</h3>
           {roster.length === 0 && <p className="muted">No one has joined yet.</p>}
           {roster.map((m) => (
             <div key={m.id} className="person">
               <Who m={m} />
               <div className="row">
                 <button className="small" onClick={() => send({ t: 'member.remove', memberId: m.id })}>Remove</button>
-                <button className="small danger" onClick={() => confirm(`Block ${m.fullName}'s device from this class?`) && send({ t: 'member.block', memberId: m.id })}>Block</button>
+                <button className="small danger" onClick={() => confirm(`Block ${m.fullName}'s device from this ${L.session}?`) && send({ t: 'member.block', memberId: m.id })}>Block</button>
               </div>
             </div>
           ))}
@@ -169,14 +180,14 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
 
         <div className="card">
           <h3>Settings</h3>
-          <label>Who can join<select value={info.joinPolicy} onChange={(e) => send({ t: 'class.policy', policy: e.target.value as JoinPolicy })}>{POLICIES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}</select></label>
-          <h3>Classroom network</h3>
+          <label>Who can join<select value={info.joinPolicy} onChange={(e) => send({ t: 'class.policy', policy: e.target.value as JoinPolicy })}>{POLICY_ORDER.map((p) => <option key={p} value={p}>{L.policy[p]}</option>)}</select></label>
+          <h3>Network</h3>
           <dl className="kv">
             <dt>Connectivity</dt><dd>Existing LAN</dd>
-            <dt>Distribution</dt><dd data-testid="distribution">{info.peerAssist ? 'Peer Assistance ON' : 'Teacher only'} <button className="small" data-testid="peer-assist-toggle" onClick={() => send({ t: 'class.peerAssist', enabled: !info.peerAssist })}>{info.peerAssist ? 'Disable Peer Assistance' : 'Enable Peer Assistance'}</button></dd>
-            <dt>Students</dt><dd>{roster.length}</dd>
-            <dt>Resource sources</dt><dd data-testid="sources">Teacher{info.peerAssist ? ` + ${stats?.peers ?? 0} peers` : ''}</dd>
-            <dt>Teacher upload</dt><dd>{formatBytes(stats?.bytesPerSec ?? 0)}/s · <span data-testid="teacher-served">{formatBytes(stats?.servedBytes ?? 0)}</span> total</dd>
+            <dt>Distribution</dt><dd data-testid="distribution">{info.peerAssist ? 'Peer Assistance ON' : `${L.host} only`} <button className="small" data-testid="peer-assist-toggle" onClick={() => send({ t: 'class.peerAssist', enabled: !info.peerAssist })}>{info.peerAssist ? 'Disable Peer Assistance' : 'Enable Peer Assistance'}</button></dd>
+            <dt>{L.members}</dt><dd>{roster.length}</dd>
+            <dt>Resource sources</dt><dd data-testid="sources">{L.host}{info.peerAssist ? ` + ${stats?.peers ?? 0} peers` : ''}</dd>
+            <dt>{L.host} upload</dt><dd>{formatBytes(stats?.bytesPerSec ?? 0)}/s · <span data-testid="teacher-served">{formatBytes(stats?.servedBytes ?? 0)}</span> total</dd>
             {info.peerAssist && <><dt>Peer upload</dt><dd>{formatBytes(stats?.peerBytesPerSec ?? 0)}/s · {formatBytes(stats?.peerUploadedBytes ?? 0)} total</dd></>}
             <dt>Health</dt><dd>{quality === 'disconnected' ? 'Server not responding' : (stats?.failedDownloads ?? 0) > 5 ? 'Fair (some transfers failed)' : 'Good'}</dd>
           </dl>
@@ -193,7 +204,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
 
         <div className="card">
           <h3>Timeline</h3>
-          <ol className="timeline">{timeline.map((e) => <li key={e.id}><time>{time(e.ts)}</time> {describe(e, names)}</li>)}</ol>
+          <ol className="timeline">{timeline.map((e) => <li key={e.id}><time>{time(e.ts)}</time> {describe(e, names, L)}</li>)}</ol>
         </div>
       </section>
     </div>

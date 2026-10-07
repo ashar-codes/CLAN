@@ -92,4 +92,28 @@ describe('classroom → CLAN migration', () => {
     const { app } = setup();
     expect(app.clans.list(app.me)).toEqual([]);
   });
+
+  it('sessions hosted for a CLAN link straight to it, for every type; members record joined CLANs canonically', () => {
+    const { app, db } = setup();
+    const sg = app.clans.create({ type: 'STUDY_GROUP', name: 'OS study group', createdBy: app.me });
+    const s1 = randomUUID(), s2 = randomUUID();
+    const ins = db.prepare("INSERT INTO sessions (id, title, join_code, network_mode, started_at, clan_type, clan_id) VALUES (?, ?, '', 'lan', ?, ?, ?)");
+    ins.run(s1, 'OS study group', 1, 'STUDY_GROUP', sg.id); ins.run(s2, 'OS study group', 2, 'STUDY_GROUP', sg.id);
+    db.prepare(`INSERT INTO members (id, session_id, device_id, full_name, roll_no, device_name, status, token_hash, token_expires, joined_at, last_seen, device_key)
+      VALUES (?, ?, 'x', 'Hana', 'R', 'L', 'approved', ?, 0, 5, 5, ?)`).run(randomUUID(), s2, randomUUID(), 'H'.repeat(43));
+    app.syncClassrooms();
+    expect(app.clans.sessionsOf(sg.id)).toEqual([s1, s2]);
+    expect(app.clans.list(app.me).map((c) => c.type)).toEqual(['STUDY_GROUP']); // no stray CLASSROOM CLAN by title
+    expect(app.clans.members(sg.id).map((m) => m.displayName).sort()).toEqual(['Hana', 'Me']);
+
+    // the member's own device: one CLAN row, host identified by its device key, local profile not copied
+    const member = setup();
+    const joined = member.app.clans.recordJoined({ id: sg.id, type: 'STUDY_GROUP', name: 'OS study group', hostDeviceId: 'host-fp', hostName: 'OS study group host', me: member.app.me });
+    member.app.clans.recordJoined({ id: sg.id, type: 'STUDY_GROUP', name: 'OS study group', hostDeviceId: 'host-fp', hostName: 'x', me: member.app.me });
+    expect(member.app.clans.list(member.app.me)).toEqual([joined]);
+    expect(member.app.clans.members(sg.id).map((m) => m.role).sort()).toEqual(['member', 'owner']);
+    expect(() => member.app.clans.recordJoined({ id: randomUUID(), type: 'PERSONAL' as never, name: 'x', hostDeviceId: 'h', hostName: 'h', me: member.app.me })).toThrow();
+    member.app.clans.archive(sg.id);
+    expect(member.app.clans.list(member.app.me)).toEqual([]); // ended CLAN leaves My CLANs
+  });
 });

@@ -17,9 +17,10 @@
 | reminders | product | `reminders_reminders` | `Reminders` | ReminderCreated |
 | share | product | — | `Share` (Share-to-CLAN) | — |
 | chat, tasks, courses, exams, flashcards, recordings, screen share, whiteboard, ai, profile | contracts only | — | `modules/contracts.ts` | ExamCreated (defined) |
-| classroom (legacy) | `@classroom/server` | `sessions`, `members`, `resources`, `assignments`, `uploads`, `submissions`, … | server API | its own `events` log |
+| classroom (legacy) | `@classroom/server` | `sessions`, `members`, `resources`, `assignments`, `uploads`, `submissions`, … | server API (hosts every CLAN type) | its own `events` log |
 
-**CLAN types → capabilities** (`CAPABILITIES`): CLASSROOM files/notes/chat/screenShare/assignments/teacherAuthority ·
+**Session capabilities** (who may do what in a live CLAN session) are in `@classroom/protocol` `capabilitiesFor(type, host|member)`
+and enforced by the host server. **CLAN types → module capabilities** (`CAPABILITIES`): CLASSROOM files/notes/chat/screenShare/assignments/teacherAuthority ·
 STUDY_GROUP and PROJECT_TEAM files/notes/chat/studyRoom/screenShare · FRIENDS files/chat · TEMPORARY files/notes/chat/expires
 (must have `expires_at`; access ends then). Code asks `clans.has(id, capability)`, never `type === …`.
 

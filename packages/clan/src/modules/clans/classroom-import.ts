@@ -7,7 +7,7 @@ import { tableExists, tx, type Db } from '../../core/db.ts';
 import type { Identity } from '../../core/identity.ts';
 import type { Clans } from './index.ts';
 
-type Session = { id: string; title: string; started_at: number };
+type Session = { id: string; title: string; started_at: number; clan_id: string | null; clan_type: string };
 type Member = { id: string; session_id: string; device_id: string; device_key: string | null; full_name: string; status: string; joined_at: number };
 
 export const courseKey = (title: string) => title.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -16,11 +16,16 @@ export function importClassrooms(db: Db, clans: Clans, identity: Identity, owner
   if (!tableExists(db, 'sessions') || !tableExists(db, 'members')) return { clans: 0, sessions: 0, members: 0 };
   const result = { clans: 0, sessions: 0, members: 0 };
   tx(db, () => {
-    const sessions = db.prepare('SELECT id, title, started_at FROM sessions ORDER BY started_at, id').all() as Session[];
+    const sessions = db.prepare('SELECT id, title, started_at, clan_id, clan_type FROM sessions ORDER BY started_at, id').all() as Session[];
     const clanFor = new Map<string, string>();
     for (const s of sessions) {
       const linked = clans.clanOfSession(s.id);
-      if (linked) { clanFor.set(courseKey(s.title), linked); continue; }
+      if (linked) { if (s.clan_type === 'CLASSROOM') clanFor.set(courseKey(s.title), linked); continue; }
+      // Sessions hosted for a CLAN created in CLAN (any type) link straight to it.
+      if (s.clan_id) {
+        if (clans.get(s.clan_id)) { db.prepare('INSERT OR IGNORE INTO clans_classroom_sessions (session_id, clan_id) VALUES (?, ?)').run(s.id, s.clan_id); result.sessions++; }
+        continue;
+      }
       let clanId = clanFor.get(courseKey(s.title));
       if (!clanId) {
         clanId = s.id; // keep an existing id: the course's first session

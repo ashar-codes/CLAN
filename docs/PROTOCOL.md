@@ -92,6 +92,27 @@ WebSocket additions: teacher `class.peerAssist {enabled}`; server → students `
 `class.state` carries `connectivity` and `peerAssist`; teacher `stats` adds `peers, peerUploadedBytes, peerBytesPerSec`.
 Signed object formats: [PEER_ASSISTED_MODE.md](PEER_ASSISTED_MODE.md).
 
+## CLAN sessions (universal join)
+
+Every CLAN type (CLASSROOM, STUDY_GROUP, PROJECT_TEAM, FRIENDS, TEMPORARY) uses this protocol unchanged: discovery hint →
+OPAQUE on the bootstrap listener → MACed TLS binding → pinned HTTPS/WSS → device-key join proof. The **host** (authority) is
+the device running the session; it holds the signing key.
+
+* `ClassroomInfo` (historical name) adds `clanId`, `clanType`, `description`, `expiresAt`. `hello` adds `capabilities`
+  (server-computed for that principal). New `members` message: names + connected + host flag only, sent to members whose
+  CLAN grants `VIEW_MEMBERS`.
+* DNS-SD TXT adds `type`. Discovery still carries only name + type + session id; description, members and everything else
+  are visible only after pairing.
+* Join policies: `APPROVAL_REQUIRED` / `KNOWN_MEMBERS_AUTO_APPROVED` / `CODE_ONLY`, stored and sent as `approval` / `known` / `open`.
+* Personal Space is not a CLAN type and cannot be hosted or joined.
+
+**Three vocabularies** (do not mix):
+| Layer | Terms |
+|---|---|
+| Brand | CLAN |
+| Domain | CLAN, host (authority), member, capability, join policy; product labels per type (Teacher/Students in classrooms) |
+| Legacy wire/persistence | `role: 'teacher' \| 'student'`, `teacherToken`, `teacherPublicKey`, `teacherKeyFingerprint`, `class.*` message names, `classroom-lan/*` signed payload types, `sessions`/`members` tables. Kept so signatures, archived receipts and old clients stay valid. |
+
 ## Mobile OPAQUE bridge (Milestone 2.6)
 App ↔ WebView messages (JSON strings via `postMessage`): `{id, op:'startLogin', password}` → `{id, ok, result:{clientLoginState: <handle>, startLoginRequest}}`;
 `{id, op:'finishLogin', handle, loginResponse, password, identifiers}` → `{id, ok, result: {finishLoginRequest, sessionKey} | null}`;

@@ -9,7 +9,7 @@ import type { WebSocket } from '@fastify/websocket';
 import { generateKeyPairSync, sign as edSign, createPublicKey, type KeyObject } from 'node:crypto';
 import * as opaque from '@serenity-kit/opaque';
 import {
-  b64u, ClientMessage, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
+  b64u, ClientMessage, MESSAGE_CAPABILITY, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
   UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, type ServerMessage,
 } from '@classroom/protocol';
 import { Pairing } from './pairing.ts';
@@ -20,12 +20,14 @@ import { createClassroomTls } from './tls.ts';
 import { Assignments } from './assignments.ts';
 import { Resources } from './resources.ts';
 import { ApiError, contentDisposition, DEFAULT_LIMITS, parseRange, RateLimit, Storage, UUID_RE, type Limits } from './storage.ts';
-import { Classroom, JoinError, type NetworkMode, type Principal } from './classroom.ts';
+import { Classroom, JoinError, type ClanSession, type NetworkMode, type Principal } from './classroom.ts';
 import { openDb, type Db } from './db.ts';
 import { advertise } from './discovery.ts';
 
 export type ServerOptions = {
   title: string;
+  /** CLAN this session hosts (type drives capabilities). Omitted → a classroom, as before. */
+  clan?: ClanSession;
   /** Interface address to bind. Never 0.0.0.0 in the product: bind only the classroom interface. */
   host: string;
   port?: number;
@@ -76,7 +78,7 @@ const MAX_WS_MESSAGE = 64 * 1024;
 
 export async function startClassroomServer(opts: ServerOptions): Promise<RunningServer> {
   const db = opts.db ?? openDb(opts.dbPath ?? ':memory:');
-  const classroom = new Classroom(db, opts.title, opts.networkMode ?? 'lan', { code: opts.code });
+  const classroom = new Classroom(db, opts.title, opts.networkMode ?? 'lan', { code: opts.code, clan: opts.clan });
   const identity = opts.identity ?? (await ephemeralIdentity());
   const teacherPublicKey = b64u.encode(new Uint8Array(createPublicKey(identity.signingKey).export({ type: 'spki', format: 'der' }).subarray(-32)));
   const signer = { publicKey: teacherPublicKey, sign: (bytes: Uint8Array) => b64u.encode(new Uint8Array(edSign(null, bytes, identity.signingKey))) };
@@ -270,7 +272,9 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   });
 
   app.post('/api/uploads', async (req, reply) => {
-    const memberId = studentOnly(auth(req));
+    const p = auth(req);
+    if (!classroom.can(p, 'SUBMIT_ASSIGNMENT')) throw new ApiError(403, 'forbidden', 'This CLAN has no assignments.');
+    const memberId = studentOnly(p);
     const body = UploadInit.safeParse(req.body);
     if (!body.success) throw new ApiError(400, 'invalid', body.error.issues[0]?.message ?? 'Invalid request');
     const st = await assignments.init(memberId, body.data);
@@ -305,7 +309,14 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   };
   const toAll = (m: ServerMessage) => { for (const ws of sockets.keys()) send(ws, m); };
 
-  classroom.on('roster', () => { toTeachers(() => ({ t: 'roster', members: classroom.roster() })); schedule(); });
+  /** Names-only roster for members whose CLAN grants VIEW_MEMBERS (never device keys or ids). */
+  const memberRoster = (): ServerMessage => ({ t: 'members', members: [{ name: 'Host', host: true, connected: true },
+    ...classroom.roster().filter((m) => m.status === 'approved').map((m) => ({ name: m.fullName, host: false, connected: m.connected }))] });
+  const toMembers = () => {
+    let msg: ServerMessage | undefined;
+    for (const [ws, p] of sockets) if (p.role === 'student' && classroom.status(p.memberId) === 'approved' && classroom.can(p, 'VIEW_MEMBERS')) send(ws, (msg ??= memberRoster()));
+  };
+  classroom.on('roster', () => { toTeachers(() => ({ t: 'roster', members: classroom.roster() })); toMembers(); schedule(); });
 
   // Coalesce bursts (40 students reporting progress) into at most one list broadcast per 150 ms.
   let pending: ReturnType<typeof setTimeout> | null = null;
@@ -378,7 +389,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
           if (!principal || classroom.info().ended) return ws.close(WS_CLOSE.authFailed, 'invalid or expired session');
           sockets.set(ws, principal);
           const memberId = principal.role === 'student' ? principal.memberId : null;
-          send(ws, { t: 'hello', role: principal.role, memberId, status: memberId ? classroom.status(memberId) : null, classroom: classroom.info(), serverTime: Date.now() });
+          send(ws, { t: 'hello', role: principal.role, memberId, status: memberId ? classroom.status(memberId) : null, classroom: classroom.info(), serverTime: Date.now(), capabilities: [...classroom.capabilities(principal)] });
+          if (principal.role === 'student' && classroom.status(principal.memberId) === 'approved' && classroom.can(principal, 'VIEW_MEMBERS')) send(ws, memberRoster());
           if (principal.role === 'teacher') {
             send(ws, { t: 'roster', members: classroom.roster() });
             send(ws, { t: 'timeline', events: classroom.timeline() });
@@ -394,7 +406,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
           return send(ws, { t: 'pong', n: msg.n, serverTime: Date.now() });
         }
         // Authorization is decided here from the server-side principal, never from anything the client claims.
-        if (TEACHER_ONLY.has(msg.t) && principal.role !== 'teacher') return send(ws, { t: 'error', code: 'forbidden', message: 'Teacher only' });
+        const needs = MESSAGE_CAPABILITY[msg.t];
+        if ((TEACHER_ONLY.has(msg.t) && principal.role !== 'teacher') || (needs && !classroom.can(principal, needs))) return send(ws, { t: 'error', code: 'forbidden', message: 'Not allowed in this CLAN' });
         if (STUDENT_ONLY.has(msg.t) && (principal.role !== 'student' || classroom.status(principal.memberId) !== 'approved')) return send(ws, { t: 'error', code: 'forbidden', message: 'Students only' });
         const fail = (e: unknown) => {
           if (e instanceof JoinError || e instanceof ApiError) return send(ws, { t: 'error', code: e.code, message: e.message });
@@ -436,7 +449,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   httpsPort = (app.server.address() as { port: number }).port;
   await boot.listen({ host: opts.host, port: opts.port ?? 0 });
   const port = (boot.server.address() as { port: number }).port;
-  const stopAdvertising = opts.advertise ? advertise({ host: opts.host, port, sid: classroom.id, title: classroom.title }) : null;
+  const stopAdvertising = opts.advertise ? advertise({ host: opts.host, port, sid: classroom.id, title: classroom.title, type: classroom.clan.type }) : null;
   // The certificate is short-lived; the class ends just before it expires rather than switching keys mid-session.
   const certTimer = setTimeout(() => classroom.end(), Math.max(0, tls.notAfter - Date.now() - 60_000));
   certTimer.unref();

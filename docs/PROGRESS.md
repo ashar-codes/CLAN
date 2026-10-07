@@ -11,6 +11,7 @@
 | CLAN rename | ✅ product-facing name CLAN; legacy identifiers kept and listed in MODULES.md |
 | CLAN Phase 1 — visual exploration | ✅ Visual Lab, 8 screens, design system, lazy 3D, screenshots, perf (design/VISUAL-LAB.md) |
 | CLAN Phase 2 — modular foundation | ✅ @clan/core: core services, 6 product modules + contracts, classroom→CLAN migration, privacy/AI context, shell (Home/CLANs/Study/Saved/Me) |
+| CLAN universal join | ✅ all five types hosted/joined with the same secure pairing; capabilities; generic policies; Study Group 3-app E2E (dev); mobile wording/contracts updated, not device-tested |
 | 3 — Windows Direct Mode, auto Wi-Fi join | not started |
 | 4 — LiveKit, screen/window sharing, student presenting | not started |
 | 5 — PDF sync presentation, notes, bookmarks | not started |

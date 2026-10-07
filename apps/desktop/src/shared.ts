@@ -49,8 +49,8 @@ export type SearchHit = { module: string; entityId: string; title: string; snipp
 /** CLAN services (window.classroom.clan). */
 export type ClanApi = {
   home(): Promise<HomeView>;
+  joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null }): Promise<void>;
   list(): Promise<Clan[]>;
-  create(a: { type: Exclude<ClanType, 'CLASSROOM'>; name: string; expiresAt?: number }): Promise<Clan>;
   detail(id: string): Promise<ClanDetail>;
   notes(): Promise<Note[]>;
   createNote(a: { title: string; body?: string }): Promise<Note>;
@@ -86,7 +86,8 @@ export type DesktopApi = {
   rejoin(sessionId: string): Promise<Joined>;
   lastSession(): Promise<{ sessionId: string; title: string; savedAt: number } | null>;
   trustTeacher(title: string, teacherPublicKey: string): Promise<void>;
-  startClassroom(a: { title: string; policy: JoinPolicy; host?: string }): Promise<StartedClassroom>;
+  /** Host any CLAN type (historical name). */
+  startClassroom(a: { title: string; policy: JoinPolicy; host?: string; type?: ClanType; description?: string; hours?: number }): Promise<StartedClassroom>;
   stopClassroom(): Promise<void>;
   discover(onList: (list: DiscoveredClassroom[]) => void): () => void;
 

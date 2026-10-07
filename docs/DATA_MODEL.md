@@ -65,8 +65,9 @@ them in `expo-secure-store`. Session tokens are held in memory only.
 |---|---|---|
 | User | `identity_users` | display name; the local user is `identity_local` |
 | Device | `identity_devices` | key fingerprint (or `legacy-device:<uuid>` for pre-2.5 members) → user |
-| CLAN | `clans_clans` | id, type, name, expiry. CLASSROOM CLANs keep the id of the course's first session |
-| Membership | `clans_memberships` | role + status; classroom participants linked row-by-row in `clans_classroom_members` |
+| CLAN | `clans_clans` | id, type, name, expiry, archived (ended Temporary). CLASSROOM CLANs keep the id of the course's first session |
+| CLAN session | `sessions` (+ migration 5: `clan_type`, `clan_id`, `description`, `expires_at`) | one live hosted session of a CLAN; old rows are CLASSROOM |
+| Membership | `clans_memberships` | role + status; session members linked row-by-row in `clans_classroom_members` (any type). Pending/approval state lives in `members.status` of the session; profile and device key are never copied into a CLAN |
 | Resource | `resources_objects` + `resources_refs` | content once (SHA-256); uses are refs with a scope |
 | Note | `notes_notes` (+ `notes_shares` references) | |
 | SavedItem / SavedCollection | `saved_items` / `saved_collections` (+ `saved_shares`) | links + metadata only |
