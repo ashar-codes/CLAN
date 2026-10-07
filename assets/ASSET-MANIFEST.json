@@ -1,0 +1,14 @@
+{
+  "note": "Every visual asset CLAN ships. No third-party images or models are used; everything visual except the two fonts is drawn in code in this repository.",
+  "assets": [
+    { "id": "font-bricolage-grotesque", "type": "font", "creator": "The Bricolage Grotesque Project Authors (Mathieu Triay)", "source": "https://github.com/ateliertriay/bricolage via npm @fontsource-variable/bricolage-grotesque@5.3.0", "license": "OFL-1.1", "date": "2026-10-07", "modifications": "none (subset woff2 files as published by Fontsource)", "usage": "display type (titles, brand)", "files": "node_modules/@fontsource-variable/bricolage-grotesque (bundled by Vite)" },
+    { "id": "font-figtree", "type": "font", "creator": "The Figtree Project Authors (Erik Kennedy)", "source": "https://github.com/erikdkennedy/figtree via npm @fontsource-variable/figtree@5.3.0", "license": "OFL-1.1", "date": "2026-10-07", "modifications": "none", "usage": "body text", "files": "node_modules/@fontsource-variable/figtree (bundled by Vite)" },
+    { "id": "clan-beacon", "type": "procedural-svg", "creator": "CLAN", "source": "packages/design/src/beacon.tsx", "license": "project", "date": "2026-10-07", "modifications": "original", "usage": "status symbol: open C-ring + per-state glyph" },
+    { "id": "clanmate-2d", "type": "procedural-svg", "creator": "CLAN", "source": "packages/design/src/clanmate.tsx", "license": "project", "date": "2026-10-07", "modifications": "original", "usage": "modular avatar: base, 6 hair, 4 tops, 4 bottoms, 2 shoes, 4 accessories, backpack" },
+    { "id": "clanmate-3d", "type": "procedural-3d", "creator": "CLAN", "source": "packages/world/src/mate3d.tsx", "license": "project", "date": "2026-10-07", "modifications": "original (three.js primitives)", "usage": "Commons figures, driven by the same CLANmateSpec" },
+    { "id": "commons-courtyard", "type": "procedural-3d", "creator": "CLAN", "source": "packages/world/src/commons.tsx", "license": "project", "date": "2026-10-07", "modifications": "original", "usage": "ground, distance rings, low-poly trees" },
+    { "id": "campus-buildings", "type": "procedural-3d", "creator": "CLAN", "source": "packages/world/src/campus.tsx", "license": "project", "date": "2026-10-07", "modifications": "original", "usage": "course buildings, floors, windows, kiosks, paths" },
+    { "id": "my-space-room", "type": "procedural-svg", "creator": "CLAN", "source": "apps/visual-lab/src/screens/home.tsx", "license": "project", "date": "2026-10-07", "modifications": "original", "usage": "room: bookshelf, board, desk, laptop, journal, lamp, backpack, door" },
+    { "id": "study-table", "type": "procedural-css", "creator": "CLAN", "source": "packages/design/src/cards.tsx", "license": "project", "date": "2026-10-07", "modifications": "original", "usage": "shared study table" }
+  ]
+}

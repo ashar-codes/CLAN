@@ -1,0 +1,8 @@
+{
+  "name": "@clan/world",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@clan/design": "workspace:*" },
+  "peerDependencies": { "react": "19.2.3", "three": "*", "@react-three/fiber": "*" }
+}

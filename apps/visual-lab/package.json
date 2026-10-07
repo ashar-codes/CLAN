@@ -1,0 +1,22 @@
+{
+  "name": "@clan/visual-lab",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build", "shots": "node shots.ts" },
+  "devDependencies": {
+    "@clan/design": "workspace:*",
+    "@clan/world": "workspace:*",
+    "@fontsource-variable/bricolage-grotesque": "5.3.0",
+    "@fontsource-variable/figtree": "5.3.0",
+    "@react-three/fiber": "9.8.1",
+    "@types/react": "~19.2.0",
+    "@types/react-dom": "~19.2.0",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "playwright-core": "^1.63.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "three": "0.186.1",
+    "vite": "^8.3.2"
+  }
+}

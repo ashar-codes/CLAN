@@ -12,13 +12,15 @@
     "dev:mobile": "pnpm --filter @classroom/mobile start",
     "server": "node packages/server/src/cli.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json && tsc -p apps/desktop/tsconfig.json && tsc -p apps/mobile/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/desktop/tsconfig.json && tsc -p apps/mobile/tsconfig.json && tsc -p apps/visual-lab/tsconfig.json",
     "lint": "pnpm typecheck",
     "benchmark": "node tools/sim/bench.ts && node tools/sim/bench-files.ts",
     "build:desktop": "pnpm --filter @classroom/desktop build",
     "dist:desktop": "pnpm --filter @classroom/desktop dist",
     "build:android": "pnpm --filter @classroom/mobile build:android",
     "build:ios": "pnpm --filter @classroom/mobile build:ios",
+    "lab": "pnpm --filter @clan/visual-lab dev",
+    "build:lab": "pnpm --filter @clan/visual-lab build",
     "test:e2e": "pnpm --filter @classroom/desktop test:e2e"
   },
   "devDependencies": {
