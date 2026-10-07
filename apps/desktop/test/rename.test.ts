@@ -15,7 +15,7 @@ describe('CLAN rename', () => {
   });
 
   it('no user-facing surface says "Classroom LAN"', () => {
-    const renderer = readdirSync(join(root, 'apps/desktop/src/renderer')).map((f) => `apps/desktop/src/renderer/${f}`);
+    const renderer = (readdirSync(join(root, 'apps/desktop/src/renderer'), { recursive: true }) as string[]).filter((f) => /\.(tsx?|html|css)$/.test(f)).map((f) => `apps/desktop/src/renderer/${f}`);
     for (const f of [...renderer, 'apps/desktop/electron-builder.yml', 'apps/mobile/app.json', 'apps/mobile/src/App.tsx']) {
       expect(read(f), f).not.toMatch(/Classroom LAN/i);
     }

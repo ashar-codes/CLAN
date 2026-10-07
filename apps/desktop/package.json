@@ -17,6 +17,10 @@
   "devDependencies": {
     "@clan/core": "workspace:*",
     "@clan/design": "workspace:*",
+    "@clan/world": "workspace:*",
+    "@react-three/fiber": "9.8.1",
+    "three": "0.186.1",
+    "@types/three": "^0.186.0",
     "@classroom/client": "workspace:*",
     "@classroom/protocol": "workspace:*",
     "@classroom/server": "workspace:*",

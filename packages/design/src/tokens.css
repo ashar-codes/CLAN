@@ -1,42 +1,53 @@
 /* CLAN design tokens. Feature-independent: components read only these variables. */
 :root {
+  /* Type roles: display = world/place headings; body = functional UI + reading; labels = small caps; numbers = .c-num */
   --font-display: 'Bricolage Grotesque Variable', 'Avenir Next', system-ui, sans-serif;
   --font-body: 'Figtree Variable', 'Avenir Next', system-ui, sans-serif;
 
-  /* Warm paper world */
-  --paper: #f5efe4;
-  --paper-2: #ece3d3;
-  --surface: #fffaf2;
-  --ink: #1d2320;
-  --ink-2: #4a524d;
-  --ink-3: #7b827d;
-  --line: #ddd2bf;
+  /* Foundation: warm paper + deep ink (navy) */
+  --paper: #f7f1e6;
+  --paper-2: #eee4d1;
+  --surface: #fffbf3;
+  --ink: #17233b;
+  --ink-2: #3a4560;
+  --ink-3: #636b80;
+  --line: #e0d4bf;
 
-  /* Accents (named after materials, not moods) */
-  --clay: #df5a3b;
-  --clay-soft: #f6d3c6;
-  --sage: #4f8a63;
-  --sage-soft: #d5e6d6;
-  --mustard: #e3a92f;
-  --mustard-soft: #f6e4b8;
-  --sky: #3f83cf;
-  --sky-soft: #d3e3f4;
-  --teal: #1f9a92;
-  --stone: #9a9488;
+  /* Student-life accents (semantic, not decorative) */
+  --campus: #287a4e;      /* campus green — available, success, places */
+  --notebook: #f0b02f;    /* notebook yellow — focus, highlights, deadlines */
+  --brick: #c04826;       /* brick/orange — act now, alerts, presenting */
+  --burgundy: #8a2d48;    /* library burgundy — books, courses, archive */
+  --study: #2a66c1;       /* study blue — studying, links, information */
+  --ai: #6a4fd6;          /* AI violet — the Guide only */
+  --transfer: #138a87;    /* moving bytes */
+  --on-accent: #ffffff;   /* text/icons on brick/campus/study fills */
+  --stone: #8f8a80;
+  --campus-soft: #d9ecdf; --notebook-soft: #fbe9be; --brick-soft: #f7d6c9; --burgundy-soft: #f0d6de; --study-soft: #d6e4f7; --ai-soft: #e6e0fa;
 
-  /* Beacon states */
-  --beacon-available: var(--sage);
-  --beacon-studying: var(--sky);
-  --beacon-focus: var(--mustard);
-  --beacon-presenting: var(--clay);
-  --beacon-transfer: var(--teal);
+  /* Legacy names (Visual Lab, existing components) map onto the semantic set */
+  --clay: var(--brick); --clay-soft: var(--brick-soft);
+  --sage: var(--campus); --sage-soft: var(--campus-soft);
+  --mustard: var(--notebook); --mustard-soft: var(--notebook-soft);
+  --sky: var(--study); --sky-soft: var(--study-soft);
+  --teal: var(--transfer);
+
+  /* Beacon states (always paired with a glyph) */
+  --beacon-available: var(--campus);
+  --beacon-studying: var(--study);
+  --beacon-focus: var(--notebook);
+  --beacon-presenting: var(--brick);
+  --beacon-transfer: var(--transfer);
   --beacon-away: var(--stone);
+
+  /* Places */
+  --wood: #c99566; --wood-dark: #93633d; --wall: #f1e7d6; --floor: #e7dbc4; --window: #bcd7ee;
 
   --radius-s: 8px;
   --radius-m: 14px;
   --radius-l: 22px;
-  --shadow-1: 0 1px 0 rgba(29, 35, 32, 0.06), 0 2px 6px rgba(29, 35, 32, 0.06);
-  --shadow-2: 0 2px 0 rgba(29, 35, 32, 0.05), 0 10px 28px rgba(29, 35, 32, 0.12);
+  --shadow-1: 0 1px 0 rgba(23, 35, 59, 0.05), 0 2px 6px rgba(23, 35, 59, 0.06);
+  --shadow-2: 0 2px 0 rgba(23, 35, 59, 0.05), 0 12px 30px rgba(23, 35, 59, 0.12);
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -45,32 +56,19 @@
   --t-slow: 520ms;
 }
 
+/* Dark: the campus/library at night — deep navy, lamplight text, warm windows. */
 :root[data-theme='dark'] {
-  --paper: #161b18;
-  --paper-2: #1e2420;
-  --surface: #232a26;
-  --ink: #f1ebe0;
-  --ink-2: #c3bdb2;
-  --ink-3: #8f938c;
-  --line: #343c37;
-  --clay-soft: #4a2a22;
-  --sage-soft: #24382b;
-  --mustard-soft: #43361a;
-  --sky-soft: #1f3247;
+  --paper: #0e1424; --paper-2: #151d31; --surface: #1a243d; --ink: #f3ead9; --ink-2: #cbc2b0; --ink-3: #959bab; --line: #2a3552;
+  --campus: #52b882; --notebook: #f5c45c; --brick: #ee7049; --burgundy: #cf6283; --study: #6aa0ee; --ai: #9b8cf2; --transfer: #3bbcb6; --stone: #7d8394; --on-accent: #0e1424;
+  --campus-soft: #1d3a2e; --notebook-soft: #3d3220; --brick-soft: #43281f; --burgundy-soft: #3b2130; --study-soft: #1e2f4d; --ai-soft: #2a2550;
+  --wood: #7a5434; --wood-dark: #553821; --wall: #18213a; --floor: #121a2e; --window: #f5c45c;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --paper: #161b18;
-    --paper-2: #1e2420;
-    --surface: #232a26;
-    --ink: #f1ebe0;
-    --ink-2: #c3bdb2;
-    --ink-3: #8f938c;
-    --line: #343c37;
-    --clay-soft: #4a2a22;
-    --sage-soft: #24382b;
-    --mustard-soft: #43361a;
-    --sky-soft: #1f3247;
+    --paper: #0e1424; --paper-2: #151d31; --surface: #1a243d; --ink: #f3ead9; --ink-2: #cbc2b0; --ink-3: #959bab; --line: #2a3552;
+    --campus: #52b882; --notebook: #f5c45c; --brick: #ee7049; --burgundy: #cf6283; --study: #6aa0ee; --ai: #9b8cf2; --transfer: #3bbcb6; --stone: #7d8394; --on-accent: #0e1424;
+    --campus-soft: #1d3a2e; --notebook-soft: #3d3220; --brick-soft: #43281f; --burgundy-soft: #3b2130; --study-soft: #1e2f4d; --ai-soft: #2a2550;
+    --wood: #7a5434; --wood-dark: #553821; --wall: #18213a; --floor: #121a2e; --window: #f5c45c;
   }
 }
 
@@ -79,12 +77,14 @@
   --paper: #eef0ec;
   --paper-2: #e2e6e0;
   --surface: #fbfcfa;
-  --clay: #c8432a;
 }
 
+/* Visual Experience: Reduced = 2D places + gentle motion; Minimal = conventional panels, no motion. */
 @media (prefers-reduced-motion: reduce) {
   :root { --t-quick: 0ms; --t-base: 0ms; --t-slow: 0ms; }
 }
+:root[data-experience='minimal'] { --t-quick: 0ms; --t-base: 0ms; --t-slow: 0ms; }
+:root[data-experience='reduced'] { --t-slow: 200ms; }
 
 /* Primitives */
 .c-btn {
@@ -101,3 +101,29 @@
 .c-chip { font: 600 12px/1 var(--font-body); padding: 6px 10px; border-radius: 999px; background: var(--paper-2); color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
 .c-eyebrow { font: 700 11px/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .c-title { font: 700 clamp(22px, 3vw, 30px)/1.1 var(--font-display); letter-spacing: -0.01em; margin: 0; }
+
+.c-num { font-variant-numeric: tabular-nums; font-family: var(--font-display); font-weight: 700; }
+.c-label { font: 600 13px/1.2 var(--font-body); color: var(--ink-2); }
+
+/* Places and rooms */
+.c-place { width: 100%; height: auto; display: block; border-radius: var(--radius-m); }
+.c-live-ring { transform-origin: 182px 16px; animation: c-pulse 2.4s var(--ease-out) infinite; }
+@keyframes c-pulse { from { opacity: .8; transform: scale(.6); } to { opacity: 0; transform: scale(1.6); } }
+.c-room { display: grid; gap: 0; justify-items: center; padding: 12px 8px 4px; border-radius: var(--radius-l);
+  background: linear-gradient(var(--wall) 0 62%, var(--floor) 62%); overflow: hidden; }
+.c-room-wall { width: min(100%, 720px); min-height: 150px; border-radius: 12px; background: #23302b; color: #f3efe4; box-shadow: inset 0 0 0 8px #3a2c22, var(--shadow-1);
+  display: grid; place-items: center; padding: 18px 22px; margin-bottom: 8px; text-align: center; }
+:root[data-theme='dark'] .c-room-wall { background: #10182b; }
+.c-room-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; min-height: 24px; }
+.c-room-person { background: none; border: 0; padding: 4px 6px; border-radius: 12px; cursor: pointer; display: grid; justify-items: center; color: var(--ink);
+  transition: transform var(--t-base) var(--ease-spring), background var(--t-quick); }
+.c-room-person:hover:not(:disabled), .c-room-person.on { transform: translateY(-4px); background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.c-room-person:disabled { cursor: default; opacity: 1; }
+.c-room-person:focus-visible { outline: 3px solid var(--study); outline-offset: 2px; }
+.c-room-name { display: inline-flex; gap: 4px; align-items: center; font: 600 12px var(--font-body); }
+.c-room-table { position: relative; z-index: 1; width: min(100%, 560px); min-height: 88px; margin: 2px 0 -6px; border-radius: 30px; background: linear-gradient(var(--wood), color-mix(in srgb, var(--wood) 80%, black));
+  box-shadow: 0 16px 0 var(--wood-dark), var(--shadow-2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 14px 20px;
+  transform: perspective(700px) rotateX(28deg); transition: box-shadow var(--t-base), outline-color var(--t-base); outline: 3px dashed transparent; outline-offset: 6px; }
+.c-room-table.over { outline-color: var(--transfer); }
+.c-room-item { background: var(--surface); color: var(--ink); border-radius: 4px; padding: 10px 8px; font: 700 10px var(--font-body); text-transform: uppercase; box-shadow: 0 2px 0 rgba(0,0,0,.18); transform: rotate(var(--r)); }
+.c-room-empty, .c-room-more { color: #fff8ec; font: 600 13px var(--font-body); text-shadow: 0 1px 0 rgba(0,0,0,.25); }

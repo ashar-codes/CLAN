@@ -4,6 +4,8 @@ import { clanLabels, shortFingerprint, type ClanCapability, type ClanType, type 
 import { TeacherAssignments, TeacherFiles } from './Files.tsx';
 import type { Capabilities, DirectAvailability, DirectStatus, PastClass, StartedClassroom } from '../shared.ts';
 import { api } from './App.tsx';
+import { HostRoom } from './world/LiveRoom.tsx';
+import { useExperience } from './world/experience.ts';
 
 const POLICY_ORDER: JoinPolicy[] = ['approval', 'known', 'open'];
 const TYPES: ClanType[] = ['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'];
@@ -120,6 +122,8 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const [assignments, setAssignments] = useState<TeacherAssignmentView[]>([]);
   const [stats, setStats] = useState<TransferStats | null>(null);
   const [can, setCan] = useState<ClanCapability[]>([]);
+  const [shared, setShared] = useState('');
+  const experience = useExperience();
   const conn = useRef<ClassroomConnection | null>(null);
 
   useEffect(() => {
@@ -154,13 +158,16 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
     <div className="dash">
       <header className="bar">
         <div><h2>{info.title}</h2><span className="muted">{L.type} · you are the {L.host.toLowerCase()} · started {time(info.startedAt)}{info.expiresAt ? ` · ends ${time(info.expiresAt)}` : ''}</span></div>
-        <div className="code" aria-label="Join code">{started.code.slice(0, 3)} {started.code.slice(3)}</div>
+        {experience === 'minimal' && <div className="code" aria-label="Join code">{started.code.slice(0, 3)} {started.code.slice(3)}</div>}
         <div className="row">
           <label className="toggle"><input type="checkbox" checked={info.locked} onChange={(e) => send({ t: 'class.lock', locked: e.target.checked })} /> Lock joining</label>
           <button className="danger" onClick={end}>End {L.session}</button>
         </div>
       </header>
       {notice && <p className="error" onClick={() => setNotice('')}>{notice}</p>}
+      {shared && <div className="toast" role="status">{shared}</div>}
+      {experience !== 'minimal' && <HostRoom code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={(m) => { setShared(m); setTimeout(() => setShared(''), 3000); }}
+        onRemove={(id) => send({ t: 'member.remove', memberId: id })} onBlock={(id) => confirm('Block this device from this ' + L.session + '?') && send({ t: 'member.block', memberId: id })} />}
 
       <section className="grid">
         <TeacherFiles resources={resources} stats={stats} send={send} />

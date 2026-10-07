@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CLAN Before After</title>
+<style>
+:root { --paper:#f7f1e6; --ink:#17233b; --muted:#636b80; --line:#e0d4bf; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#0e1424; --ink:#f3ead9; --muted:#959bab; --line:#2a3552; } }
+body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.5 system-ui, sans-serif; padding:24px 16px; }
+main { max-width:1500px; margin:0 auto; } h1 { margin:0 0 4px; } p { color:var(--muted); margin:0 0 24px; }
+section { margin-bottom:36px; } h2 { font-size:18px; margin:0 0 10px; }
+.pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; } @media (max-width:800px) { .pair { grid-template-columns:1fr; } }
+figure { margin:0; } img { width:100%; height:auto; border:1px solid var(--line); border-radius:12px; display:block; } figcaption { color:var(--muted); font-size:13px; margin-top:6px; }
+</style></head><body><main>
+<h1>CLAN production UI — before / after</h1>
+<p>Real Electron app, real data typed through the UI, 1440×900. Before = the production shell at <code>clan-network-validation</code>; after = <code>clan-production-world-ui</code>. Phone-width captures: <code>after/mobile/</code>; interaction frames: <code>after/interaction/</code>; Reduced/Minimal modes: <code>after/modes/</code>.</p>
+<section><h2>Home → My Space</h2><div class="pair"><figure><img src="before/1-home.png" alt="Before: Home → My Space" loading="lazy"><figcaption>Before (tag clan-network-validation)</figcaption></figure><figure><img src="after/desktop/1-my-space.png" alt="After: Home → My Space" loading="lazy"><figcaption>After (clan-production-world-ui)</figcaption></figure></div></section>
+<section><h2>CLANs</h2><div class="pair"><figure><img src="before/2-clans.png" alt="Before: CLANs" loading="lazy"><figcaption>Before (tag clan-network-validation)</figcaption></figure><figure><img src="after/desktop/3-clans.png" alt="After: CLANs" loading="lazy"><figcaption>After (clan-production-world-ui)</figcaption></figure></div></section>
+<section><h2>Study → Knowledge Campus</h2><div class="pair"><figure><img src="before/3-study.png" alt="Before: Study → Knowledge Campus" loading="lazy"><figcaption>Before (tag clan-network-validation)</figcaption></figure><figure><img src="after/desktop/5-knowledge-campus.png" alt="After: Study → Knowledge Campus" loading="lazy"><figcaption>After (clan-production-world-ui)</figcaption></figure></div></section>
+<section><h2>Saved</h2><div class="pair"><figure><img src="before/4-saved.png" alt="Before: Saved" loading="lazy"><figcaption>Before (tag clan-network-validation)</figcaption></figure><figure><img src="after/desktop/6-saved.png" alt="After: Saved" loading="lazy"><figcaption>After (clan-production-world-ui)</figcaption></figure></div></section>
+<section><h2>Me / Diary</h2><div class="pair"><figure><img src="before/5-me.png" alt="Before: Me / Diary" loading="lazy"><figcaption>Before (tag clan-network-validation)</figcaption></figure><figure><img src="after/desktop/8-me.png" alt="After: Me / Diary" loading="lazy"><figcaption>After (clan-production-world-ui)</figcaption></figure></div></section>
+<section><h2>Host session → CLAN room</h2><div class="pair"><figure><img src="before/6-host-room.png" alt="Before: Host session → CLAN room" loading="lazy"><figcaption>Before (tag clan-network-validation)</figcaption></figure><figure><img src="after/desktop/4-open-study-group-host.png" alt="After: Host session → CLAN room" loading="lazy"><figcaption>After (clan-production-world-ui)</figcaption></figure></div></section>
+<section><h2>Member session → CLAN room</h2><div class="pair"><figure><img src="before/7-member-room.png" alt="Before: Member session → CLAN room" loading="lazy"><figcaption>Before (tag clan-network-validation)</figcaption></figure><figure><img src="after/desktop/4-open-study-group-member.png" alt="After: Member session → CLAN room" loading="lazy"><figcaption>After (clan-production-world-ui)</figcaption></figure></div></section>
+</main></body></html>

@@ -20,7 +20,10 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
     const now = Date.now();
     const recent = c.db.prepare(`SELECT type, ts FROM core_events WHERE type IN (${Object.keys(ACTIVITY).map(() => '?').join(',')}) ORDER BY seq DESC LIMIT 8`).all(...Object.keys(ACTIVITY)) as { type: string; ts: number }[];
     return {
-      me: { name: c.identity.displayName(c.me) ?? 'Me' },
+      me: { id: c.me, name: c.identity.displayName(c.me) ?? 'Me' },
+      library: { notes: c.notes.mine(me, 500).length, saved: c.saved.items(me).length, courses: c.clans.list(c.me).filter((x) => x.type === 'CLASSROOM').length, files: c.files.list(me, { kind: 'personal', ownerId: c.me }).length },
+      inboxCount: c.saved.items(me, c.saved.inbox(me)).length,
+      diaryToday: !!c.diary.day(me, new Date().toLocaleDateString('en-CA')),
       clans: c.clans.list(c.me).map((x) => ({ id: x.id, name: x.name, type: x.type, members: c.clans.members(x.id).filter((m) => m.status === 'active').length })),
       continueNotes: c.notes.mine(me, 3).map((n) => ({ id: n.id, title: n.title, updatedAt: n.updatedAt })),
       deadlines: c.reminders.upcoming(me, now + 14 * 86_400_000),
@@ -31,6 +34,20 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   });
 
   handle('clan:list', () => c.clans.list(c.me));
+  /** CLANs as places: real counts only. */
+  handle('clan:places', () => c.clans.list(c.me).map((x) => {
+    const members = c.clans.members(x.id).filter((m) => m.status === 'active');
+    const owner = members.find((m) => m.role === 'owner');
+    return { id: x.id, name: x.name, type: x.type, expiresAt: x.expiresAt, members: members.length, files: c.files.list(me, { kind: 'clan', clanId: x.id }).length,
+      sessions: c.clans.sessionsOf(x.id).length, host: owner?.userId === c.me ? 'You' : owner?.displayName ?? null, mine: owner?.userId === c.me };
+  }));
+  /** Knowledge Campus: CLASSROOM CLANs are the courses we really know about. No progress is inferred. */
+  handle('study:courses', () => c.clans.list(c.me).filter((x) => x.type === 'CLASSROOM').map((x) => {
+    const notes = c.notes.inClan(me, x.id);
+    return { id: x.id, name: x.name, sessions: c.clans.sessionsOf(x.id).length, files: c.files.list(me, { kind: 'clan', clanId: x.id }).length,
+      notes: notes.length, recentNotes: notes.filter((n) => n.updatedAt > Date.now() - 7 * 86_400_000).length, exams: 0 };
+  }));
+  handle('files:personal', () => c.files.list(me, { kind: 'personal', ownerId: c.me }));
   /** Called by the member UI once the host approved it. Values come from the authenticated session (hello) + the paired host key. */
   handle('clan:joined', (raw) => {
     const a = z.object({ sessionId: Id, clanId: Id.nullable(), type: ClanType, name: z.string().trim().min(1).max(80), hostKey: z.string().max(64), expiresAt: z.number().int().nullable(), hostName: z.string().trim().min(1).max(80).nullable().optional() }).parse(raw);

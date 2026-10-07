@@ -7,6 +7,7 @@ import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
 import { opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
 import { OpaqueBridgeHost } from './OpaqueBridgeHost';
+import { dark, light } from '@clan/design/palette';
 import { associator, bleCarriers } from '../modules/direct-join';
 
 /** Android asks at run time; a refusal just means no BLE (QR / existing network still work). */
@@ -133,6 +134,20 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
   );
 }
 
+/** Compact room for phones: wall, table with the files, no 3D (battery, small screens). */
+function RoomHeader({ c, title, host, files, type }: { c: C; title: string; host: string | null; files: number; type: string }) {
+  return (
+    <View style={[s.room, { backgroundColor: c.wall }]} accessibilityRole="header" accessibilityLabel={`${title}, ${type}${host ? `, hosted by ${host}` : ''}, ${files} files`}>
+      <View style={s.wall}><Text style={s.wallTitle}>{host ? `${host}’s room` : title}</Text><Text style={s.wallSub}>{type}</Text></View>
+      <View style={[s.table, { backgroundColor: c.wood }]}>
+        {Array.from({ length: Math.min(files, 6) }, (_, i) => <View key={i} style={[s.paper, { transform: [{ rotate: `${(i % 3) * 4 - 4}deg` }] }]} />)}
+        {files === 0 && <Text style={s.tableEmpty}>No files yet</Text>}
+      </View>
+      <View style={[s.floorStrip, { backgroundColor: c.floor }]} />
+    </View>
+  );
+}
+
 function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
   const [joined, setJoined] = useState(first);
   const [status, setStatus] = useState<MemberStatus>(joined.status);
@@ -189,6 +204,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
             <View style={[s.dot, { backgroundColor: quality === 'disconnected' ? c.danger : quality === 'poor' ? c.warn : c.ok }]} />
             <Text style={{ color: c.text }}>{QUALITY[quality]}</Text>
           </View>
+          <RoomHeader c={c} title={info.title} host={info.hostName} files={resources.length} type={L.type} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
         </>
@@ -215,10 +231,18 @@ function Button({ c, label, onPress, primary, disabled }: { c: C; label: string;
   );
 }
 
-const lightColors = { bg: '#f6f7f9', surface: '#fff', text: '#16191d', muted: '#646b75', border: '#d5dae0', accent: '#1f6feb', danger: '#c93c37', ok: '#1a7f37', warn: '#b7791f' };
-const darkColors: C = { bg: '#111418', surface: '#1a1e24', text: '#e8ebef', muted: '#9aa3ad', border: '#2c323a', accent: '#4c8dff', danger: '#ff6b63', ok: '#3fb950', warn: '#e3b341' };
+// From the shared CLAN palette (packages/design/src/palette.ts = tokens.css).
+const theme = (p: typeof light | typeof dark) => ({ bg: p.paper, surface: p.surface, text: p.ink, muted: p.ink3, border: p.line, accent: p.ink, danger: p.brick, ok: p.campus, warn: p.notebook, wall: p.wall, floor: p.floor, wood: p.wood, study: p.study, brick: p.brick, campus: p.campus });
+const lightColors = theme(light);
+const darkColors: C = theme(dark);
 
 const s = StyleSheet.create({
+  room: { borderRadius: 20, overflow: 'hidden', paddingTop: 12, alignItems: 'center' },
+  wall: { width: '86%', borderRadius: 10, backgroundColor: '#23302b', borderWidth: 6, borderColor: '#3a2c22', paddingVertical: 14, alignItems: 'center' },
+  wallTitle: { color: '#f3efe4', fontSize: 17, fontWeight: '700' }, wallSub: { color: '#f3efe4', opacity: 0.75, marginTop: 2 },
+  table: { width: '78%', minHeight: 56, borderRadius: 22, marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: 'center', padding: 10, zIndex: 1 },
+  paper: { width: 26, height: 32, borderRadius: 3, backgroundColor: '#fffbf3' }, tableEmpty: { color: '#fff8ec', fontWeight: '600' },
+  floorStrip: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 40 },
   fill: { flex: 1 },
   page: { padding: 20, gap: 14, flexGrow: 1, justifyContent: 'center' },
   h1: { fontSize: 28, fontWeight: '700' },

@@ -30,7 +30,7 @@ export function TeacherFiles({ resources, stats, send }: { resources: TeacherRes
 
   return (
     <div className="card wide">
-      <h3>Classroom files <button className="primary small push" disabled={busy} onClick={add}>{busy ? 'Adding…' : 'Add files'}</button></h3>
+      <h3>Shared files <button className="primary small push" disabled={busy} onClick={add}>{busy ? 'Adding…' : 'Add files'}</button></h3>
       <p className="muted small-text">Files stay on this computer. Students download them over the local network.
         {stats && (stats.activeDownloads > 0 || stats.activeUploads > 0) && <> · <b>{stats.activeDownloads}</b> downloading, <b>{stats.activeUploads}</b> uploading, {formatBytes(stats.bytesPerSec)}/s</>}
       </p>
@@ -161,7 +161,7 @@ export function StudentFiles({ conn, resources, pushed, send, host = 'teacher' }
 
   return (
     <div className="card wide">
-      <h3>Classroom files
+      <h3>Shared files
         <label className="toggle push small-text" title="Lets classmates download verified parts of files you already have, over this network only.">
           <input type="checkbox" checked={sharing} onChange={(e) => { setSharing(e.target.checked); void api.setSharing(e.target.checked); }} /> Share with classmates
         </label>

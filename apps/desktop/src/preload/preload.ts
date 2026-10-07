@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { DesktopApi } from '../shared.ts';
 
 const listen = <T>(channel: string, cb: (v: T) => void) => {
@@ -10,7 +10,7 @@ const listen = <T>(channel: string, cb: (v: T) => void) => {
 const inv = (ch: string) => (...a: unknown[]) => ipcRenderer.invoke(ch, ...a);
 const api: DesktopApi = {
   clan: {
-    home: inv('clan:home'), joined: inv('clan:joined'), list: inv('clan:list'), detail: inv('clan:detail'),
+    home: inv('clan:home'), joined: inv('clan:joined'), places: inv('clan:places'), courses: inv('study:courses'), personalFiles: inv('files:personal'), addPersonalFile: inv('files:addPersonal'), list: inv('clan:list'), detail: inv('clan:detail'),
     notes: inv('notes:mine'), createNote: inv('notes:create'), updateNote: inv('notes:update'), removeNote: inv('notes:remove'), shareNote: inv('notes:share'),
     collections: inv('saved:collections'), savedItems: inv('saved:items'), save: inv('saved:add'), createCollection: inv('saved:collection'),
     moveSaved: inv('saved:move'), shareSaved: inv('saved:share'),
@@ -35,6 +35,8 @@ const api: DesktopApi = {
     return () => { ipcRenderer.off('discover:list', h); ipcRenderer.invoke('discover:stop'); };
   },
   addFiles: () => ipcRenderer.invoke('teacher:addFiles'),
+  // Only paths of real dropped files (webUtils returns '' for anything not backed by a disk file).
+  addDropped: (files) => ipcRenderer.invoke('teacher:addPaths', files.slice(0, 20).map((f) => webUtils.getPathForFile(f)).filter(Boolean)),
   onImportProgress: (cb) => listen('teacher:import', cb),
   revealSubmission: (id) => ipcRenderer.invoke('teacher:revealSubmission', id),
   pastClasses: () => ipcRenderer.invoke('teacher:pastClasses'),

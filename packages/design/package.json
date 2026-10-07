@@ -2,6 +2,12 @@
   "name": "@clan/design",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts", "./tokens.css": "./src/tokens.css" },
-  "peerDependencies": { "react": "19.2.3" }
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css",
+    "./palette": "./src/palette.ts"
+  },
+  "peerDependencies": {
+    "react": "19.2.3"
+  }
 }

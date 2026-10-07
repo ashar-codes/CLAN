@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor, session, shell, type WebContents } from 'electron';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import * as opaque from '@serenity-kit/opaque';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { join, dirname } from 'node:path';
+import { basename, isAbsolute, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ClanType, JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
@@ -226,6 +226,25 @@ function registerIpc() {
       try { await server.resources.importFile(p); added++; } catch (err) { errors.push(`${p.split(/[\\/]/).pop()}: ${(err as Error).message}`); }
     }
     return { added, errors };
+  });
+  ipcMain.handle('teacher:addPaths', async (_e, raw: unknown) => {
+    if (!server) throw new Error('Start a CLAN session first.');
+    const paths = z.array(z.string().min(3).max(4096)).max(20).parse(raw);
+    const errors: string[] = []; let added = 0;
+    for (const p of paths) {
+      try {
+        if (!isAbsolute(p) || !statSync(p).isFile()) throw new Error('not a file');
+        await server.resources.importFile(p); added++;
+      } catch (err) { errors.push(`${p.split(/[\\/]/).pop()}: ${(err as Error).message}`); }
+    }
+    return { added, errors };
+  });
+  ipcMain.handle('files:addPersonal', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender) ?? undefined;
+    const r = win ? await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] }) : await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] });
+    let n = 0;
+    for (const p of r.canceled ? [] : r.filePaths.slice(0, 20)) { await clan.files.add({ kind: 'user', userId: clan.me }, p, basename(p), { kind: 'personal', ownerId: clan.me }); n++; }
+    return n;
   });
   // Reveal only — never open/execute student-submitted files.
   ipcMain.handle('teacher:revealSubmission', (_e, id: unknown) => {

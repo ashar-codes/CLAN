@@ -6,19 +6,23 @@ import { Vector3 } from 'three';
 import type { CourseBuildingViewModel } from './index.ts';
 import { token } from './mate3d.tsx';
 
-const FLOOR = 0.32;
+const FLOOR = 0.5;
 const place = (courses: CourseBuildingViewModel[]) => {
   const slot = new Map<number, number>();
-  return new Map(courses.map((c) => { const n = slot.get(c.term) ?? 0; slot.set(c.term, n + 1); return [c.id, new Vector3((c.term - 1.5) * 3.2, 0, (n - 0.5) * 3)]; }));
+  const raw = courses.map((c) => { const n = slot.get(c.term) ?? 0; slot.set(c.term, n + 1); return [c.id, new Vector3((c.term - 1.5) * 3.2, 0, (n - 0.5) * 3)] as const; });
+  // centre the campus that exists so a small campus fills the view
+  const cx = raw.reduce((a, [, v]) => a + v.x, 0) / Math.max(raw.length, 1), cz = raw.reduce((a, [, v]) => a + v.z, 0) / Math.max(raw.length, 1);
+  return new Map(raw.map(([id, v]) => [id, new Vector3(v.x - cx, 0, v.z - cz)]));
 };
 
-function Rig({ target }: { target: Vector3 | null }) {
+function Rig({ target, extent }: { target: Vector3 | null; extent: number }) {
   const { camera, size } = useThree();
   const look = useRef(new Vector3());
   useFrame((_, dt) => {
     const goal = target ?? new Vector3(0, 0, 0);
-    const back = size.width < size.height ? 1.7 : 1; // portrait screens need the camera further out to fit every term
-    const camGoal = target ? new Vector3(goal.x + 4.6, 5.6, goal.z + 6.8) : new Vector3(0, 9 * back, 11 * back);
+    const back = size.width < size.height ? 1.7 : 1; // portrait screens need the camera further out
+    const d = Math.max(4.2, extent * 1.15) * back; // frame the campus that exists, not a fixed large one
+    const camGoal = target ? new Vector3(goal.x + 4.6, 5.6, goal.z + 6.8) : new Vector3(0, d * 0.8, d);
     const k = 1 - Math.exp(-dt * 3);
     camera.position.lerp(camGoal, k); look.current.lerp(goal, k); camera.lookAt(look.current);
   });
@@ -50,7 +54,7 @@ export default function CampusScene({ courses, focusId, onSelect, onReady }: { c
   return (
     <Canvas camera={{ position: [0, 9, 11], fov: 40 }} dpr={[1, 2]} onPointerMissed={() => onSelect(null)} aria-label="Knowledge Campus" onCreated={() => requestAnimationFrame(() => onReady?.())}>
       <color attach="background" args={[token('--paper')]} />
-      <hemisphereLight args={['#fff6e8', '#b9a990', 1.3]} />
+      <hemisphereLight args={['#fff6e8', '#d9c9ad', 1.7]} />
       <directionalLight position={[5, 10, 6]} intensity={1.3} />
       <mesh rotation-x={-Math.PI / 2}><planeGeometry args={[30, 30]} /><meshStandardMaterial color={token('--paper-2')} /></mesh>
       {paths.map(([a, b], i) => {
@@ -58,7 +62,7 @@ export default function CampusScene({ courses, focusId, onSelect, onReady }: { c
         return <mesh key={i} position={[mid.x, 0.01, mid.z]} rotation={[-Math.PI / 2, 0, -Math.atan2(b.z - a.z, b.x - a.x)]}><planeGeometry args={[len, 0.18]} /><meshStandardMaterial color={token('--line')} /></mesh>;
       })}
       {courses.map((c) => <Building key={c.id} c={c} at={at.get(c.id)!} selected={c.id === focusId} onSelect={() => onSelect(c.id)} />)}
-      <Rig target={focusId ? at.get(focusId) ?? null : null} />
+      <Rig target={focusId ? at.get(focusId) ?? null : null} extent={Math.max(1, ...[...at.values()].map((v) => Math.hypot(v.x, v.z) + 1.5))} />
     </Canvas>
   );
 }

@@ -4,6 +4,8 @@ import { clanLabels, shortFingerprint, type ClanCapability, type ClassroomInfo, 
 import type { Joined, OwnProfile } from '../shared.ts';
 import { StudentAssignments, StudentFiles as FilesCard } from './Files.tsx';
 import { api } from './App.tsx';
+import { MemberRoom } from './world/LiveRoom.tsx';
+import { useExperience } from './world/experience.ts';
 
 type Names = { fullName: string; rollNo: string; deviceName: string };
 const QUALITY_LABEL: Record<Quality, string> = { excellent: 'Excellent', good: 'Good', poor: 'Poor', disconnected: 'Reconnecting…' };
@@ -112,6 +114,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
   const [pushed, setPushed] = useState<string | null>(null);
   const [can, setCan] = useState<ClanCapability[]>([]);
+  const experience = useExperience();
   const [people, setPeople] = useState<{ name: string; host: boolean; connected: boolean }[]>([]);
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
   const revoked = useRef<string[]>([]);
@@ -187,6 +190,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.hostName && <p className="muted small-text" data-testid="host-name">Hosted by {info.hostName}</p>}{info.description && <p className="muted small-text">{info.description}</p>}</div>
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>
       </header>
+      {experience !== 'minimal' && <MemberRoom hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : null} resources={resources} />}
       <section className="grid">
         <FilesCard conn={conn} resources={resources} pushed={pushed} send={send} host={L.host.toLowerCase()} />
         {can.includes('SUBMIT_ASSIGNMENT') && <StudentAssignments conn={conn} assignments={assignments} />}

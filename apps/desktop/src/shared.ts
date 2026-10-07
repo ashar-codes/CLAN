@@ -34,7 +34,10 @@ export type Conn = { url: string; token: string; sessionId: string; classTitle: 
 export type PastClass = { sessionId: string; title: string; startedAt: number; endedAt: number | null; files: number; submissions: number };
 
 export type HomeView = {
-  me: { name: string };
+  me: { id: string; name: string };
+  library: { notes: number; saved: number; courses: number; files: number };
+  inboxCount: number;
+  diaryToday: boolean;
   clans: { id: string; name: string; type: ClanType; members: number }[];
   continueNotes: { id: string; title: string; updatedAt: number }[];
   deadlines: Reminder[];
@@ -49,11 +52,18 @@ export type ClanDetail = {
 };
 export type SearchHit = { module: string; entityId: string; title: string; snippet: string };
 
+export type ClanPlaceView = { id: string; name: string; type: ClanType; expiresAt: number | null; members: number; files: number; sessions: number; host: string | null; mine: boolean };
+export type CourseView = { id: string; name: string; sessions: number; files: number; notes: number; recentNotes: number; exams: number };
+
 /** CLAN services (window.classroom.clan). */
 export type ClanApi = {
   home(): Promise<HomeView>;
   joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null; hostName?: string | null }): Promise<void>;
   list(): Promise<Clan[]>;
+  places(): Promise<ClanPlaceView[]>;
+  courses(): Promise<CourseView[]>;
+  personalFiles(): Promise<FileView[]>;
+  addPersonalFile(): Promise<number>;
   detail(id: string): Promise<ClanDetail>;
   notes(): Promise<Note[]>;
   createNote(a: { title: string; body?: string }): Promise<Note>;
@@ -101,6 +111,8 @@ export type DesktopApi = {
 
   // teacher
   addFiles(): Promise<{ added: number; errors: string[] }>;
+  /** Files dropped on the room table (paths resolved in the preload from real dropped File objects). */
+  addDropped(files: File[]): Promise<{ added: number; errors: string[] }>;
   onImportProgress(cb: (p: { resourceId: string; bytes: number; size: number }) => void): () => void;
   revealSubmission(submissionId: string): Promise<void>;
   pastClasses(): Promise<PastClass[]>;
