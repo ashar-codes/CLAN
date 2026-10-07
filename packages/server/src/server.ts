@@ -1,4 +1,4 @@
-import Fastify, { type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { createReadStream } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +6,15 @@ import { join } from 'node:path';
 import { pipeline, Transform, type Readable } from 'node:stream';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from '@fastify/websocket';
-import { ClientMessage, JoinRequest, STUDENT_ONLY, TEACHER_ONLY, UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, type ServerMessage } from '@classroom/protocol';
+import { generateKeyPairSync, sign as edSign, createPublicKey, type KeyObject } from 'node:crypto';
+import * as opaque from '@serenity-kit/opaque';
+import {
+  b64u, ClientMessage, JoinRequest, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
+  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, type ServerMessage,
+} from '@classroom/protocol';
+import { Pairing } from './pairing.ts';
+import { logError } from './redact.ts';
+import { createClassroomTls } from './tls.ts';
 import { Assignments } from './assignments.ts';
 import { Resources } from './resources.ts';
 import { ApiError, contentDisposition, DEFAULT_LIMITS, parseRange, RateLimit, Storage, UUID_RE, type Limits } from './storage.ts';
@@ -25,17 +33,34 @@ export type ServerOptions = {
   /** Publish over DNS-SD. Off in tests. */
   advertise?: boolean;
   code?: string;
+  /**
+   * Teacher's long-lived secrets (desktop: decrypted from OS secure storage). Omitted -> ephemeral per run
+   * (tests, CLI). `signingKey` signs receipts; `opaqueServerSetup` is the OPAQUE server setup.
+   */
+  identity?: TeacherIdentity;
   /** Managed file storage root (teacher app: <userData>/storage). Defaults to a fresh temp dir. */
   storageDir?: string;
   limits?: Partial<Limits>;
 };
 
+export type TeacherIdentity = { signingKey: KeyObject; opaqueServerSetup: string };
+
+export async function ephemeralIdentity(): Promise<TeacherIdentity> {
+  await opaque.ready;
+  return { signingKey: generateKeyPairSync('ed25519').privateKey, opaqueServerSetup: opaque.server.createSetup() };
+}
+
 export type RunningServer = {
   classroom: Classroom;
+  /** HTTPS base URL (everything after pairing). */
+  url: string;
+  /** Plaintext bootstrap URL: only /api/info and the OPAQUE pairing endpoints. Advertised over DNS-SD. */
+  bootstrapUrl: string;
+  tls: { certificate: string; spkiSha256: string; notAfter: number };
+  teacherPublicKey: string;
   resources: Resources;
   assignments: Assignments;
   storage: Storage;
-  url: string;
   port: number;
   close(): Promise<void>;
 };
@@ -46,40 +71,86 @@ const MAX_WS_MESSAGE = 64 * 1024;
 export async function startClassroomServer(opts: ServerOptions): Promise<RunningServer> {
   const db = opts.db ?? openDb(opts.dbPath ?? ':memory:');
   const classroom = new Classroom(db, opts.title, opts.networkMode ?? 'lan', { code: opts.code });
+  const identity = opts.identity ?? (await ephemeralIdentity());
+  const teacherPublicKey = b64u.encode(new Uint8Array(createPublicKey(identity.signingKey).export({ type: 'spki', format: 'der' }).subarray(-32)));
+  const signer = { publicKey: teacherPublicKey, sign: (bytes: Uint8Array) => b64u.encode(new Uint8Array(edSign(null, bytes, identity.signingKey))) };
+  const tls = await createClassroomTls(classroom.id);
+  db.prepare('UPDATE sessions SET teacher_key = ?, tls_spki = ? WHERE id = ?').run(teacherPublicKey, tls.spkiSha256, classroom.id);
+  let httpsPort = 0;
+  const pairing = await Pairing.create(classroom, identity.opaqueServerSetup, classroom.code, () => ({
+    httpsPort, spkiSha256: tls.spkiSha256, certificate: tls.certificate, teacherPublicKey, title: classroom.title,
+  }));
   const limits: Limits = { ...DEFAULT_LIMITS, ...opts.limits };
   const storage = new Storage(opts.storageDir ?? mkdtempSync(join(tmpdir(), 'classroom-storage-')));
   await storage.init();
   const resources = new Resources(db, classroom, storage, limits);
-  const assignments = new Assignments(db, classroom, storage, limits);
+  const assignments = new Assignments(db, classroom, storage, limits, signer);
   await resources.sweepRemoved();
   await assignments.sweep();
   const downloadRate = new RateLimit(limits.downloadRequestsPerMinute, 60_000);
 
   // requestTimeout 0: large uploads on slow Wi-Fi are legitimate; stalls are caught by per-transfer idle watchdogs.
   // forceCloseConnections: ending the class must not wait out keep-alive sockets (72 s) that were mid-response.
-  const app = Fastify({ bodyLimit: 16 * 1024, trustProxy: false, requestTimeout: 0, forceCloseConnections: true });
-  await app.register(websocket, { options: { maxPayload: MAX_WS_MESSAGE } });
+  // HTTPS (TLS 1.3, per-session certificate) carries every classroom API. No CORS: clients are native apps.
+  const app = Fastify({
+    https: { cert: tls.certPem, key: tls.keyPem, minVersion: 'TLSv1.3' },
+    bodyLimit: 16 * 1024, trustProxy: false, requestTimeout: 0, forceCloseConnections: true, logger: false,
+  });
+  // Native clients send no Origin; the Electron renderer sends file:// (or the local dev server). Web pages may not open sockets.
+  const allowedOrigin = (o: string | undefined) => !o || o === 'file://' || o === 'null' || /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(o);
+  await app.register(websocket, { options: { maxPayload: MAX_WS_MESSAGE, verifyClient: (info: { origin?: string }) => allowedOrigin(info.origin) } });
+  // Plaintext bootstrap: OPAQUE only. Nothing here is secret or authorizes anything by itself.
+  const boot = Fastify({ bodyLimit: 16 * 1024, trustProxy: false, forceCloseConnections: true, logger: false });
 
-  // Auth is bearer-token only (no cookies), so permissive CORS grants nothing ambient.
-  app.addHook('onRequest', async (req, reply) => {
-    reply.header('access-control-allow-origin', '*');
-    reply.header('access-control-allow-headers', 'content-type, authorization, range, if-range, upload-offset');
-    reply.header('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
-    reply.header('access-control-expose-headers', 'content-range, content-length, etag, repr-digest, accept-ranges, retry-after');
-    reply.header('cache-control', 'no-store');
-    reply.header('x-content-type-options', 'nosniff');
-    if (req.method === 'OPTIONS') return reply.code(204).send();
+  for (const a of [app, boot] as unknown as FastifyInstance[]) {
+    a.removeContentTypeParser('text/plain'); // JSON (and raw upload bytes on HTTPS) only
+    a.addHook('onRequest', async (_req, reply) => {
+      reply.header('cache-control', 'no-store');
+      reply.header('x-content-type-options', 'nosniff');
+    });
+    a.setErrorHandler((err: Error, _req, reply) => {
+      if (err instanceof ApiError || err instanceof JoinError) {
+        if (err.status === 429) reply.header('retry-after', Math.max(1, Math.ceil(((err as JoinError).retryAfterMs ?? 1000) / 1000)));
+        return reply.code(err.status).send({ code: err.code, message: err.message, ...((err as ApiError).extra ?? {}) });
+      }
+      const status = (err as { statusCode?: number }).statusCode;
+      if (status && status < 500) return reply.code(status).send({ code: 'invalid', message: 'Invalid request.' });
+      logError('request failed', err);
+      return reply.code(500).send({ code: 'internal', message: 'Something went wrong on the teacher computer.' });
+    });
+  }
+  const parse = <T>(schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { issues: { message: string }[] } } }, body: unknown): T => {
+    const r = schema.safeParse(body);
+    if (!r.success) throw new ApiError(400, 'invalid', r.error.issues[0]?.message ?? 'Invalid request');
+    return r.data;
+  };
+
+  boot.get('/api/info', async () => ({ product: 'classroom-lan', protocol: 1, title: classroom.title, sessionId: classroom.id }));
+  boot.post('/api/pair/start', async (req) => {
+    const b = parse(PairStart, req.body);
+    return pairing.start(req.ip, b.sessionId, b.startLoginRequest);
+  });
+  boot.post('/api/pair/finish', async (req) => {
+    const b = parse(PairFinish, req.body);
+    return pairing.finish(req.ip, b.pairingId, b.finishLoginRequest);
   });
 
-  app.setErrorHandler((err: Error, _req, reply) => {
-    if (err instanceof ApiError) {
-      if (err.status === 429) reply.header('retry-after', 1);
-      return reply.code(err.status).send({ code: err.code, message: err.message, ...err.extra });
-    }
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status && status < 500) return reply.code(status).send({ code: 'invalid', message: err.message });
-    app.log.error(err);
-    return reply.code(500).send({ code: 'internal', message: 'Something went wrong on the teacher computer.' });
+  // ---- HTTPS: join / reconnect ----
+  app.post('/api/join', async (req) => {
+    const b = parse(JoinRequest, req.body);
+    pairing.verifyJoin(b);
+    return { ...classroom.join(b.profile), classroom: classroom.info() };
+  });
+  const reconnectRate = new RateLimit(30, 60_000);
+  app.post('/api/reconnect/challenge', async (req) => {
+    if (!reconnectRate.take(req.ip)) throw new ApiError(429, 'rate_limited', 'Too many attempts.');
+    const b = parse(ReconnectChallengeRequest, req.body);
+    return pairing.reconnectChallenge(b.devicePublicKey);
+  });
+  app.post('/api/reconnect', async (req) => {
+    const b = parse(ReconnectRequest, req.body);
+    const fp = pairing.verifyReconnect(b.challengeId, b.devicePublicKey, b.signature);
+    return { ...classroom.reconnect(fp), classroom: classroom.info() };
   });
 
   // Uploads are streamed straight to disk; never buffered by a body parser.
@@ -178,20 +249,6 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     } catch (e) {
       body?.resume?.(); // drain so the error response can be delivered
       throw e;
-    }
-  });
-
-  app.get('/api/info', async () => ({ product: 'classroom-lan', protocol: 1, title: classroom.title, sessionId: classroom.id }));
-
-  app.post('/api/join', async (req, reply) => {
-    const parsed = JoinRequest.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: 'invalid', message: parsed.error.issues[0]?.message ?? 'Invalid request' });
-    try {
-      return { ...classroom.join(parsed.data, req.ip), classroom: classroom.info() };
-    } catch (e) {
-      if (!(e instanceof JoinError)) throw e;
-      if (e.retryAfterMs) reply.header('retry-after', Math.ceil(e.retryAfterMs / 1000));
-      return reply.code(e.status).send({ code: e.code, message: e.message });
     }
   });
 
@@ -318,9 +375,15 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     });
   });
 
-  await app.listen({ host: opts.host, port: opts.port ?? 0 });
-  const port = (app.server.address() as { port: number }).port;
+  await app.listen({ host: opts.host, port: 0 });
+  httpsPort = (app.server.address() as { port: number }).port;
+  await boot.listen({ host: opts.host, port: opts.port ?? 0 });
+  const port = (boot.server.address() as { port: number }).port;
   const stopAdvertising = opts.advertise ? advertise({ host: opts.host, port, sid: classroom.id, title: classroom.title }) : null;
+  // The certificate is short-lived; the class ends just before it expires rather than switching keys mid-session.
+  const certTimer = setTimeout(() => classroom.end(), Math.max(0, tls.notAfter - Date.now() - 60_000));
+  certTimer.unref();
+  const hostPart = opts.host.includes(':') ? `[${opts.host}]` : opts.host;
 
   return {
     classroom,
@@ -328,14 +391,19 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     assignments,
     storage,
     port,
-    url: `http://${opts.host.includes(':') ? `[${opts.host}]` : opts.host}:${port}`,
+    url: `https://${hostPart}:${httpsPort}`,
+    bootstrapUrl: `http://${hostPart}:${port}`,
+    tls: { certificate: tls.certificate, spkiSha256: tls.spkiSha256, notAfter: tls.notAfter },
+    teacherPublicKey,
     async close() {
       await stopAdvertising?.();
       classroom.end();
       shuttingDown = true;
       clearInterval(statsTimer);
+      clearTimeout(certTimer);
       if (pending) clearTimeout(pending);
-      await app.close();
+      pairing.destroy();
+      await Promise.all([app.close(), boot.close()]);
       classroom.removeAllListeners();
       if (!opts.db) db.close();
     },

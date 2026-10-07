@@ -132,6 +132,29 @@ const MIGRATIONS: string[] = [
     UNIQUE (assignment_id, member_id, version)
   );
   `,
+  // 3: Milestone 2.5 — cryptographic device identity, signed receipts. Plaintext join codes are scrubbed and no
+  // longer stored. UUID-based known_devices are deliberately NOT migrated into trusted_devices: a copyable UUID
+  // never becomes cryptographic trust; those students simply need one approval again.
+  `
+  UPDATE sessions SET join_code = '';
+  ALTER TABLE sessions ADD COLUMN teacher_key TEXT;
+  ALTER TABLE sessions ADD COLUMN tls_spki TEXT;
+  ALTER TABLE members ADD COLUMN device_key TEXT;
+  ALTER TABLE members ADD COLUMN trust TEXT NOT NULL DEFAULT 'legacy';
+  ALTER TABLE members ADD COLUMN token_issued_at INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE trusted_devices (
+    course TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    roll_no TEXT NOT NULL,
+    first_approved_at INTEGER NOT NULL,
+    last_approved_at INTEGER NOT NULL,
+    PRIMARY KEY (course, fingerprint)
+  );
+  CREATE INDEX trusted_devices_roll ON trusted_devices(course, roll_no);
+  ALTER TABLE submissions ADD COLUMN receipt TEXT;
+  `,
 ];
 
 export type Db = DatabaseSync;

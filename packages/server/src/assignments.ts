@@ -6,7 +6,7 @@ import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import {
-  AssignmentInput, extensionOf, safeFileName,
+  AssignmentInput, canonicalBytes, extensionOf, keyFingerprint, safeFileName, type ReceiptPayload,
   type AssignmentView, type Receipt, type StudentAssignmentView, type SubmissionState, type TeacherAssignmentView, type UploadInit, type UploadStatus,
 } from '@classroom/protocol';
 import type { Classroom } from './classroom.ts';
@@ -15,7 +15,9 @@ import { ApiError, hashFile, sizeOf, type Limits, type Storage } from './storage
 
 type ARow = { id: string; title: string; instructions: string; due_at: number | null; allowed_ext: string; max_bytes: number; mode: 'individual' | 'group'; created_at: number; closed_at: number | null };
 type URow = { id: string; assignment_id: string; member_id: string; idempotency_key: string; file_name: string; size: number; sha256: string; state: UploadStatus['state']; error: string | null; submission_id: string | null; updated_at: number };
-type SRow = { id: string; assignment_id: string; member_id: string; device_id: string; version: number; file_name: string; safe_name: string; stored_path: string; size: number; sha256: string; submitted_at: number; late: number };
+type SRow = { id: string; assignment_id: string; member_id: string; device_id: string; version: number; file_name: string; safe_name: string; stored_path: string; size: number; sha256: string; submitted_at: number; late: number; receipt: string | null };
+/** Teacher application-identity signer (Ed25519). Distinct from the TLS key. */
+export type ReceiptSigner = { publicKey: string; sign(bytes: Uint8Array): string };
 
 const aview = (r: ARow): AssignmentView => ({
   id: r.id, title: r.title, instructions: r.instructions, dueAt: r.due_at, allowedExtensions: JSON.parse(r.allowed_ext),
@@ -31,10 +33,11 @@ export class Assignments extends EventEmitter {
   private db: Db; private classroom: Classroom; private storage: Storage; private limits: Limits;
   private now: () => number;
   private writing = new Map<string, string>(); // uploadId -> memberId while a PUT is streaming
+  private signer: ReceiptSigner;
 
-  constructor(db: Db, classroom: Classroom, storage: Storage, limits: Limits, now = Date.now) {
+  constructor(db: Db, classroom: Classroom, storage: Storage, limits: Limits, signer: ReceiptSigner, now = Date.now) {
     super();
-    this.db = db; this.classroom = classroom; this.storage = storage; this.limits = limits; this.now = now;
+    this.db = db; this.classroom = classroom; this.storage = storage; this.limits = limits; this.signer = signer; this.now = now;
   }
 
   get activeUploads() { return this.writing.size; }
@@ -200,20 +203,30 @@ export class Assignments extends EventEmitter {
       await rename(dest, part).catch(() => {});
       throw e;
     }
+    this.receipt(id); // sign + persist now so the receipt is immutable from the moment of acceptance
     this.classroom.log('submission.accepted', u.member_id, { name: member.fullName, assignmentId: a.id, title: a.title, late: !!late });
     this.emit('changed');
     return this.status(u.member_id, u.id);
   }
 
+  /**
+   * Signed receipt. Signed once when the submission is accepted and stored verbatim, so idempotent re-fetches return
+   * byte-identical receipts. (Pre-2.5 submissions are signed on first request.)
+   */
   receipt(submissionId: string): Receipt {
     const s = this.db.prepare('SELECT * FROM submissions WHERE id = ? AND session_id = ?').get(submissionId, this.classroom.id) as SRow;
+    if (s.receipt) return JSON.parse(s.receipt) as Receipt;
     const a = this.mustAssignment(s.assignment_id);
     const m = this.classroom.member(s.member_id)!;
-    return {
-      submissionId: s.id, assignmentId: a.id, assignmentTitle: a.title, sessionId: this.classroom.id, classTitle: this.classroom.title,
-      memberId: m.id, deviceId: s.device_id, fullName: m.fullName, rollNo: m.rollNo, version: s.version, submittedAt: s.submitted_at,
-      late: !!s.late, fileName: s.safe_name, size: s.size, sha256: s.sha256, status: 'accepted',
+    const payload: ReceiptPayload = {
+      type: 'classroom-lan/receipt', v: 1, receiptId: randomUUID(), submissionId: s.id, assignmentId: a.id, assignmentTitle: a.title,
+      sessionId: this.classroom.id, courseTitle: this.classroom.title, memberId: m.id, studentKeyFingerprint: s.device_id,
+      fullName: m.fullName, rollNo: m.rollNo, version: s.version, submittedAt: s.submitted_at, late: !!s.late,
+      fileName: s.safe_name, size: s.size, sha256: s.sha256, status: 'accepted', teacherKeyFingerprint: keyFingerprint(this.signer.publicKey),
     };
+    const receipt: Receipt = { payload, alg: 'Ed25519', signature: this.signer.sign(canonicalBytes(payload)), teacherPublicKey: this.signer.publicKey };
+    this.db.prepare('UPDATE submissions SET receipt = ? WHERE id = ? AND receipt IS NULL').run(JSON.stringify(receipt), s.id);
+    return JSON.parse((this.db.prepare('SELECT receipt FROM submissions WHERE id = ?').get(s.id) as { receipt: string }).receipt);
   }
 
   /** Absolute path of a stored submission, for the teacher's "show in folder". */

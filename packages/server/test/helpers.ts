@@ -1,16 +1,41 @@
-import { randomUUID } from 'node:crypto';
-import type { ServerMessage, StudentProfile } from '@classroom/protocol';
+import * as opaque from '@serenity-kit/opaque';
+import type { ServerMessage, StudentProfile, TlsBinding } from '@classroom/protocol';
+import { pairAndJoin, type DeviceSigner, type Transport } from '@classroom/client';
+import { newEd25519, nodeSigner, pinnedTransport } from '@classroom/client/node';
 
-export const profile = (n = 1): StudentProfile => ({ fullName: `Student ${n}`, rollNo: `FA23-CS-${100 + n}`, deviceName: `Laptop-${n}`, deviceId: randomUUID() });
+/** A fresh Ed25519 device identity. */
+export const device = (): DeviceSigner & { privatePkcs8: string } => { const k = newEd25519(); return { ...nodeSigner(k.privatePkcs8), privatePkcs8: k.privatePkcs8 }; };
+export const names = (n = 1) => ({ fullName: `Student ${n}`, rollNo: `FA23-CS-${100 + n}`, deviceName: `Laptop-${n}` });
+export const profile = (n = 1, d: DeviceSigner = device()): StudentProfile => ({ ...names(n), devicePublicKey: d.publicKey });
 
-export async function post(url: string, body: unknown, raw = false) {
-  const res = await fetch(url + '/api/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw ? (body as string) : JSON.stringify(body) });
+// Pinned transports by origin, so tests can keep using plain https URLs (and TCP proxies in front of them).
+const transports = new Map<string, Transport>();
+export const trustServer = (s: { url: string; tls: Pick<TlsBinding, 'certificate' | 'spkiSha256'> }, alsoUrl?: string) => {
+  const t = pinnedTransport(s.tls);
+  transports.set(new URL(s.url).origin, t);
+  if (alsoUrl) transports.set(new URL(alsoUrl).origin, t);
+  return t;
+};
+export const trFor = (url: string) => {
+  const t = transports.get(new URL(url).origin);
+  if (!t) throw new Error(`no pinned transport for ${url}`);
+  return t;
+};
+
+/** Real secure join: OPAQUE with the code, pinned TLS, device-key proof. */
+export async function secureJoin(s: { bootstrapUrl: string; classroom: { id: string; code: string } }, n = 1, d: DeviceSigner = device(), code = s.classroom.code) {
+  await opaque.ready;
+  return pairAndJoin({ candidates: [{ url: s.bootstrapUrl, sid: s.classroom.id }], code, profile: names(n), device: d, opaque: opaque.client, transportFor: pinnedTransport });
+}
+
+export async function postJoin(url: string, body: unknown, raw = false) {
+  const res = await trFor(url).fetch(url + '/api/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw ? (body as string) : JSON.stringify(body) });
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
-/** Minimal test socket: collects messages, lets tests await a predicate. */
+/** Minimal test socket over pinned WSS: collects messages, lets tests await a predicate. */
 export function socket(url: string, token?: string) {
-  const ws = new WebSocket(url.replace('http', 'ws') + '/ws');
+  const ws = trFor(url).openWebSocket(url.replace(/^https/, 'wss') + '/ws');
   const msgs: ServerMessage[] = [];
   const waiters: { pred: (m: ServerMessage) => boolean; res: (m: ServerMessage) => void }[] = [];
   let closed: { code: number; reason: string } | null = null;
@@ -44,7 +69,6 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { joinByCode } from '@classroom/client';
 import { startClassroomServer, type ServerOptions, type RunningServer } from '../src/index.ts';
 
 export const tmp = (prefix = 'clt-') => mkdtempSync(join(tmpdir(), prefix));
@@ -57,21 +81,23 @@ export function makeFile(bytes: number, name = 'file.bin', dir = tmp()) {
   return { path, sha256: createHash('sha256').update(buf).digest('hex'), size: bytes, buf };
 }
 
-export type Student = { token: string; memberId: string };
+export type Student = { token: string; memberId: string; device: DeviceSigner };
 /** Server with open join policy and `n` approved students. */
 export async function classWith(n: number, opts: Partial<ServerOptions> = {}): Promise<{ s: RunningServer; students: Student[] }> {
   const s = await startClassroomServer({ title: 'Class', host: '127.0.0.1', storageDir: tmp('cls-storage-'), ...opts });
+  trustServer(s);
   s.classroom.setPolicy('open');
   const students: Student[] = [];
   for (let i = 0; i < n; i++) {
-    const j = await joinByCode([{ url: s.url }], s.classroom.code, profile(i));
-    students.push({ token: j.token, memberId: j.memberId });
+    const d = device();
+    const j = await secureJoin(s, i, d);
+    students.push({ token: j.token, memberId: j.memberId, device: d });
   }
   return { s, students };
 }
 
 export const get = (url: string, token: string | null, headers: Record<string, string> = {}) =>
-  fetch(url, { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } });
+  trFor(url).fetch(url, { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } });
 
 /**
  * TCP proxy that kills the first connection after `cutAfter` bytes in one direction ('down' = server->client).
@@ -101,7 +127,8 @@ export async function cuttingProxy(target: string, cutAfter: number, dir: 'down'
   });
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
   return {
-    url: `http://127.0.0.1:${(srv.address() as { port: number }).port}`,
+    // Raw TCP relay: TLS runs end-to-end through it, so it's https and uses the real server's pin.
+    url: `https://127.0.0.1:${(srv.address() as { port: number }).port}`,
     wasCut: () => cut,
     close: () => { socks.forEach((s) => s.destroy()); return new Promise<void>((r) => srv.close(() => r())); },
   };

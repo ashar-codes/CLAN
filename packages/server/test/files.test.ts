@@ -6,6 +6,7 @@ import { downloadResource, partPaths } from '@classroom/client/node';
 import type { ResourceView, TeacherResourceView } from '@classroom/protocol';
 import type { RunningServer } from '../src/index.ts';
 import { classWith, cuttingProxy, get, makeFile, socket, tmp } from './helpers.ts';
+import { trFor, trustServer, secureJoin } from './helpers.ts';
 
 const servers: RunningServer[] = [];
 const cleanups: (() => Promise<void>)[] = [];
@@ -42,7 +43,7 @@ describe('classroom files', () => {
     const r = await s.resources.importFile(f.path);
     const dest = tmp();
     const states: string[] = [];
-    const out = await downloadResource({ url: s.url, token: a!.token, resource: view(r), destDir: dest, onProgress: (p) => states.push(p.state) });
+    const out = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: view(r), destDir: dest, onProgress: (p) => states.push(p.state) });
     expect(out.path).toBe(join(dest, 'Lab04.zip'));
     expect(readFileSync(out.path).equals(f.buf)).toBe(true);
     expect(existsSync(partPaths(dest, r.id).part)).toBe(false);
@@ -96,9 +97,10 @@ describe('classroom files', () => {
     const f = makeFile(100 * 1024 * 1024, 'video.mp4');
     const r = await s.resources.importFile(f.path);
     const proxy = await cuttingProxy(s.url, 47 * 1024 * 1024);
+    trustServer(s, proxy.url);
     cleanups.push(proxy.close);
     const dest = tmp();
-    await expect(downloadResource({ url: proxy.url, token: a!.token, resource: view(r), destDir: dest })).rejects.toThrow();
+    await expect(downloadResource({ transport: trFor(proxy.url), url: proxy.url, token: a!.token, resource: view(r), destDir: dest })).rejects.toThrow();
     expect(proxy.wasCut()).toBe(true);
     // Partial is never presented as the finished file.
     expect(existsSync(join(dest, 'video.mp4'))).toBe(false);
@@ -106,7 +108,7 @@ describe('classroom files', () => {
     // Bytes still in socket buffers at the drop are lost, so the partial sits somewhat below the 47 MB cut.
     expect(partial).toBeGreaterThan(20 * 1024 * 1024);
     expect(partial).toBeLessThanOrEqual(47 * 1024 * 1024);
-    const out = await downloadResource({ url: proxy.url, token: a!.token, resource: view(r), destDir: dest });
+    const out = await downloadResource({ transport: trFor(proxy.url), url: proxy.url, token: a!.token, resource: view(r), destDir: dest });
     expect(out.resumedFrom).toBe(partial);
     expect(readFileSync(out.path).equals(f.buf)).toBe(true);
   }, 60_000);
@@ -122,10 +124,10 @@ describe('classroom files', () => {
     bad[1234] = bad[1234]! ^ 0xff;
     writeFileSync(p.part, bad);
     writeFileSync(p.meta, JSON.stringify({ sha256: r.sha256, size: r.size }));
-    await expect(downloadResource({ url: s.url, token: a!.token, resource: view(r), destDir: dest })).rejects.toMatchObject({ code: 'hash_mismatch' });
+    await expect(downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: view(r), destDir: dest })).rejects.toMatchObject({ code: 'hash_mismatch' });
     expect(existsSync(p.part)).toBe(false);
     expect(readdirSync(dest).filter((x) => !x.startsWith('.'))).toEqual([]);
-    const out = await downloadResource({ url: s.url, token: a!.token, resource: view(r), destDir: dest });
+    const out = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: view(r), destDir: dest });
     expect(out.resumedFrom).toBe(0);
     expect(readFileSync(out.path).equals(f.buf)).toBe(true);
   });
@@ -139,7 +141,7 @@ describe('classroom files', () => {
     mkdirSync(p.dir, { recursive: true });
     writeFileSync(p.part, Buffer.alloc(50_000, 7));
     writeFileSync(p.meta, JSON.stringify({ sha256: 'f'.repeat(64), size: r.size }));
-    const out = await downloadResource({ url: s.url, token: a!.token, resource: view(r), destDir: dest });
+    const out = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: view(r), destDir: dest });
     expect(out.resumedFrom).toBe(0);
     expect(readFileSync(out.path).equals(f.buf)).toBe(true);
   });
@@ -150,8 +152,8 @@ describe('classroom files', () => {
     const r1 = await s.resources.importFile(f1.path), r2 = await s.resources.importFile(f2.path);
     expect(r1.id).not.toBe(r2.id);
     const dest = tmp();
-    const o1 = await downloadResource({ url: s.url, token: a!.token, resource: view(r1), destDir: dest });
-    const o2 = await downloadResource({ url: s.url, token: a!.token, resource: view(r2), destDir: dest });
+    const o1 = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: view(r1), destDir: dest });
+    const o2 = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: view(r2), destDir: dest });
     expect([o1.path, o2.path]).toEqual([join(dest, 'notes.txt'), join(dest, 'notes (1).txt')]);
     expect(readFileSync(o1.path).equals(f1.buf)).toBe(true);
   });
@@ -162,7 +164,7 @@ describe('classroom files', () => {
     const r = await s.resources.importFile(f.path);
     const dest = tmp();
     for (const name of ['../../escape.txt', '/etc/passwd', 'C:\\Windows\\x.dll', '..', 'CON', 'a\u0000b']) {
-      const out = await downloadResource({ url: s.url, token: a!.token, resource: { ...view(r), name }, destDir: dest });
+      const out = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: { ...view(r), name }, destDir: dest });
       expect(out.path.startsWith(dest + '/')).toBe(true);
       expect(out.path.slice(dest.length + 1)).not.toMatch(/[/\\\u0000]/);
     }
@@ -174,7 +176,7 @@ describe('classroom files', () => {
     const f = makeFile(1000);
     const r = await s.resources.importFile(f.path);
     const dest = tmp();
-    const got = await downloadResource({ url: s.url, token: a!.token, resource: view(r), destDir: dest });
+    const got = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: view(r), destDir: dest });
     s.resources.setAvailable(r.id, false);
     expect((await get(content(s, r.id), a!.token)).status).toBe(404);
     expect((await get(content(s, r.id), s.classroom.teacherToken)).status).toBe(200);
@@ -199,7 +201,7 @@ describe('classroom files', () => {
     expect(v.pushed).toBe(true);
     // Students fetch over HTTP and report.
     await Promise.all(students.map(async (st, i) => {
-      await downloadResource({ url: s.url, token: st.token, resource: view(r), destDir: tmp(), onProgress: (p) => socks[i]!.send({ t: 'transfer.state', resourceId: r.id, state: p.state, bytes: p.bytes }) });
+      await downloadResource({ transport: trFor(s.url), url: s.url, token: st.token, resource: view(r), destDir: tmp(), onProgress: (p) => socks[i]!.send({ t: 'transfer.state', resourceId: r.id, state: p.state, bytes: p.bytes }) });
     }));
     v = (await teacher.next('resources', (m) => (m.resources as TeacherResourceView[])[0]?.counts.completed === 3)).resources[0] as TeacherResourceView;
     expect(v.students.map((x) => x.state)).toEqual(['completed', 'completed', 'completed']);
@@ -235,8 +237,7 @@ describe('file authorization', () => {
     expect((await get(url, 'x'.repeat(43))).status).toBe(401);
     expect((await get(url, 'not a token at all')).status).toBe(401);
     s.classroom.setPolicy('approval');
-    const { joinByCode } = await import('@classroom/client');
-    const pending = await joinByCode([{ url: s.url }], s.classroom.code, (await import('./helpers.ts')).profile(9));
+    const pending = await secureJoin(s, 9);
     expect((await get(url, pending.token)).status).toBe(403);
     s.classroom.setStatus(a!.memberId, 'removed');
     expect((await get(url, a!.token)).status).toBe(401);
@@ -321,13 +322,13 @@ describe('cross-session isolation on one teacher database (realistic: last week\
     const r = await old.s.resources.importFile(makeFile(10).path);
     const A = old.s.assignments.create({ title: 'Old', maxBytes: 1000 });
     const f = makeFile(10);
-    const up = await initUpload(old.s.url, old.students[0]!.token, { assignmentId: A.id, fileName: 'a.txt', size: 10, sha256: f.sha256, idempotencyKey: randomUUID() });
+    const up = await initUpload(trFor(old.s.url), old.s.url, old.students[0]!.token, { assignmentId: A.id, fileName: 'a.txt', size: 10, sha256: f.sha256, idempotencyKey: randomUUID() });
     const t = now.students[0]!.token;
     expect((await get(content(now.s, r.id), t)).status).toBe(404);
     expect((await get(content(now.s, r.id), now.s.classroom.teacherToken)).status).toBe(404);
     expect(now.s.resources.listForTeacher()).toEqual([]);
-    await expect(initUpload(now.s.url, t, { assignmentId: A.id, fileName: 'a.txt', size: 10, sha256: f.sha256, idempotencyKey: randomUUID() })).rejects.toMatchObject({ status: 404 });
-    await expect(uploadStatus(now.s.url, t, up.uploadId)).rejects.toMatchObject({ status: 404 });
+    await expect(initUpload(trFor(now.s.url), now.s.url, t, { assignmentId: A.id, fileName: 'a.txt', size: 10, sha256: f.sha256, idempotencyKey: randomUUID() })).rejects.toMatchObject({ status: 404 });
+    await expect(uploadStatus(trFor(now.s.url), now.s.url, t, up.uploadId)).rejects.toMatchObject({ status: 404 });
     expect(now.s.assignments.listForTeacher()).toEqual([]);
     expect(() => now.s.assignments.close(A.id)).toThrow();
     await expect(now.s.resources.remove(r.id)).rejects.toMatchObject({ status: 404 });

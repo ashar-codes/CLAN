@@ -10,8 +10,11 @@
   "dependencies": {
     "@classroom/protocol": "workspace:*",
     "@fastify/websocket": "^11.3.3",
+    "@peculiar/x509": "^2.1.0",
+    "@serenity-kit/opaque": "1.1.0",
     "bonjour-service": "^1.4.4",
-    "fastify": "^5.12.5"
+    "fastify": "^5.12.5",
+    "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
     "@classroom/client": "workspace:*",

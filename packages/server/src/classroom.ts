@@ -1,10 +1,12 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { ClassroomInfo, JoinPolicy, JoinRequest, Member, MemberStatus, TimelineEvent } from '@classroom/protocol';
+import { keyFingerprint, type ClassroomInfo, type DeviceTrust, type JoinPolicy, type Member, type MemberStatus, type StudentProfile, type TimelineEvent } from '@classroom/protocol';
 import type { Db } from './db.ts';
 import { Throttle } from './throttle.ts';
 
 export const TOKEN_IDLE_MS = 30 * 60_000;
+/** Absolute token lifetime; afterwards the device re-proves its key (reconnect) to get a new one. */
+export const TOKEN_MAX_MS = 8 * 60 * 60_000;
 const MAX_PENDING = 200;
 
 export type NetworkMode = 'lan' | 'direct';
@@ -24,7 +26,7 @@ const newToken = () => randomBytes(32).toString('base64url');
 export const newJoinCode = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
 
 type MemberRow = {
-  id: string; device_id: string; full_name: string; roll_no: string; device_name: string;
+  id: string; device_id: string; trust: DeviceTrust; full_name: string; roll_no: string; device_name: string;
   status: MemberStatus; token_expires: number; joined_at: number; last_seen: number;
 };
 
@@ -34,6 +36,7 @@ type MemberRow = {
  */
 export class Classroom extends EventEmitter {
   readonly id = randomUUID();
+  /** Shown to the teacher; held in memory only (never stored), and only an OPAQUE record is derived from it. */
   readonly code: string;
   readonly teacherToken = newToken();
   private teacherTokenHash = Buffer.from(sha256(this.teacherToken), 'hex');
@@ -55,7 +58,7 @@ export class Classroom extends EventEmitter {
     this.ipThrottle = new Throttle(5, 5 * 60_000, 5 * 60_000, this.now);
     this.globalThrottle = new Throttle(50, 60_000, 60_000, this.now);
     db.prepare('INSERT INTO sessions (id, title, join_code, network_mode, started_at) VALUES (?, ?, ?, ?, ?)')
-      .run(this.id, title, this.code, networkMode, this.now());
+      .run(this.id, title, '', networkMode, this.now());
     this.log('class.started', null, { title, networkMode });
   }
 
@@ -65,27 +68,28 @@ export class Classroom extends EventEmitter {
     return { sessionId: this.id, title: r.title, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null };
   }
 
-  join(req: JoinRequest, source: string): { memberId: string; token: string; status: MemberStatus } {
-    const lock = Math.max(this.ipThrottle.lockedFor(source), this.globalThrottle.lockedFor('*'));
-    if (lock > 0) throw new JoinError(429, 'throttled', 'Too many attempts. Wait and try again.', lock);
-    const a = Buffer.from(req.code), b = Buffer.from(this.code);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) {
-      this.ipThrottle.fail(source);
-      this.globalThrottle.fail('*');
-      throw new JoinError(403, 'bad_code', 'Wrong classroom code.');
-    }
+  /** Pre-checks shared by pairing and joining (no secrets involved). */
+  assertJoinable() {
     const info = this.info();
     if (info.ended) throw new JoinError(410, 'ended', 'This class has ended.');
     if (info.locked) throw new JoinError(423, 'locked', 'The teacher has locked joining.');
+  }
 
-    const p = req.profile;
-    const existing = this.db.prepare('SELECT id, status FROM members WHERE session_id = ? AND device_id = ?').get(this.id, p.deviceId) as
+  /**
+   * Admit a device whose code knowledge (OPAQUE) and key possession (signed challenge) were already verified by
+   * Pairing. Identity is the device public key; names are display data.
+   */
+  join(p: StudentProfile): { memberId: string; token: string; status: MemberStatus } {
+    this.assertJoinable();
+    const fingerprint = keyFingerprint(p.devicePublicKey);
+    const existing = this.db.prepare('SELECT id, status FROM members WHERE session_id = ? AND device_id = ?').get(this.id, fingerprint) as
       { id: string; status: MemberStatus } | undefined;
     if (existing?.status === 'blocked') throw new JoinError(403, 'blocked', 'This device has been blocked from the class.');
 
-    const known = !!this.db.prepare('SELECT 1 FROM known_devices WHERE course = ? AND device_id = ?').get(this.title, p.deviceId);
-    const auto = info.joinPolicy === 'open' || (info.joinPolicy === 'known' && known);
-    // A device the teacher already let in keeps its place (reconnect after token expiry / app restart).
+    const trust = this.trustOf(fingerprint, p.rollNo);
+    const info = this.info();
+    const auto = info.joinPolicy === 'open' || (info.joinPolicy === 'known' && trust === 'known');
+    // The same proven key that the teacher already let in keeps its place.
     let status: MemberStatus = existing?.status === 'approved' || auto ? 'approved' : 'pending';
     if (existing?.status === 'removed') status = 'pending'; // removed students must be re-approved
 
@@ -98,16 +102,39 @@ export class Classroom extends EventEmitter {
     const t = this.now();
     const memberId = existing?.id ?? randomUUID();
     if (existing) {
-      this.db.prepare('UPDATE members SET full_name=?, roll_no=?, device_name=?, status=?, token_hash=?, token_expires=?, last_seen=? WHERE id=?')
-        .run(p.fullName, p.rollNo, p.deviceName, status, sha256(token), t + TOKEN_IDLE_MS, t, memberId);
+      this.db.prepare('UPDATE members SET full_name=?, roll_no=?, device_name=?, status=?, trust=?, token_hash=?, token_expires=?, token_issued_at=?, last_seen=? WHERE id=?')
+        .run(p.fullName, p.rollNo, p.deviceName, status, trust, sha256(token), t + TOKEN_IDLE_MS, t, t, memberId);
     } else {
-      this.db.prepare('INSERT INTO members (id, session_id, device_id, full_name, roll_no, device_name, status, token_hash, token_expires, joined_at, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-        .run(memberId, this.id, p.deviceId, p.fullName, p.rollNo, p.deviceName, status, sha256(token), t + TOKEN_IDLE_MS, t, t);
+      this.db.prepare('INSERT INTO members (id, session_id, device_id, device_key, trust, full_name, roll_no, device_name, status, token_hash, token_expires, token_issued_at, joined_at, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(memberId, this.id, fingerprint, p.devicePublicKey, trust, p.fullName, p.rollNo, p.deviceName, status, sha256(token), t + TOKEN_IDLE_MS, t, t, t);
     }
-    this.log(status === 'approved' ? 'member.joined' : 'member.requested', memberId, { name: p.fullName, rollNo: p.rollNo });
+    this.log(status === 'approved' ? 'member.joined' : 'member.requested', memberId, { name: p.fullName, rollNo: p.rollNo, trust });
     if (status === 'approved') this.remember(memberId);
     this.emit('roster');
     return { memberId, token, status };
+  }
+
+  /** Cryptographic trust: only an exact previously approved device key counts as known. */
+  private trustOf(fingerprint: string, rollNo: string): DeviceTrust {
+    if (this.db.prepare('SELECT 1 FROM trusted_devices WHERE course = ? AND fingerprint = ?').get(this.title, fingerprint)) return 'known';
+    if (this.db.prepare('SELECT 1 FROM trusted_devices WHERE course = ? AND lower(roll_no) = lower(?)').get(this.title, rollNo)) return 'new_device';
+    return 'first';
+  }
+
+  /**
+   * Device-key reconnect (after token expiry or app restart) for a device already in this session. The caller has
+   * verified a fresh signed challenge for `fingerprint`. Issues a new token; never changes approval state.
+   */
+  reconnect(fingerprint: string): { memberId: string; token: string; status: MemberStatus } {
+    if (this.info().ended) throw new JoinError(410, 'ended', 'This class has ended.');
+    const m = this.db.prepare('SELECT id, status FROM members WHERE session_id = ? AND device_id = ?').get(this.id, fingerprint) as { id: string; status: MemberStatus } | undefined;
+    if (!m) throw new JoinError(404, 'not_member', 'This device has not joined this class. Join with the code.');
+    if (m.status !== 'approved' && m.status !== 'pending') throw new JoinError(403, m.status, 'This device is not allowed in this class.');
+    const token = newToken();
+    const t = this.now();
+    this.db.prepare('UPDATE members SET token_hash = ?, token_expires = ?, token_issued_at = ?, last_seen = ? WHERE id = ?').run(sha256(token), t + TOKEN_IDLE_MS, t, t, m.id);
+    this.log('member.reconnected', m.id, {});
+    return { memberId: m.id, token, status: m.status };
   }
 
   /** Resolve a bearer token. Slides the idle expiry on success. */
@@ -115,9 +142,9 @@ export class Classroom extends EventEmitter {
     const h = Buffer.from(sha256(token), 'hex');
     if (timingSafeEqual(h, this.teacherTokenHash)) return { role: 'teacher' };
     const t = this.now();
-    const r = this.db.prepare('SELECT id, status, token_expires FROM members WHERE token_hash = ? AND session_id = ?').get(h.toString('hex'), this.id) as
-      { id: string; status: MemberStatus; token_expires: number } | undefined;
-    if (!r || r.token_expires < t || r.status === 'blocked' || r.status === 'removed' || r.status === 'rejected') return null;
+    const r = this.db.prepare('SELECT id, status, token_expires, token_issued_at FROM members WHERE token_hash = ? AND session_id = ?').get(h.toString('hex'), this.id) as
+      { id: string; status: MemberStatus; token_expires: number; token_issued_at: number } | undefined;
+    if (!r || r.token_expires < t || r.token_issued_at + TOKEN_MAX_MS < t || r.status === 'blocked' || r.status === 'removed' || r.status === 'rejected') return null;
     this.touch(r.id);
     return { role: 'student', memberId: r.id };
   }
@@ -184,9 +211,9 @@ export class Classroom extends EventEmitter {
   }
 
   roster(): Member[] {
-    const rows = this.db.prepare('SELECT id, device_id, full_name, roll_no, device_name, status, token_expires, joined_at, last_seen FROM members WHERE session_id = ? ORDER BY joined_at').all(this.id) as MemberRow[];
+    const rows = this.db.prepare('SELECT id, device_id, trust, full_name, roll_no, device_name, status, token_expires, joined_at, last_seen FROM members WHERE session_id = ? ORDER BY joined_at').all(this.id) as MemberRow[];
     return rows.map((r) => ({
-      id: r.id, deviceId: r.device_id, fullName: r.full_name, rollNo: r.roll_no, deviceName: r.device_name,
+      id: r.id, deviceFingerprint: r.device_id, trust: r.trust, fullName: r.full_name, rollNo: r.roll_no, deviceName: r.device_name,
       status: r.status, connected: (this.connections.get(r.id) ?? 0) > 0, joinedAt: r.joined_at, lastSeen: r.last_seen,
     }));
   }
@@ -197,9 +224,13 @@ export class Classroom extends EventEmitter {
     return rows.reverse().map((r) => ({ ...r, data: JSON.parse(r.data) }));
   }
 
+  /** Record the approved device key for this course (history: first/last approval). */
   private remember(memberId: string) {
-    this.db.prepare(`INSERT OR IGNORE INTO known_devices (course, device_id, full_name, roll_no, first_approved_at)
-      SELECT ?, device_id, full_name, roll_no, ? FROM members WHERE id = ?`).run(this.title, this.now(), memberId);
+    const t = this.now();
+    this.db.prepare(`INSERT INTO trusted_devices (course, fingerprint, public_key, full_name, roll_no, first_approved_at, last_approved_at)
+      SELECT ?, device_id, device_key, full_name, roll_no, ?, ? FROM members WHERE id = ? AND device_key IS NOT NULL
+      ON CONFLICT (course, fingerprint) DO UPDATE SET full_name = excluded.full_name, roll_no = excluded.roll_no, last_approved_at = excluded.last_approved_at`)
+      .run(this.title, t, t, memberId);
   }
 
   log(type: string, actor: string | null, data: Record<string, unknown>) {

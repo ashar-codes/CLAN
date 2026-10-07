@@ -15,6 +15,10 @@
     "dist:dir": "pnpm build && electron-builder --dir"
   },
   "devDependencies": {
+    "@classroom/client": "workspace:*",
+    "@classroom/protocol": "workspace:*",
+    "@classroom/server": "workspace:*",
+    "@serenity-kit/opaque": "1.1.0",
     "@types/react": "~19.2.0",
     "@types/react-dom": "~19.2.0",
     "@vitejs/plugin-react": "^6.1.2",
@@ -24,9 +28,6 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "vite": "^8.3.2",
-    "@classroom/client": "workspace:*",
-    "@classroom/protocol": "workspace:*",
-    "@classroom/server": "workspace:*",
     "zod": "^4.6.5"
   },
   "author": "Classroom LAN"

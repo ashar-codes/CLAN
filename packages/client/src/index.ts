@@ -1,47 +1,32 @@
-// Platform-neutral student client: works in Electron renderer, React Native and Node (load simulator).
-// Uses only fetch + WebSocket globals.
-import { WS_CLOSE, type ClientMessage, type JoinResponse, type ServerMessage, type StudentProfile } from '@classroom/protocol';
+// Platform-neutral student client: Electron renderer, React Native and Node (tests, simulator).
+// All classroom traffic after pairing goes through a pinned `Transport` over HTTPS/WSS.
+import { WS_CLOSE, type ClientMessage, type JoinResponse, type ServerMessage } from '@classroom/protocol';
 
-export type Candidate = { url: string; title?: string };
 export type Quality = 'excellent' | 'good' | 'poor' | 'disconnected';
+export type Candidate = { url: string; title?: string; sid?: string };
 export type JoinResult = JoinResponse & { url: string };
 
-export class JoinFailed extends Error {
-  code: string;
-  constructor(code: string, message: string) { super(message); this.code = code; }
-}
+/** Minimal WebSocket surface used by ClassroomConnection (browser WebSocket, `ws`, React Native). */
+export type WebSocketLike = {
+  readyState: number; send(data: string): void; close(code?: number, reason?: string): void;
+  onopen: ((ev: unknown) => void) | null; onmessage: ((ev: { data: unknown }) => void) | null;
+  onclose: ((ev: { code: number; reason: string }) => void) | null; onerror: ((ev: unknown) => void) | null;
+};
+/**
+ * How a client reaches the classroom after pairing. Implementations MUST only accept the PAKE-authenticated pinned
+ * certificate: Node -> `pinnedTransport` (./node); Electron renderer -> platformTransport + main-process verify proc.
+ */
+export type Transport = { fetch(url: string, init?: RequestInit): Promise<Response>; openWebSocket(url: string): WebSocketLike };
 
-/** Try the code against every discovered classroom; the server that accepts it is ours. */
-export async function joinByCode(candidates: Candidate[], code: string, profile: StudentProfile, timeoutMs = 5000): Promise<JoinResult> {
-  if (!/^\d{6}$/.test(code)) throw new JoinFailed('invalid', 'Enter the 6-digit classroom code.');
-  if (candidates.length === 0) throw new JoinFailed('none_found', 'No classrooms found on this network yet. Make sure you are on the same Wi-Fi as the teacher.');
-  const errors: JoinFailed[] = [];
-  const attempts = candidates.map(async (c) => {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), timeoutMs);
-    try {
-      const res = await fetch(`${c.url}/api/join`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code, profile, protocol: 1 }), signal: ctl.signal,
-      });
-      const body = await res.json();
-      if (!res.ok) throw new JoinFailed(body.code ?? 'error', body.message ?? `Join failed (${res.status})`);
-      return { ...(body as JoinResponse), url: c.url };
-    } catch (e) {
-      const err = e instanceof JoinFailed ? e : new JoinFailed('unreachable', 'Could not reach the classroom.');
-      errors.push(err);
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
-  });
-  try {
-    return await Promise.any(attempts);
-  } catch {
-    // Prefer the most informative error: anything other than a wrong code at some other classroom.
-    const meaningful = errors.find((e) => e.code !== 'bad_code' && e.code !== 'unreachable');
-    throw meaningful ?? new JoinFailed('bad_code', errors.some((e) => e.code === 'bad_code') ? 'No classroom matches that code.' : 'Could not reach any classroom.');
-  }
+/** Uses the platform's fetch/WebSocket. Only valid where the platform itself enforces the pin (Electron renderer). */
+export const platformTransport: Transport = {
+  fetch: (u, i) => fetch(u, i),
+  openWebSocket: (u) => new WebSocket(u) as unknown as WebSocketLike,
+};
+
+/** Classroom APIs are HTTPS/WSS only. A plaintext URL here is a downgrade attempt or a bug — refuse it. */
+export function assertSecureUrl(url: string) {
+  if (!/^(https|wss):\/\//.test(url)) throw new TransferError('insecure_transport', 'Refusing to use an unencrypted classroom connection.');
 }
 
 export function qualityFromRtt(rttMs: number | null): Quality {
@@ -58,7 +43,7 @@ type Handlers = {
 
 /** WebSocket connection that re-authenticates and reconnects with backoff across Wi-Fi drops. */
 export class ClassroomConnection {
-  private ws: WebSocket | null = null;
+  private ws: WebSocketLike | null = null;
   private stopped = false;
   private attempt = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -69,13 +54,16 @@ export class ClassroomConnection {
 
   private url: string; private token: string; private h: Handlers; private pingMs: number;
 
-  constructor(url: string, token: string, h: Handlers = {}, pingMs = 5000) {
-    this.url = url; this.token = token; this.h = h; this.pingMs = pingMs;
+  private transport: Transport;
+
+  constructor(url: string, token: string, h: Handlers = {}, pingMs = 5000, transport: Transport = platformTransport) {
+    assertSecureUrl(url);
+    this.url = url; this.token = token; this.h = h; this.pingMs = pingMs; this.transport = transport;
     this.open();
   }
 
   send(m: ClientMessage) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(m));
+    if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(m));
   }
 
   close() {
@@ -86,7 +74,7 @@ export class ClassroomConnection {
   }
 
   private open() {
-    const ws = new WebSocket(this.url.replace(/^http/, 'ws') + '/ws');
+    const ws = this.transport.openWebSocket(this.url.replace(/^https/, 'wss') + '/ws');
     this.ws = ws;
     ws.onopen = () => {
       ws.send(JSON.stringify({ t: 'auth', token: this.token } satisfies ClientMessage));
@@ -149,6 +137,7 @@ export class ClassroomConnection {
 
 // ---- Files & submissions (platform-neutral HTTP pieces; byte I/O lives in ./node or the mobile app) ----
 import type { UploadInit, UploadStatus } from '@classroom/protocol';
+export * from './pairing.ts';
 
 export class TransferError extends Error {
   code: string; status: number; extra: Record<string, unknown>;
@@ -156,16 +145,17 @@ export class TransferError extends Error {
 }
 
 /** All authenticated HTTP goes through here so an encrypted transport can later replace it in one place. */
-export async function api<T>(base: string, token: string, path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(base + path, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.body && typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(init.headers as Record<string, string>) } });
+export async function api<T>(t: Transport, base: string, token: string, path: string, init: RequestInit = {}): Promise<T> {
+  assertSecureUrl(base);
+  const res = await t.fetch(base + path, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.body && typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(init.headers as Record<string, string>) } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new TransferError(body.code ?? 'http_' + res.status, body.message ?? `Request failed (${res.status})`, res.status, body);
   return body as T;
 }
 
 export const resourceContentPath = (id: string) => `/api/resources/${encodeURIComponent(id)}/content`;
-export const initUpload = (base: string, token: string, req: UploadInit) => api<UploadStatus>(base, token, '/api/uploads', { method: 'POST', body: JSON.stringify(req) });
-export const uploadStatus = (base: string, token: string, uploadId: string) => api<UploadStatus>(base, token, `/api/uploads/${encodeURIComponent(uploadId)}`);
+export const initUpload = (t: Transport, base: string, token: string, req: UploadInit) => api<UploadStatus>(t, base, token, '/api/uploads', { method: 'POST', body: JSON.stringify(req) });
+export const uploadStatus = (t: Transport, base: string, token: string, uploadId: string) => api<UploadStatus>(t, base, token, `/api/uploads/${encodeURIComponent(uploadId)}`);
 
 /** Bytes as "4.2 MB". */
 export function formatBytes(n: number): string {

@@ -3,15 +3,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { Classroom, JoinError, newJoinCode, TOKEN_IDLE_MS } from '../src/classroom.ts';
 import { migrate, openDb } from '../src/db.ts';
 import { Throttle } from '../src/throttle.ts';
-import { StudentProfile } from '@classroom/protocol';
-import { profile } from './helpers.ts';
+import * as opaque from '@serenity-kit/opaque';
+import { StudentProfile, keyFingerprint } from '@classroom/protocol';
+import { opaqueIdentifiers } from '@classroom/client';
+import { Pairing } from '../src/pairing.ts';
+import { ephemeralIdentity } from '../src/server.ts';
+import { device, profile } from './helpers.ts';
 
 const setup = (code = '123456') => {
   let t = 1_000_000;
   const clock = { now: () => t, advance: (ms: number) => (t += ms) };
   return { c: new Classroom(openDb(':memory:'), 'Operating Systems', 'lan', { now: clock.now, code }), clock };
 };
-const req = (code: string, p = profile()) => ({ code, profile: p, protocol: 1 as const });
 
 describe('join code', () => {
   it('is always 6 digits and well spread', () => {
@@ -57,10 +60,11 @@ describe('throttle', () => {
 });
 
 describe('profile validation', () => {
-  it('rejects control characters, blanks and bad uuids', () => {
+  it('rejects control characters, blanks and bad device keys', () => {
     expect(StudentProfile.safeParse({ ...profile(), fullName: 'a\u0000b' }).success).toBe(false);
     expect(StudentProfile.safeParse({ ...profile(), fullName: '   ' }).success).toBe(false);
-    expect(StudentProfile.safeParse({ ...profile(), deviceId: 'MacBook' }).success).toBe(false);
+    expect(StudentProfile.safeParse({ ...profile(), devicePublicKey: 'MacBook' }).success).toBe(false);
+    expect(StudentProfile.safeParse({ ...profile(), devicePublicKey: undefined, deviceId: '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a' }).success).toBe(false);
     expect(StudentProfile.safeParse({ ...profile(), fullName: 'x'.repeat(81) }).success).toBe(false);
     expect(StudentProfile.safeParse(profile()).success).toBe(true);
   });
@@ -69,73 +73,90 @@ describe('profile validation', () => {
 describe('classroom membership', () => {
   it('defaults to pending; approval activates the same token', () => {
     const { c } = setup();
-    const j = c.join(req('123456'), 'ip1');
+    const j = c.join(profile());
     expect(j.status).toBe('pending');
     expect(c.authenticate(j.token)).toEqual({ role: 'student', memberId: j.memberId });
     c.setStatus(j.memberId, 'approved');
     expect(c.status(j.memberId)).toBe('approved');
   });
 
-  it('wrong code throws and is throttled per source, then globally', () => {
+  it('wrong code is throttled per source, then globally (each OPAQUE start counts as one guess)', async () => {
     const { c, clock } = setup();
-    for (let i = 0; i < 5; i++) expect(() => c.join(req('000000'), 'ip1')).toThrow(/Wrong classroom code/);
+    const pairing = await Pairing.create(c, (await ephemeralIdentity()).opaqueServerSetup, '123456',
+      () => ({ httpsPort: 1, spkiSha256: 'x', certificate: 'x', teacherPublicKey: 'x', title: 'OS' }));
+    const attempt = (code: string, src: string) => {
+      const l = opaque.client.startLogin({ password: code });
+      const r = pairing.start(src, c.id, l.startLoginRequest);
+      const f = opaque.client.finishLogin({ clientLoginState: l.clientLoginState, loginResponse: r.loginResponse, password: code, identifiers: opaqueIdentifiers(c.id) });
+      if (!f) throw new Error('Wrong classroom code');
+      return pairing.finish(src, r.pairingId, f.finishLoginRequest);
+    };
+    for (let i = 0; i < 5; i++) expect(() => attempt('000000', 'ip1')).toThrow(/Wrong classroom code/);
     // Locked even with the correct code.
-    expect(() => c.join(req('123456'), 'ip1')).toThrowError(expect.objectContaining({ status: 429 }));
-    expect(c.join(req('123456'), 'ip2').status).toBe('pending');
+    expect(() => attempt('123456', 'ip1')).toThrowError(expect.objectContaining({ status: 429 }));
+    expect(attempt('123456', 'ip2').binding.sessionId).toBe(c.id);
     clock.advance(5 * 60_000 + 1);
-    expect(c.join(req('123456'), 'ip1').status).toBe('pending');
+    expect(attempt('123456', 'ip1').binding.sessionId).toBe(c.id);
+    // Successful pairings are forgiven, so a full class can join without tripping the limits.
+    for (let i = 0; i < 12; i++) attempt('123456', 'ip3'); // > the 5-per-source limit
     // Distributed guessing: 50 failures across many sources locks the classroom briefly.
-    for (let i = 0; i < 50; i++) { try { c.join(req('000001'), `bot${i}`); } catch {} }
-    expect(() => c.join(req('123456'), 'fresh-ip')).toThrowError(expect.objectContaining({ code: 'throttled' }));
+    for (let i = 0; i < 50; i++) { try { attempt('000001', `bot${i}`); } catch {} }
+    expect(() => attempt('123456', 'fresh-ip')).toThrowError(expect.objectContaining({ code: 'throttled' }));
   });
 
   it('policies: open auto-approves, known approves previously approved devices', () => {
     const { c } = setup();
     c.setPolicy('open');
-    expect(c.join(req('123456'), 'a').status).toBe('approved');
+    expect(c.join(profile()).status).toBe('approved');
     c.setPolicy('known');
     const p = profile(7);
-    expect(c.join(req('123456', p), 'a').status).toBe('pending');
+    expect(c.join(p).status).toBe('pending');
     // 'known' spans sessions of the same course on one teacher database.
     const db = openDb(':memory:');
     const s1 = new Classroom(db, 'OS', 'lan', { code: '111111' });
-    const m = s1.join(req('111111', p), 'a');
+    const m = s1.join(p);
     s1.setStatus(m.memberId, 'approved');
     const s2 = new Classroom(db, 'OS', 'lan', { code: '222222' });
     s2.setPolicy('known');
-    expect(s2.join(req('222222', p), 'a').status).toBe('approved');
-    expect(s2.join(req('222222'), 'a').status).toBe('pending');
+    // Known = the exact device key approved before.
+    expect(s2.join(p).status).toBe('approved');
+    expect(s2.roster()[0]).toMatchObject({ trust: 'known', deviceFingerprint: keyFingerprint(p.devicePublicKey) });
+    expect(s2.join(profile()).status).toBe('pending');
+    // Same name + roll number from a different key: not trusted, flagged as a new device.
+    const thief = s2.join({ ...p, devicePublicKey: device().publicKey });
+    expect(thief.status).toBe('pending');
+    expect(s2.roster().find((x) => x.id === thief.memberId)!.trust).toBe('new_device');
   });
 
   it('locked and ended classrooms refuse joins', () => {
     const { c } = setup();
     c.setLocked(true);
-    expect(() => c.join(req('123456'), 'a')).toThrowError(expect.objectContaining({ status: 423 }));
+    expect(() => c.join(profile())).toThrowError(expect.objectContaining({ status: 423 }));
     c.setLocked(false);
     c.end();
-    expect(() => c.join(req('123456'), 'a')).toThrowError(expect.objectContaining({ status: 410 }));
+    expect(() => c.join(profile())).toThrowError(expect.objectContaining({ status: 410 }));
   });
 
   it('removed must be re-approved; blocked cannot rejoin; both lose their token', () => {
     const { c } = setup();
     c.setPolicy('open');
     const p = profile();
-    const j = c.join(req('123456', p), 'a');
+    const j = c.join(p);
     c.setStatus(j.memberId, 'removed');
     expect(c.authenticate(j.token)).toBeNull();
-    const again = c.join(req('123456', p), 'a');
+    const again = c.join(p);
     expect(again.memberId).toBe(j.memberId);
     expect(again.status).toBe('pending');
     c.setStatus(again.memberId, 'blocked');
-    expect(() => c.join(req('123456', p), 'a')).toThrowError(expect.objectContaining({ code: 'blocked' }));
+    expect(() => c.join(p)).toThrowError(expect.objectContaining({ code: 'blocked' }));
   });
 
   it('rejoin rotates the token (old one dies) and keeps approved status', () => {
     const { c } = setup();
     const p = profile();
-    const j = c.join(req('123456', p), 'a');
+    const j = c.join(p);
     c.setStatus(j.memberId, 'approved');
-    const j2 = c.join(req('123456', p), 'a');
+    const j2 = c.join(p);
     expect(j2.status).toBe('approved');
     expect(c.authenticate(j.token)).toBeNull();
     expect(c.authenticate(j2.token)).not.toBeNull();
@@ -143,7 +164,7 @@ describe('classroom membership', () => {
 
   it('tokens expire after idle period, activity slides expiry', () => {
     const { c, clock } = setup();
-    const j = c.join(req('123456'), 'a');
+    const j = c.join(profile());
     clock.advance(TOKEN_IDLE_MS - 1000);
     expect(c.authenticate(j.token)).not.toBeNull(); // slides
     clock.advance(TOKEN_IDLE_MS - 1000);
@@ -154,7 +175,7 @@ describe('classroom membership', () => {
 
   it('state transitions: only pending can be approved/rejected', () => {
     const { c } = setup();
-    const j = c.join(req('123456'), 'a');
+    const j = c.join(profile());
     c.setStatus(j.memberId, 'rejected');
     expect(() => c.setStatus(j.memberId, 'approved')).toThrow(JoinError);
     expect(() => c.setStatus('nope', 'removed')).toThrowError(expect.objectContaining({ status: 404 }));
@@ -162,7 +183,7 @@ describe('classroom membership', () => {
 
   it('presence logs connect/disconnect/reconnect once per transition', () => {
     const { c } = setup();
-    const j = c.join(req('123456'), 'a');
+    const j = c.join(profile());
     c.connected(j.memberId, true);
     c.connected(j.memberId, true); // second tab: no new row
     c.connected(j.memberId, false);
@@ -175,7 +196,7 @@ describe('classroom membership', () => {
 
   it('timeline records the class lifecycle', () => {
     const { c } = setup();
-    const j = c.join(req('123456'), 'a');
+    const j = c.join(profile());
     c.setStatus(j.memberId, 'approved');
     c.setLocked(true);
     c.end();

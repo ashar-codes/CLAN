@@ -11,16 +11,58 @@ export const JoinCode = z.string().regex(/^\d{6}$/, 'Join code must be 6 digits'
 
 const name = (max: number) => z.string().trim().min(1).max(max).refine((s) => !/[\u0000-\u001f\u007f]/.test(s), 'Control characters are not allowed');
 
+/** Raw 32-byte Ed25519 public key, base64url without padding. */
+export const PublicKeyB64 = z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Invalid public key');
+const b64url = (min: number, max: number) => z.string().min(min).max(max).regex(/^[A-Za-z0-9_-]+$/);
+
+/** The device's public key is the identity; names are display only. */
 export const StudentProfile = z.object({
   fullName: name(80),
   rollNo: name(40),
   deviceName: name(60),
-  deviceId: z.uuid(),
+  devicePublicKey: PublicKeyB64,
 });
 export type StudentProfile = z.infer<typeof StudentProfile>;
 
-export const JoinRequest = z.object({ code: JoinCode, profile: StudentProfile, protocol: z.literal(PROTOCOL_VERSION) });
+// ---- Pairing (bootstrap listener, plaintext HTTP, protected by OPAQUE) — see docs/PAIRING_AND_TRUST.md ----
+export const PairStart = z.object({ v: z.literal(PROTOCOL_VERSION), sessionId: z.uuid(), startLoginRequest: b64url(1, 4096) });
+export const PairFinish = z.object({ v: z.literal(PROTOCOL_VERSION), pairingId: z.uuid(), finishLoginRequest: b64url(1, 4096) });
+export type PairStartResponse = { pairingId: string; loginResponse: string };
+
+/** Sent by the server after OPAQUE succeeds; authenticated with HMAC under a key derived from the OPAQUE session key. */
+export type TlsBinding = {
+  type: 'classroom-lan/tls-binding'; v: 1;
+  sessionId: string; pairingId: string; title: string;
+  httpsPort: number;
+  /** base64 SHA-256 of the certificate's DER SubjectPublicKeyInfo. */
+  spkiSha256: string;
+  /** The (self-signed) certificate itself, base64 DER; clients trust exactly this certificate. */
+  certificate: string;
+  teacherPublicKey: string;
+  /** Fresh nonce the device must sign to prove key possession. */
+  challenge: string;
+  issuedAt: number; expiresAt: number;
+};
+export type PairFinishResponse = { binding: TlsBinding; mac: string };
+
+// ---- Join / reconnect (HTTPS only) ----
+export const JoinRequest = z.object({
+  v: z.literal(PROTOCOL_VERSION),
+  pairingId: z.uuid(),
+  profile: StudentProfile,
+  proof: z.object({ mac: b64url(43, 43), signature: b64url(86, 86) }),
+});
 export type JoinRequest = z.infer<typeof JoinRequest>;
+/** Signed by the device key and MACed with the OPAQUE-derived join key. Canonical JSON (RFC 8785). */
+export type JoinProofPayload = {
+  type: 'classroom-lan/join-proof'; v: 1;
+  sessionId: string; pairingId: string; challenge: string; deviceKeyFingerprint: string;
+  fullName: string; rollNo: string; deviceName: string;
+};
+export const ReconnectChallengeRequest = z.object({ v: z.literal(PROTOCOL_VERSION), devicePublicKey: PublicKeyB64 });
+export type ReconnectChallengeResponse = { challengeId: string; challenge: string; expiresAt: number };
+export const ReconnectRequest = z.object({ v: z.literal(PROTOCOL_VERSION), challengeId: z.uuid(), devicePublicKey: PublicKeyB64, signature: b64url(86, 86) });
+export type ReconnectProofPayload = { type: 'classroom-lan/reconnect-proof'; v: 1; sessionId: string; challengeId: string; challenge: string; deviceKeyFingerprint: string };
 
 export const MemberStatus = z.enum(['pending', 'approved', 'rejected', 'removed', 'blocked']);
 export type MemberStatus = z.infer<typeof MemberStatus>;
@@ -39,9 +81,15 @@ export type ClassroomInfo = {
   ended: boolean;
 };
 
+/** first = never approved before in this course; known = this exact device key was approved before;
+ *  new_device = this roll number was approved before but from a different device key; legacy = pre-2.5 record. */
+export type DeviceTrust = 'first' | 'known' | 'new_device' | 'legacy';
+
 export type Member = {
   id: string;
-  deviceId: string;
+  /** SHA-256 fingerprint of the device public key (base64url). */
+  deviceFingerprint: string;
+  trust: DeviceTrust;
   fullName: string;
   rollNo: string;
   deviceName: string;
@@ -84,12 +132,17 @@ export type AssignmentView = {
   maxBytes: number; mode: 'individual' | 'group'; createdAt: number; closed: boolean;
 };
 
-/** Issued by the teacher server; teacher time is authoritative. */
-export type Receipt = {
-  submissionId: string; assignmentId: string; assignmentTitle: string; sessionId: string; classTitle: string;
-  memberId: string; deviceId: string; fullName: string; rollNo: string;
+/** Immutable receipt content signed by the teacher's Ed25519 key over its RFC 8785 canonical JSON. */
+export type ReceiptPayload = {
+  type: 'classroom-lan/receipt'; v: 1;
+  receiptId: string; submissionId: string; assignmentId: string; assignmentTitle: string;
+  /** In this model a classroom run is a session; courseTitle groups sessions of the same class. */
+  sessionId: string; courseTitle: string;
+  memberId: string; studentKeyFingerprint: string; fullName: string; rollNo: string;
   version: number; submittedAt: number; late: boolean; fileName: string; size: number; sha256: string; status: 'accepted';
+  teacherKeyFingerprint: string;
 };
+export type Receipt = { payload: ReceiptPayload; alg: 'Ed25519'; signature: string; teacherPublicKey: string };
 export type StudentAssignmentView = AssignmentView & { latest: Receipt | null };
 export type SubmissionState = 'submitted' | 'late' | 'missing' | 'uploading' | 'failed';
 export type StudentSubmissionRow = {
@@ -176,3 +229,5 @@ export type ServerMessage =
   | { t: 'error'; code: string; message: string };
 
 export const WS_CLOSE = { authFailed: 4001, removed: 4003, ended: 4004, badMessage: 4400 } as const;
+
+export * from './trust.ts';
