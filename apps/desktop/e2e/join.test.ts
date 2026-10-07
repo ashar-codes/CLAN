@@ -15,6 +15,7 @@ const chooseFiles = (app: ElectronApplication, paths: string[]) =>
   app.evaluate(({ dialog }, ps) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: ps })) as never; }, paths);
 let lastApp: ElectronApplication;
 async function launch(env: Record<string, string> = {}, userData = mkdtempSync(join(tmpdir(), 'clan-'))): Promise<Page> {
+  if (!userDataDirs.includes(userData)) userDataDirs.push(userData);
   // E2E_EXECUTABLE=release/mac-arm64/Classroom LAN.app/Contents/MacOS/Classroom LAN tests the packaged build instead.
   const exe = process.env.E2E_EXECUTABLE;
   const app = await electron.launch({ ...(exe ? { executablePath: exe, args: [] } : { args: ['.'] }), cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData, ...env } });
@@ -25,7 +26,8 @@ async function launch(env: Record<string, string> = {}, userData = mkdtempSync(j
   await page.waitForLoadState('domcontentloaded');
   return page;
 }
-afterAll(async () => { await Promise.all(apps.map((a) => a.close())); rmSync(scratch, { recursive: true, force: true }); });
+const userDataDirs: string[] = [];
+afterAll(async () => { await Promise.all(apps.map((a) => a.close())); for (const d of [scratch, ...userDataDirs]) rmSync(d, { recursive: true, force: true }); });
 
 it('secure join, approve, files, assignment + signed receipt, MITM/downgrade/clone rejected, device-key rejoin', async () => {
   const teacher = await launch();

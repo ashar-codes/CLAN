@@ -5,7 +5,8 @@ import { rename, rm, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
-import { extensionOf, safeFileName, TransferState, type ResourceView, type StudentTransfer, type TeacherResourceView, type TransferStats } from '@classroom/protocol';
+import { canonicalBytes, extensionOf, keyFingerprint, safeFileName, TransferState, type ManifestPayload, type ResourceView, type SignedManifest, type StudentTransfer, type TeacherResourceView, type TransferStats } from '@classroom/protocol';
+import type { ReceiptSigner } from './assignments.ts';
 import type { Classroom, Principal } from './classroom.ts';
 import type { Db } from './db.ts';
 import { ApiError, mimeFor, type Limits, type Storage } from './storage.ts';
@@ -31,10 +32,11 @@ export class Resources extends EventEmitter {
   private served = 0;
   private failed = 0;
   private window: { t: number; bytes: number }[] = [];
+  private signer: ReceiptSigner;
 
-  constructor(db: Db, classroom: Classroom, storage: Storage, limits: Limits) {
+  constructor(db: Db, classroom: Classroom, storage: Storage, limits: Limits, signer: ReceiptSigner) {
     super();
-    this.db = db; this.classroom = classroom; this.storage = storage; this.limits = limits;
+    this.db = db; this.classroom = classroom; this.storage = storage; this.limits = limits; this.signer = signer;
   }
 
   /** Teacher-only, in-process: copy a local file into managed storage while hashing it. */
@@ -54,6 +56,19 @@ export class Resources extends EventEmitter {
 
     const part = this.storage.tmp(id);
     const hash = createHash('sha256');
+    // Per-chunk hashes in the same single pass (for the signed manifest that lets peers carry the bytes).
+    const chunkSize = this.limits.chunkSize;
+    const chunks: string[] = [];
+    let chunkHash = createHash('sha256'), inChunk = 0;
+    const feedChunks = (buf: Buffer) => {
+      let o = 0;
+      while (o < buf.length) {
+        const n = Math.min(chunkSize - inChunk, buf.length - o);
+        chunkHash.update(buf.subarray(o, o + n));
+        inChunk += n; o += n;
+        if (inChunk === chunkSize) { chunks.push(chunkHash.digest('hex')); chunkHash = createHash('sha256'); inChunk = 0; }
+      }
+    };
     let done = 0, lastEmit = 0;
     try {
       await pipeline(
@@ -61,6 +76,7 @@ export class Resources extends EventEmitter {
         new Transform({
           transform: (chunk: Buffer, _e, cb) => {
             hash.update(chunk);
+            feedChunks(chunk);
             done += chunk.length;
             if (Date.now() - lastEmit > 100) { lastEmit = Date.now(); this.emit('progress', id, done, st.size); }
             cb(null, chunk);
@@ -76,7 +92,16 @@ export class Resources extends EventEmitter {
       this.emit('changed');
       throw e;
     }
-    this.db.prepare("UPDATE resources SET status = 'ready', sha256 = ?, size = ? WHERE id = ?").run(hash.digest('hex'), done, id);
+    if (inChunk > 0 || chunks.length === 0) chunks.push(chunkHash.digest('hex')); // last partial chunk (or empty file)
+    const sha256 = hash.digest('hex');
+    const row = this.row(id)!;
+    const payload: ManifestPayload = {
+      type: 'classroom-lan/resource-manifest', v: 1, resourceId: id, sessionId: this.classroom.id, courseTitle: this.classroom.title,
+      name: safe, mime: row.mime, size: done, sha256, chunkSize, chunks, version: 1, createdAt: Date.now(),
+      teacherKeyFingerprint: keyFingerprint(this.signer.publicKey),
+    };
+    const manifest: SignedManifest = { payload, alg: 'Ed25519', signature: this.signer.sign(canonicalBytes(payload)), teacherPublicKey: this.signer.publicKey };
+    this.db.prepare("UPDATE resources SET status = 'ready', sha256 = ?, size = ?, chunk_size = ?, manifest = ? WHERE id = ?").run(sha256, done, chunkSize, JSON.stringify(manifest), id);
     this.emit('progress', id, done, done);
     this.classroom.log('resource.added', null, { resourceId: id, name: safe, size: done });
     this.emit('changed');
@@ -152,6 +177,13 @@ export class Resources extends EventEmitter {
     await rm(this.storage.resource(r.id), { force: true }).catch(() => {});
   }
 
+  /** The teacher-signed manifest of a visible resource (same visibility rules as the bytes). */
+  manifest(p: Principal, id: string): SignedManifest {
+    const r = this.db.prepare('SELECT manifest, status, available FROM resources WHERE id = ? AND session_id = ?').get(id, this.classroom.id) as { manifest: string | null; status: string; available: number } | undefined;
+    if (!r || r.status !== 'ready' || !r.manifest || (p.role === 'student' && !r.available)) throw new ApiError(404, 'not_found', 'No such file in this class.');
+    return JSON.parse(r.manifest);
+  }
+
   /** Authorize + locate a download. Same 404 for missing, other-class and hidden: no enumeration oracle. */
   openForDownload(p: Principal, id: string) {
     const r = this.row(id);
@@ -189,13 +221,13 @@ export class Resources extends EventEmitter {
     if (last?.t === t) last.bytes += bytes; else this.window.push({ t, bytes });
     while (this.window.length && this.window[0]!.t < t - 5) this.window.shift();
   }
-  stats(activeUploads: number): TransferStats {
+  stats(activeUploads: number, peers = { peers: 0, peerUploadedBytes: 0, peerBytesPerSec: 0 }): TransferStats {
     const t = Math.floor(Date.now() / 1000);
     const recent = this.window.filter((w) => w.t >= t - 5 && w.t < t);
     return {
       activeDownloads: this.activeTotal, activeUploads,
       bytesPerSec: recent.reduce((a, w) => a + w.bytes, 0) / 5,
-      servedBytes: this.served, failedDownloads: this.failed,
+      servedBytes: this.served, failedDownloads: this.failed, ...peers,
     };
   }
 

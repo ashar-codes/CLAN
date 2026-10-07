@@ -138,6 +138,7 @@ export class ClassroomConnection {
 // ---- Files & submissions (platform-neutral HTTP pieces; byte I/O lives in ./node or the mobile app) ----
 import type { UploadInit, UploadStatus } from '@classroom/protocol';
 export * from './pairing.ts';
+export * from './swarm.ts';
 
 export class TransferError extends Error {
   code: string; status: number; extra: Record<string, unknown>;

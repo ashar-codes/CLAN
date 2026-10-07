@@ -155,6 +155,14 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX trusted_devices_roll ON trusted_devices(course, roll_no);
   ALTER TABLE submissions ADD COLUMN receipt TEXT;
   `,
+  // 4: Milestone 2.75 — data plane. Session transport settings live with the session (not with any process), and every
+  // resource carries a teacher-signed manifest with per-chunk hashes.
+  `
+  ALTER TABLE sessions ADD COLUMN connectivity TEXT NOT NULL DEFAULT 'lan';
+  ALTER TABLE sessions ADD COLUMN peer_assist INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE resources ADD COLUMN chunk_size INTEGER;
+  ALTER TABLE resources ADD COLUMN manifest TEXT;
+  `,
 ];
 
 export type Db = DatabaseSync;

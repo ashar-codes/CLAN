@@ -13,6 +13,8 @@ import {
   UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, type ServerMessage,
 } from '@classroom/protocol';
 import { Pairing } from './pairing.ts';
+import { PeerRegistry } from './peers.ts';
+import { z } from 'zod';
 import { logError } from './redact.ts';
 import { createClassroomTls } from './tls.ts';
 import { Assignments } from './assignments.ts';
@@ -52,6 +54,7 @@ export async function ephemeralIdentity(): Promise<TeacherIdentity> {
 
 export type RunningServer = {
   classroom: Classroom;
+  peers: PeerRegistry;
   /** HTTPS base URL (everything after pairing). */
   url: string;
   /** Plaintext bootstrap URL: only /api/info and the OPAQUE pairing endpoints. Advertised over DNS-SD. */
@@ -66,6 +69,9 @@ export type RunningServer = {
 };
 
 const AUTH_TIMEOUT_MS = 5000;
+/** Seed a resource to a few peers when it spans at least this many chunks. */
+const SEED_MIN_CHUNKS = 8;
+const SEEDERS = 4;
 const MAX_WS_MESSAGE = 64 * 1024;
 
 export async function startClassroomServer(opts: ServerOptions): Promise<RunningServer> {
@@ -82,9 +88,11 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     httpsPort, spkiSha256: tls.spkiSha256, certificate: tls.certificate, teacherPublicKey, title: classroom.title,
   }));
   pairing.inflightPerSource = limits.pairInflightPerSource;
+  const ownStorage = !opts.storageDir; // ephemeral storage (tests, CLI) is deleted on close
   const storage = new Storage(opts.storageDir ?? mkdtempSync(join(tmpdir(), 'classroom-storage-')));
   await storage.init();
-  const resources = new Resources(db, classroom, storage, limits);
+  const resources = new Resources(db, classroom, storage, limits, signer);
+  const peers = new PeerRegistry(classroom, signer);
   const assignments = new Assignments(db, classroom, storage, limits, signer);
   await resources.sweepRemoved();
   await assignments.sweep();
@@ -226,6 +234,36 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     return reply.send(stream);
   });
 
+  // ---- data plane (Milestone 2.75): manifests, peer endorsement/capabilities/sources. Control stays here. ----
+  app.get('/api/resources/:id/manifest', async (req) => resources.manifest(auth(req), uuidParam(req)));
+  const b64 = (max: number) => z.string().max(max).regex(/^[A-Za-z0-9+/_=-]*$/);
+  app.post('/api/peer/endorse', async (req) => {
+    const memberId = studentOnly(auth(req));
+    if (!classroom.info().peerAssist) throw new ApiError(409, 'peer_assist_off', 'Peer assistance is off.');
+    const b = parse(z.object({ v: z.literal(1), tlsCa: b64(8192), tlsSpkiSha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/), port: z.number().int().min(1).max(65535) }), req.body);
+    return peers.endorse(memberId, b, req.ip);
+  });
+  app.post('/api/peer/capability', async (req) => peers.capability(studentOnly(auth(req))));
+  app.post('/api/peer/have', async (req, reply) => {
+    const memberId = studentOnly(auth(req));
+    const b = parse(z.object({ v: z.literal(1), resourceId: z.uuid(), chunks: b64(16384) }), req.body);
+    const m = resources.manifest({ role: 'student', memberId }, b.resourceId);
+    peers.have(memberId, b.resourceId, b.chunks, m.payload.chunks.length);
+    return reply.code(204).send();
+  });
+  app.post('/api/peer/stats', async (req, reply) => {
+    const memberId = studentOnly(auth(req));
+    peers.stats(memberId, parse(z.object({ v: z.literal(1), uploadedBytes: z.number().int().nonnegative() }), req.body).uploadedBytes);
+    return reply.code(204).send();
+  });
+  app.get('/api/peer/sources/:id', async (req) => {
+    const p = auth(req);
+    const id = uuidParam(req);
+    resources.manifest(p, id); // same visibility as the resource itself
+    const on = classroom.info().peerAssist, me = p.role === 'student' ? p.memberId : '';
+    return { peerAssist: on, sources: on ? peers.sources(id, me) : [], swarm: on ? peers.swarm(me) : 0 };
+  });
+
   app.get('/api/assignments', async (req) => {
     const p = auth(req);
     return { assignments: p.role === 'teacher' ? assignments.listForTeacher() : assignments.listForStudent(p.memberId) };
@@ -290,8 +328,20 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   assignments.on('changed', schedule);
   resources.on('push', (resourceId: string) => {
     for (const [ws, p] of sockets) if (p.role === 'student' && classroom.status(p.memberId) === 'approved') send(ws, { t: 'resource.push', resourceId });
+    // Large file + peer assistance: ask a few active peers to start right away so the swarm forms early.
+    const m = resources.manifest({ role: 'teacher' }, resourceId);
+    if (classroom.info().peerAssist && m.payload.chunks.length >= SEED_MIN_CHUNKS) {
+      const seeders = new Set(peers.pickSeeders(SEEDERS));
+      for (const [ws, p] of sockets) if (p.role === 'student' && seeders.has(p.memberId)) send(ws, { t: 'resource.seed', resourceId });
+    }
   });
-  const statsTimer = setInterval(() => toTeachers(() => ({ t: 'stats', stats: resources.stats(assignments.activeUploads) })), 1000);
+  // Removal/blocking revokes the peer role and tells every peer to refuse that device from now on.
+  classroom.on('member', (memberId: string, status: string) => {
+    if (status === 'approved') return;
+    const fp = peers.revoke(memberId);
+    if (fp) for (const [ws, p] of sockets) if (p.role === 'student') send(ws, { t: 'peer.revoked', fingerprints: [fp] });
+  });
+  const statsTimer = setInterval(() => toTeachers(() => ({ t: 'stats', stats: resources.stats(assignments.activeUploads, peers.summary()) })), 1000);
   classroom.on('timeline', () => toTeachers(() => ({ t: 'timeline', events: classroom.timeline() })));
   classroom.on('state', () => {
     const info = classroom.info();
@@ -365,6 +415,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
             case 'resource.remove': return void resources.remove(msg.resourceId).catch(fail);
             case 'assignment.create': return void assignments.create(msg.assignment);
             case 'assignment.close': return assignments.close(msg.assignmentId);
+            case 'class.peerAssist': return classroom.setPeerAssist(msg.enabled);
             case 'transfer.state': return resources.report((principal as { memberId: string }).memberId, msg.resourceId, msg.state, msg.bytes);
           }
         } catch (e) {
@@ -396,6 +447,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     resources,
     assignments,
     storage,
+    peers,
     port,
     url: `https://${hostPart}:${httpsPort}`,
     bootstrapUrl: `http://${hostPart}:${port}`,
@@ -412,6 +464,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       await Promise.all([app.close(), boot.close()]);
       classroom.removeAllListeners();
       if (!opts.db) db.close();
+      if (ownStorage) await import('node:fs/promises').then((f) => f.rm(storage.root, { recursive: true, force: true }));
     },
   };
 }

@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { keyFingerprint, type ClassroomInfo, type DeviceTrust, type JoinPolicy, type Member, type MemberStatus, type StudentProfile, type TimelineEvent } from '@classroom/protocol';
+import { keyFingerprint, type ClassroomInfo, type Connectivity, type DeviceTrust, type JoinPolicy, type Member, type MemberStatus, type StudentProfile, type TimelineEvent } from '@classroom/protocol';
 import type { Db } from './db.ts';
 import { Throttle } from './throttle.ts';
 
@@ -63,9 +63,9 @@ export class Classroom extends EventEmitter {
   }
 
   info(): ClassroomInfo {
-    const r = this.db.prepare('SELECT title, locked, join_policy, started_at, ended_at FROM sessions WHERE id = ?').get(this.id) as
-      { title: string; locked: number; join_policy: JoinPolicy; started_at: number; ended_at: number | null };
-    return { sessionId: this.id, title: r.title, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null };
+    const r = this.db.prepare('SELECT title, locked, join_policy, started_at, ended_at, connectivity, peer_assist FROM sessions WHERE id = ?').get(this.id) as
+      { title: string; locked: number; join_policy: JoinPolicy; started_at: number; ended_at: number | null; connectivity: Connectivity; peer_assist: number };
+    return { sessionId: this.id, title: r.title, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null, connectivity: r.connectivity, peerAssist: !!r.peer_assist };
   }
 
   /** Pre-checks shared by pairing and joining (no secrets involved). */
@@ -178,6 +178,14 @@ export class Classroom extends EventEmitter {
     this.emit('state');
   }
 
+  /** Switch the data plane (teacher-only <-> peer-assisted). Session, members, resources and ids are unaffected. */
+  setPeerAssist(enabled: boolean) {
+    if (this.info().peerAssist === enabled) return;
+    this.db.prepare('UPDATE sessions SET peer_assist = ? WHERE id = ?').run(enabled ? 1 : 0, this.id);
+    this.log(enabled ? 'class.peer_assist_on' : 'class.peer_assist_off', null, {});
+    this.emit('state');
+  }
+
   setPolicy(policy: JoinPolicy) {
     if (this.info().joinPolicy === policy) return;
     this.db.prepare('UPDATE sessions SET join_policy = ? WHERE id = ?').run(policy, this.id);
@@ -204,10 +212,10 @@ export class Classroom extends EventEmitter {
     this.emit('roster');
   }
 
-  member(memberId: string): { id: string; deviceId: string; fullName: string; rollNo: string; status: MemberStatus } | null {
-    const r = this.db.prepare('SELECT id, device_id, full_name, roll_no, status FROM members WHERE id = ? AND session_id = ?').get(memberId, this.id) as
-      { id: string; device_id: string; full_name: string; roll_no: string; status: MemberStatus } | undefined;
-    return r ? { id: r.id, deviceId: r.device_id, fullName: r.full_name, rollNo: r.roll_no, status: r.status } : null;
+  member(memberId: string): { id: string; deviceId: string; deviceKey: string | null; fullName: string; rollNo: string; status: MemberStatus } | null {
+    const r = this.db.prepare('SELECT id, device_id, device_key, full_name, roll_no, status FROM members WHERE id = ? AND session_id = ?').get(memberId, this.id) as
+      { id: string; device_id: string; device_key: string | null; full_name: string; roll_no: string; status: MemberStatus } | undefined;
+    return r ? { id: r.id, deviceId: r.device_id, deviceKey: r.device_key, fullName: r.full_name, rollNo: r.roll_no, status: r.status } : null;
   }
 
   roster(): Member[] {

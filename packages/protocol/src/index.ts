@@ -73,9 +73,15 @@ export type JoinPolicy = z.infer<typeof JoinPolicy>;
 
 export type JoinResponse = { memberId: string; token: string; status: MemberStatus; classroom: ClassroomInfo };
 
+/** Physical connectivity (how devices reach each other). Direct and mesh are interfaces only for now. */
+export type Connectivity = 'lan' | 'direct' | 'mesh_experimental';
+
 export type ClassroomInfo = {
   sessionId: string;
   title: string;
+  connectivity: Connectivity;
+  /** Data plane: teacher only (false) or peer-assisted (true). The control plane is always the teacher. */
+  peerAssist: boolean;
   locked: boolean;
   joinPolicy: JoinPolicy;
   startedAt: number;
@@ -115,7 +121,11 @@ export type ResourceView = {
 };
 export type StudentTransfer = { memberId: string; fullName: string; state: TransferState; bytes: number; updatedAt: number | null };
 export type TeacherResourceView = ResourceView & { counts: Record<TransferState, number>; students: StudentTransfer[] };
-export type TransferStats = { activeDownloads: number; activeUploads: number; bytesPerSec: number; servedBytes: number; failedDownloads: number };
+export type TransferStats = {
+  activeDownloads: number; activeUploads: number; bytesPerSec: number; servedBytes: number; failedDownloads: number;
+  /** Data plane (peer-assisted): registered serving peers and what they report having uploaded. */
+  peers: number; peerUploadedBytes: number; peerBytesPerSec: number;
+};
 
 export const AssignmentInput = z.object({
   title: z.string().trim().min(1).max(120),
@@ -205,13 +215,14 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('resource.push'), resourceId: id }),
   z.object({ t: z.literal('assignment.create'), assignment: AssignmentInput }),
   z.object({ t: z.literal('assignment.close'), assignmentId: id }),
+  z.object({ t: z.literal('class.peerAssist'), enabled: z.boolean() }),
   // student
   z.object({ t: z.literal('transfer.state'), resourceId: id, state: TransferState, bytes: z.number().int().nonnegative() }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export const TEACHER_ONLY: ReadonlySet<ClientMessage['t']> = new Set([
   'member.approve', 'member.reject', 'member.remove', 'member.block', 'class.lock', 'class.policy', 'class.end',
-  'resource.available', 'resource.remove', 'resource.push', 'assignment.create', 'assignment.close',
+  'resource.available', 'resource.remove', 'resource.push', 'assignment.create', 'assignment.close', 'class.peerAssist',
 ]);
 export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.state']);
 
@@ -225,6 +236,10 @@ export type ServerMessage =
   | { t: 'member.status'; status: MemberStatus }
   | { t: 'resources'; resources: ResourceView[] | TeacherResourceView[] }
   | { t: 'resource.push'; resourceId: string }
+  /** Teacher asks a few healthy peers to fetch a large resource early so the swarm forms quickly. */
+  | { t: 'resource.seed'; resourceId: string }
+  /** Devices no longer authorized; peers must refuse them immediately. */
+  | { t: 'peer.revoked'; fingerprints: string[] }
   | { t: 'assignments'; assignments: StudentAssignmentView[] | TeacherAssignmentView[] }
   | { t: 'stats'; stats: TransferStats }
   | { t: 'error'; code: string; message: string };
@@ -232,3 +247,4 @@ export type ServerMessage =
 export const WS_CLOSE = { authFailed: 4001, removed: 4003, ended: 4004, badMessage: 4400 } as const;
 
 export * from './trust.ts';
+export * from './peer.ts';

@@ -71,7 +71,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startClassroomServer, type ServerOptions, type RunningServer } from '../src/index.ts';
 
-export const tmp = (prefix = 'clt-') => mkdtempSync(join(tmpdir(), prefix));
+/** Temp dirs are registered and removed after each test file (test/setup.ts) — tests must not leak disk. */
+export const tmpDirs: string[] = ((globalThis as { __classroomTmpDirs?: string[] }).__classroomTmpDirs ??= []);
+export const tmp = (prefix = 'clt-') => { const d = mkdtempSync(join(tmpdir(), prefix)); tmpDirs.push(d); return d; };
 
 /** Random file of `bytes`; returns path + sha256. */
 export function makeFile(bytes: number, name = 'file.bin', dir = tmp()) {
@@ -81,7 +83,7 @@ export function makeFile(bytes: number, name = 'file.bin', dir = tmp()) {
   return { path, sha256: createHash('sha256').update(buf).digest('hex'), size: bytes, buf };
 }
 
-export type Student = { token: string; memberId: string; device: DeviceSigner };
+export type Student = { token: string; memberId: string; device: ReturnType<typeof device> };
 /** Server with open join policy and `n` approved students. */
 export async function classWith(n: number, opts: Partial<ServerOptions> = {}): Promise<{ s: RunningServer; students: Student[] }> {
   const s = await startClassroomServer({ title: 'Class', host: '127.0.0.1', storageDir: tmp('cls-storage-'), ...opts });

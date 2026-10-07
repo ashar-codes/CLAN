@@ -25,6 +25,8 @@ export type Limits = {
   transferIdleMs: number;
   /** Unfinished OPAQUE pairing attempts per source address at once. */
   pairInflightPerSource: number;
+  /** Manifest chunk size for new resources (see BENCHMARKS.md for how it was chosen). */
+  chunkSize: number;
 };
 
 export const DEFAULT_LIMITS: Limits = {
@@ -40,6 +42,7 @@ export const DEFAULT_LIMITS: Limits = {
   maxAssignmentsPerSession: 200,
   transferIdleMs: 60_000,
   pairInflightPerSource: 4,
+  chunkSize: 1024 * 1024,
 };
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

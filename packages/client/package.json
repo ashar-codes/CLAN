@@ -6,7 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./node": "./src/node.ts",
-    "./opaque-bridge": "./src/opaque-bridge.ts"
+    "./opaque-bridge": "./src/opaque-bridge.ts",
+    "./tls": "./src/tls.ts",
+    "./peer": "./src/peer-node.ts"
   },
   "dependencies": {
     "@classroom/protocol": "workspace:*",
@@ -14,7 +16,9 @@
     "@noble/hashes": "^2.4.0",
     "canonicalize": "^5.1.0",
     "undici": "^8.11.2",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "@peculiar/x509": "^2.1.0",
+    "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
     "@types/ws": "^8.18.2"
