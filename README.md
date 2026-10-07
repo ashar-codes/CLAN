@@ -18,7 +18,7 @@ pnpm test             # unit + integration + security tests
 pnpm test:e2e         # launches two real Electron apps and joins over your LAN
 pnpm benchmark        # join + file-transfer benchmarks; rewrites docs/BENCHMARKS.md
 node tools/sim/lan-bench.ts   # real-Wi-Fi capacity: students open the printed URL in any browser
-node tools/verify-receipt.ts receipt.json --teacher-key KEY   # verify an archived receipt offline
+node tools/sim/verify-receipt.ts receipt.json --teacher-key KEY   # verify an archived receipt offline
 pnpm typecheck
 ```
 

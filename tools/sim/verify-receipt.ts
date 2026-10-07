@@ -1,5 +1,5 @@
 // Verify an archived Classroom LAN receipt offline (no classroom needed).
-// Usage: node tools/verify-receipt.ts <receipt.json> [--teacher-key <base64url Ed25519 public key>] [--session <id>]
+// Usage: node tools/sim/verify-receipt.ts <receipt.json> [--teacher-key <base64url Ed25519 public key>] [--session <id>]
 // Exit codes: 0 verified against the given teacher key; 1 verification failed; 2 signature internally consistent but
 // no trusted teacher key was supplied (so it proves nothing about WHO signed it).
 import { readFileSync } from 'node:fs';

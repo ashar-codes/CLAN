@@ -65,8 +65,14 @@ export class Trust {
   private sessionsFile() { return join(this.dir, 'paired-sessions.json'); }
 
   remember(s: PairedSession) {
-    this.pin(s.url, s.binding.spkiSha256);
     const all = readJson<Record<string, PairedSession>>(this.sessionsFile(), {});
+    // A session keeps the identity it was first paired with. A different certificate for the same session id is never
+    // accepted silently (the real teacher restarting creates a NEW session id).
+    const prev = all[s.sessionId];
+    if (prev && (prev.binding.spkiSha256 !== s.binding.spkiSha256 || prev.binding.teacherPublicKey !== s.binding.teacherPublicKey)) {
+      throw new Error('This class presented a different security identity than before. Not connecting; ask your teacher to restart the class.');
+    }
+    this.pin(s.url, s.binding.spkiSha256);
     const now = Date.now();
     for (const [k, v] of Object.entries(all)) if (now - v.savedAt > SESSION_MAX_AGE_MS) delete all[k];
     all[s.sessionId] = s;

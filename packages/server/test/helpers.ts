@@ -112,13 +112,17 @@ export async function cuttingProxy(target: string, cutAfter: number, dir: 'down'
     socks.add(client); socks.add(upstream);
     let n = 0;
     const armed = !cut;
-    const watch = (from: Socket, to: Socket, counting: boolean) => from.on('data', (d) => {
-      if (armed && counting && !cut) {
-        n += d.length;
-        if (n >= cutAfter) { cut = true; to.write(d.subarray(0, d.length - (n - cutAfter))); client.destroy(); upstream.destroy(); return; }
-      }
-      to.write(d);
-    });
+    // Respect backpressure, so "bytes sent" means bytes handed to the receiver's socket, not bytes queued in this proxy.
+    const watch = (from: Socket, to: Socket, counting: boolean) => {
+      to.on('drain', () => from.resume());
+      from.on('data', (d) => {
+        if (armed && counting && !cut) {
+          n += d.length;
+          if (n >= cutAfter) { cut = true; to.write(d.subarray(0, d.length - (n - cutAfter)), () => { client.destroy(); upstream.destroy(); }); return; }
+        }
+        if (!to.write(d)) from.pause();
+      });
+    };
     watch(upstream, client, dir === 'down');
     watch(client, upstream, dir === 'up');
     const end = () => { client.destroy(); upstream.destroy(); };

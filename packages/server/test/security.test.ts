@@ -454,3 +454,26 @@ describe('tokens and secrets', () => {
     expect(redact(new Error(`bad token ${token}`))).not.toContain(token);
   });
 });
+
+describe('receipt verifier CLI', () => {
+  it('exit 0 verified, 1 tampered or wrong key, 2 unanchored', async () => {
+    const { s, students: [a] } = await classWith(1);
+    servers.push(s);
+    const A = s.assignments.create({ title: 'A4', maxBytes: 1000 });
+    const r = await uploadSubmission({ transport: trFor(s.url), url: s.url, token: a!.token, assignmentId: A.id, path: makeFile(10, 'x.pdf').path, idempotencyKey: randomUUID() });
+    const { writeFileSync } = await import('node:fs');
+    const { spawnSync } = await import('node:child_process');
+    const dir = tmp();
+    const cwd = (await import('node:url')).fileURLToPath(new URL('../../..', import.meta.url));
+    const run = (receipt: unknown, key?: string) => {
+      writeFileSync(`${dir}/r.json`, JSON.stringify(receipt));
+      return spawnSync(process.execPath, ['tools/sim/verify-receipt.ts', `${dir}/r.json`, ...(key ? ['--teacher-key', key] : [])], { cwd, encoding: 'utf8' });
+    };
+    const ok = run(r, s.teacherPublicKey);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain('Verified ✓');
+    expect(run({ ...r, payload: { ...r.payload, fileName: 'other.pdf' } }, s.teacherPublicKey).status).toBe(1);
+    expect(run(r, device().publicKey).status).toBe(1);
+    expect(run(r).status).toBe(2);
+  });
+});

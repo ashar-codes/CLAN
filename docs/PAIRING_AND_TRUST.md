@@ -141,7 +141,7 @@ memberId, studentKeyFingerprint, fullName, rollNo, version, submittedAt (teacher
 status, teacherKeyFingerprint. Signed with the teacher Ed25519 key over JCS(payload) once at acceptance and stored
 verbatim (idempotent retries return byte-identical receipts). Envelope: `{payload, alg: "Ed25519", signature, teacherPublicKey}`.
 
-Verification (`verifyReceipt` in `@classroom/protocol`; CLI `node tools/verify-receipt.ts receipt.json --teacher-key KEY`)
+Verification (`verifyReceipt` in `@classroom/protocol`; CLI `node tools/sim/verify-receipt.ts receipt.json --teacher-key KEY`)
 checks version, algorithm, that the embedded key matches the payload fingerprint, the signature, and — essential — that the
 key is one the verifier trusts. The desktop trusts only teacher keys it obtained through pairing (append-only
 `paired-teacher-keys.json`), shows "Verified ✓" or "Verification failed — reason", and keeps failed receipts as evidence

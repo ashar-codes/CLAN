@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 
 // Append-only list. Never edit a shipped migration; add a new one.
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `
   CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
@@ -166,9 +166,9 @@ export function openDb(path: string): Db {
   return db;
 }
 
-export function migrate(db: Db): number {
+export function migrate(db: Db, upTo = MIGRATIONS.length): number {
   const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-  for (let v = version; v < MIGRATIONS.length; v++) {
+  for (let v = version; v < upTo; v++) {
     db.exec('BEGIN');
     try {
       db.exec(MIGRATIONS[v]!);
@@ -179,5 +179,5 @@ export function migrate(db: Db): number {
       throw e;
     }
   }
-  return MIGRATIONS.length;
+  return Math.max(version, upTo);
 }
