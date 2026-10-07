@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
 import { ClassroomConnection, joinByCode, JoinFailed, type Candidate, type JoinResult, type Quality } from '@classroom/client';
-import { StudentProfile, type ClassroomInfo, type MemberStatus } from '@classroom/protocol';
+import { StudentProfile, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
+import { ClassContent } from './ClassContent';
 import { browse } from './discovery';
 import { loadProfile, saveProfile } from './storage';
 
@@ -98,24 +99,34 @@ function InClass({ c, joined, onLeave }: { c: C; joined: JoinResult; onLeave(): 
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
   const [quality, setQuality] = useState<Quality>('disconnected');
   const [closed, setClosed] = useState(false);
+  const [resources, setResources] = useState<ResourceView[]>([]);
+  const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
+  const [pushed, setPushed] = useState<string | null>(null);
+  const ref = useRef<ClassroomConnection | null>(null);
   useEffect(() => {
     const conn = new ClassroomConnection(joined.url, joined.token, {
       onMessage: (m) => {
         if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); }
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') setStatus(m.status);
+        if (m.t === 'resources') setResources(m.resources as ResourceView[]);
+        if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
+        if (m.t === 'resource.push') setPushed(m.resourceId);
       },
       onQuality: setQuality,
       onClosed: () => setClosed(true),
     });
+    ref.current = conn;
     return () => conn.close();
   }, [joined]);
+  const send = useCallback((m: ClientMessage) => ref.current?.send(m), []);
+  const conn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title }), [joined]);
 
   const over = info.ended ? 'The class has ended.' : status === 'rejected' ? 'The teacher declined your request.' : status === 'removed' ? 'You were removed from the class.'
     : status === 'blocked' ? 'This device was blocked from the class.' : closed ? 'Your session expired. Join again with the code.' : '';
 
   return (
-    <View style={s.page}>
+    <ScrollView contentContainerStyle={s.page}>
       <Text style={[s.h1, { color: c.text }]}>{info.title}</Text>
       {over ? (
         <><Text style={{ color: c.text, fontSize: 17 }}>{over}</Text><Button c={c} primary label="OK" onPress={onLeave} /></>
@@ -127,11 +138,11 @@ function InClass({ c, joined, onLeave }: { c: C; joined: JoinResult; onLeave(): 
             <View style={[s.dot, { backgroundColor: quality === 'disconnected' ? c.danger : quality === 'poor' ? c.warn : c.ok }]} />
             <Text style={{ color: c.text }}>{QUALITY[quality]}</Text>
           </View>
-          <Text style={{ color: c.muted }}>You're in the class. Files, presentations and quizzes from your teacher will appear here in upcoming builds.</Text>
-          <Button c={c} label="Leave" onPress={onLeave} />
+          <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
+          <Button c={c} label="Leave class" onPress={onLeave} />
         </>
       )}
-    </View>
+    </ScrollView>
   );
 }
 

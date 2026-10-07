@@ -10,17 +10,34 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Classroom LAN finds and connects to your teacher's classroom on this Wi-Fi network. No internet is used.",
-        "NSBonjourServices": ["_classroomlan._tcp"],
-        "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
+        "NSBonjourServices": [
+          "_classroomlan._tcp"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {
       "package": "app.classroomlan.student",
-      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE", "CHANGE_WIFI_MULTICAST_STATE"]
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_MULTICAST_STATE"
+      ]
     },
     "plugins": [
       "expo-secure-store",
-      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-sharing"
     ]
   }
 }
