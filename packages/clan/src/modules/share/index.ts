@@ -27,16 +27,13 @@ export class Share {
 
   async share(p: Principal, input: ShareInput, target: ShareTarget): Promise<ShareResult> {
     if (target.kind === 'person') return { status: 'unsupported', reason: 'Sending to one person happens inside a live CLAN room (CLANmate › Send).' };
-    // A course is the CLASSROOM CLAN it lives in.
-    const clanId = target.kind === 'clan' ? target.clanId : target.kind === 'course' ? target.courseId : null;
-    if (clanId) {
-      const c = this.clans.get(clanId);
-      if (!c || !this.clans.isActiveMember(c.id, userOf(p))) throw new Error('Not a member of that CLAN.');
-      if (target.kind === 'course' && c.type !== 'CLASSROOM') throw new Error('That is not a course.');
-    }
-    if (target.kind === 'inbox') {
+    const clanId = target.kind === 'clan' ? target.clanId : null;
+    if (clanId && !this.clans.isActiveMember(clanId, userOf(p))) throw new Error('Not a member of that CLAN.');
+    if (target.kind === 'inbox' || target.kind === 'course') {
+      // A course is one of your Courses: the item is created privately and referenced from the course.
       const item = await this.capture.capture(p, input.kind === 'url' ? { kind: 'link', url: input.url, title: input.title, note: input.note }
-        : input.kind === 'text' ? { kind: 'text', text: input.title ? `${input.title}\n${input.text}` : input.text } : { kind: 'file', path: input.path, name: input.name, mime: input.mime });
+        : input.kind === 'text' ? { kind: 'text', text: input.title ? `${input.title}\n${input.text}` : input.text } : { kind: 'file', path: input.path, name: input.name, mime: input.mime },
+        target.kind === 'course' ? { courseId: target.courseId } : undefined);
       return { status: 'ok', module: item.module, id: item.entityId };
     }
     switch (input.kind) {

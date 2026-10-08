@@ -1,10 +1,18 @@
-// Study: Knowledge Campus (real courses = CLASSROOM CLANs), course spaces, notes and the exam center.
-import { Component, lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
+// Study: Knowledge Campus (your Courses), course spaces, Semester Board, tasks, the Exam Command Center, flashcards,
+// notes and personal history. Everything here is real Study Engine data; nothing is estimated.
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { loadCampus, type CourseBuildingViewModel } from '@clan/world';
-import type { ClanDetail, CourseView, Note, SearchHit } from '../../shared.ts';
+import type { CourseView, Note, SearchHit } from '../../shared.ts';
 import { api } from '../App.tsx';
-import { useLoad } from './useLoad.ts';
+import { errText, useLoad } from './useLoad.ts';
 import type { Experience } from './experience.ts';
+import { useStudy, type StudyTab } from './study/common.tsx';
+import { CourseSpace } from './study/Course.tsx';
+import { Board } from './study/Board.tsx';
+import { Tasks } from './study/Tasks.tsx';
+import { Exams } from './study/Exams.tsx';
+import { Cards } from './study/Cards.tsx';
+import { History } from './study/History.tsx';
 
 declare global { interface Window { __clanPerf?: { sceneMs?: number } } }
 const sceneStart = { t: 0 };
@@ -20,72 +28,106 @@ class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-export type StudyTab = 'campus' | 'notes' | 'exams';
+const TABS: [StudyTab, string][] = [['campus', 'Campus'], ['board', 'Semester Board'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['cards', 'Flashcards'], ['notes', 'Notes'], ['history', 'History']];
 
-export function Study({ experience, tab, setTab }: { experience: Experience; tab: StudyTab; setTab(t: StudyTab): void }) {
+export function Study({ experience }: { experience: Experience }) {
+  const { target, go } = useStudy();
+  const tab = target.tab;
   return (
     <div className="stack">
       <header className="page-head">
-        <div><span className="eyebrow">Study</span><h1 className="title world">{tab === 'campus' ? 'Knowledge Campus' : tab === 'notes' ? 'Notes' : 'Exams'}</h1></div>
-        <div className="seg" role="tablist" aria-label="Study area">
-          {(['campus', 'notes', 'exams'] as const).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t === 'campus' ? 'Campus' : t === 'notes' ? 'Notes' : 'Exams'}</button>)}
+        <div><span className="eyebrow">Study</span><h1 className="title world">{tab === 'campus' ? 'Knowledge Campus' : TABS.find((t) => t[0] === tab)![1]}</h1></div>
+        <div className="seg study-tabs" role="tablist" aria-label="Study area">
+          {TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => go({ tab: t })}>{l}</button>)}
         </div>
       </header>
-      {tab === 'campus' && <Campus experience={experience} />}
+      {tab === 'campus' && (target.courseId ? <CourseSpace id={target.courseId} onBack={() => go({ tab: 'campus' })} /> : <Campus experience={experience} />)}
+      {tab === 'board' && <Board />}
+      {tab === 'tasks' && <Tasks courseId={target.courseId} />}
+      {tab === 'exams' && <Exams examId={target.examId} />}
+      {tab === 'cards' && <Cards courseId={target.courseId} deckId={target.deckId} />}
       {tab === 'notes' && <Notes />}
-      {tab === 'exams' && <ExamCenter />}
+      {tab === 'history' && <History />}
     </div>
   );
 }
 
+function NewCourse({ onDone }: { onDone(): void }) {
+  const [o, setO] = useState({ name: '', code: '', instructor: '', term: '', schedule: '' });
+  const [err, setErr] = useState('');
+  return (
+    <form className="card new-course" aria-label="New course" onSubmit={async (e) => { e.preventDefault(); try { await api.study.createCourse(o); onDone(); } catch (x) { setErr(errText(x)); } }}>
+      <span className="eyebrow">New course</span>
+      <div className="form-grid">
+        <input required value={o.name} onChange={(e) => setO({ ...o, name: e.target.value })} placeholder="Operating Systems" aria-label="Course name" maxLength={120} />
+        <input value={o.code} onChange={(e) => setO({ ...o, code: e.target.value })} placeholder="Code (CS-330)" aria-label="Course code" maxLength={30} />
+        <input value={o.instructor} onChange={(e) => setO({ ...o, instructor: e.target.value })} placeholder="Instructor (optional)" aria-label="Instructor" maxLength={120} />
+        <input value={o.term} onChange={(e) => setO({ ...o, term: e.target.value })} placeholder="Term (Fall 2026)" aria-label="Term" maxLength={60} />
+        <input value={o.schedule} onChange={(e) => setO({ ...o, schedule: e.target.value })} placeholder="Schedule (Mon/Wed 10:00)" aria-label="Schedule" maxLength={500} />
+      </div>
+      {err && <span className="error small-text">{err}</span>}
+      <div className="row"><button className="primary">Add course</button></div>
+    </form>
+  );
+}
+
 function Campus({ experience }: { experience: Experience }) {
-  const [courses] = useLoad<CourseView[]>(api.clan.courses);
+  const { go } = useStudy();
+  const [courses, reload] = useLoad<CourseView[]>(api.study.courses);
   const [view, setView] = useState<'campus' | 'list'>(experience === 'minimal' ? 'list' : 'campus');
-  const [open, setOpen] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const open = (id: string) => go({ tab: 'campus', courseId: id });
   if (!courses) return null;
-  if (open) return <CourseSpace id={open} course={courses.find((c) => c.id === open)!} onBack={() => setOpen(null)} />;
+  const add = adding ? <NewCourse onDone={() => { setAdding(false); reload(); }} /> : <button className="primary" onClick={() => setAdding(true)}>New course</button>;
   if (!courses.length) return (
-    <div className="empty-world"><svg viewBox="0 0 300 120" aria-hidden><rect x="20" y="96" width="260" height="10" rx="5" fill="var(--floor)" /><rect x="120" y="60" width="60" height="36" rx="4" fill="var(--paper-2)" stroke="var(--line)" strokeWidth="3" strokeDasharray="6 5" /></svg>
-      <b>Your campus is an empty lot.</b><span className="muted">Each classroom you teach or join becomes a building here, growing a floor for every class session.</span></div>
+    <div className="stack">
+      <div className="empty-world"><svg viewBox="0 0 300 120" aria-hidden><rect x="20" y="96" width="260" height="10" rx="5" fill="var(--floor)" /><rect x="120" y="60" width="60" height="36" rx="4" fill="var(--paper-2)" stroke="var(--line)" strokeWidth="3" strokeDasharray="6 5" /></svg>
+        <b>Your campus is an empty lot.</b><span className="muted">Each course you add becomes a building, with a floor for every topic. Classrooms you join get a course automatically.</span></div>
+      {add}
+    </div>
   );
   const vms: CourseBuildingViewModel[] = courses.map((c, i) => ({
-    id: c.id, code: c.name.slice(0, 14), name: c.name, color: tokenColor(COLORS[i % COLORS.length]!), term: (i % 3) + 1, // term = layout column only
-    lectures: Array.from({ length: c.sessions }, (_, k) => ({ id: `${c.id}-${k}`, title: `Session ${k + 1}`, done: true })),
-    studyingNow: c.recentNotes, resources: Math.min(c.files, 8), prerequisites: [],
+    id: c.id, code: (c.code || c.name).slice(0, 14), name: c.name, color: tokenColor(COLORS[i % COLORS.length]!), term: (i % 3) + 1, // term = layout column only
+    lectures: c.topics.map((t) => ({ id: t.id, title: t.title, done: t.state === 'confident' })), // floors = topics
+    studyingNow: Math.min(c.recent, c.topics.length), resources: Math.min(c.files, 8), prerequisites: [], examSoon: !!c.nextExam?.soon,
   }));
   return (
     <div className="campus">
       <div className="row between">
-        <p className="muted small-text legend-line"><b>Floors</b> = class sessions held · <b>lit windows</b> = notes updated this week · <b>kiosks</b> = shared files · position is layout only</p>
+        <p className="muted small-text legend-line"><b>Floors</b> = your topics (solid = marked Confident) · <b>lit windows</b> = course activity this week · <b>flag</b> = exam within 14 days · <b>kiosks</b> = linked files · position is layout only</p>
         <div className="seg small" role="tablist" aria-label="Campus view">
           <button role="tab" aria-selected={view === 'campus'} disabled={experience === 'minimal'} onClick={() => setView('campus')}>Campus View</button>
           <button role="tab" aria-selected={view === 'list'} onClick={() => setView('list')}>List View</button>
         </div>
       </div>
-      {view === 'list' || experience === 'minimal' ? <CourseList courses={courses} onOpen={setOpen} />
+      {view === 'list' || experience === 'minimal' ? <CourseList courses={courses} onOpen={open} />
         : experience === 'full' ? (
           <div className="scene">
-            <SceneBoundary fallback={<Towers courses={courses} onOpen={setOpen} />}>
-              <Suspense fallback={<Towers courses={courses} onOpen={setOpen} />}>
-                <CampusScene courses={vms} onSelect={(id) => id && setOpen(id)} onReady={() => { window.__clanPerf = { sceneMs: Math.round(performance.now() - sceneStart.t) }; }} />
+            <SceneBoundary fallback={<Towers courses={courses} onOpen={open} />}>
+              <Suspense fallback={<Towers courses={courses} onOpen={open} />}>
+                <CampusScene courses={vms} onSelect={(id) => id && open(id)} onReady={() => { window.__clanPerf = { sceneMs: Math.round(performance.now() - sceneStart.t) }; }} />
               </Suspense>
             </SceneBoundary>
-            <div className="scene-keys" aria-label="Courses">{courses.map((c) => <button key={c.id} className="small" onClick={() => setOpen(c.id)}>{c.name}</button>)}</div>
+            <div className="scene-keys" aria-label="Courses">{courses.map((c) => <button key={c.id} className="small" onClick={() => open(c.id)}>{c.name}</button>)}</div>
           </div>
-        ) : <Towers courses={courses} onOpen={setOpen} />}
+        ) : <Towers courses={courses} onOpen={open} />}
+      {add}
     </div>
   );
 }
+
+const confident = (c: CourseView) => c.topics.filter((t) => t.state === 'confident').length;
 
 function Towers({ courses, onOpen }: { courses: CourseView[]; onOpen(id: string): void }) {
   return (
     <div className="towers" role="list">
       {courses.map((c, i) => (
         <button key={c.id} role="listitem" className="tower" onClick={() => onOpen(c.id)} style={{ ['--c' as string]: COLORS[i % COLORS.length] }}
-          aria-label={`${c.name}: ${c.sessions} sessions, ${c.notes} notes, ${c.files} files`}>
-          <span className="floors">{c.sessions === 0 ? <span className="floor neutral" /> : Array.from({ length: Math.min(c.sessions, 12) }, (_, k) => <span key={k} className="floor">{k < c.recentNotes && <i className="lit" />}</span>)}</span>
+          aria-label={`${c.name}: ${c.topics.length} topics, ${confident(c)} marked Confident, ${c.files} files${c.nextExam ? `, exam ${c.nextExam.name}` : ''}`}>
+          {c.nextExam?.soon && <span className="exam-flag" aria-hidden>▲</span>}
+          <span className="floors">{c.topics.length === 0 ? <span className="floor neutral" /> : c.topics.slice(0, 12).map((t, k) => <span key={t.id} className={`floor st-${t.state}`}>{k < c.recent && <i className="lit" />}</span>)}</span>
           <span className="kiosks">{Array.from({ length: Math.min(c.files, 6) }, (_, k) => <i key={k} />)}</span>
-          <b>{c.name}</b>
+          <b>{c.code || c.name}</b>
         </button>
       ))}
     </div>
@@ -94,45 +136,17 @@ function Towers({ courses, onOpen }: { courses: CourseView[]; onOpen(id: string)
 
 function CourseList({ courses, onOpen }: { courses: CourseView[]; onOpen(id: string): void }) {
   return (
-    <table className="course-table"><thead><tr><th>Course</th><th>Sessions</th><th>Files</th><th>Notes</th><th>This week</th></tr></thead>
-      <tbody>{courses.map((c) => <tr key={c.id}><td><button className="link" onClick={() => onOpen(c.id)}>{c.name}</button></td><td className="c-num">{c.sessions}</td><td className="c-num">{c.files}</td><td className="c-num">{c.notes}</td><td className="c-num">{c.recentNotes}</td></tr>)}</tbody></table>
-  );
-}
-
-const SECTIONS = ['Resources', 'Notes', 'Exams', 'Saved', 'Recordings', 'Flashcards'] as const;
-function CourseSpace({ id, course, onBack }: { id: string; course: CourseView; onBack(): void }) {
-  const [d] = useLoad<ClanDetail>(useCallback(() => api.clan.detail(id), [id]));
-  const [sec, setSec] = useState<(typeof SECTIONS)[number]>('Resources');
-  return (
-    <div className="stack course-space">
-      <button className="link back" onClick={onBack}>← Campus</button>
-      <div className="course-hero">
-        <svg viewBox="0 0 120 120" aria-hidden><rect x="30" y="20" width="60" height="90" rx="4" fill="var(--burgundy)" />{Array.from({ length: Math.min(course.sessions, 6) }, (_, k) => <rect key={k} x="38" y={96 - k * 13} width="44" height="8" rx="2" fill={k < course.recentNotes ? 'var(--notebook)' : 'rgba(255,255,255,.25)'} />)}<rect x="10" y="108" width="100" height="6" rx="3" fill="var(--floor)" /></svg>
-        <div><span className="eyebrow">Course</span><h2 className="title world">{course.name}</h2><span className="muted">{course.sessions} sessions · {course.files} files · {course.notes} notes</span></div>
-      </div>
-      <div className="room-tabs" role="tablist">{SECTIONS.map((s) => { const soon = s === 'Recordings' || s === 'Flashcards'; return <button key={s} role="tab" aria-selected={sec === s} disabled={soon} onClick={() => setSec(s)}>{s}{soon && <small> · soon</small>}</button>; })}</div>
-      <section className="card panel-body">
-        {!d ? null : sec === 'Resources' ? (d.files.length ? d.files.map((f) => <div key={f.refId} className="line">{f.name}<span className="muted c-num">{(f.size / 1e6).toFixed(1)} MB</span></div>) : <p className="muted">No files shared in this course yet.</p>)
-          : sec === 'Notes' ? (d.notes.length ? d.notes.map((n) => <div key={n.id} className="line">{n.title}<span className="muted">{n.mine ? 'yours' : ''}</span></div>) : <p className="muted">Share a note into this course from Notes.</p>)
-          : sec === 'Saved' ? (d.saved.length ? d.saved.map((s) => <a key={s.id} className="line" href={s.url} target="_blank" rel="noreferrer noopener">{s.title}<span className="muted">{s.source}</span></a>) : <p className="muted">No links shared here yet.</p>)
-          : <p className="muted">No exams for this course yet. Exam planning arrives with the Exams module.</p>}
-      </section>
-    </div>
-  );
-}
-
-function ExamCenter() {
-  return (
-    <div className="exam-empty">
-      <div className="countdown-ghost" aria-hidden><span>—</span><small>days</small></div>
-      <div><b>No exams yet.</b><p className="muted">When the Exams module arrives, this becomes your command center: a countdown, topics with your own confidence marks, a study plan and the materials for each exam. CLAN will never guess your readiness.</p></div>
-    </div>
+    <table className="course-table"><thead><tr><th>Course</th><th>Topics</th><th>Confident</th><th>Open tasks</th><th>Next exam</th><th>Cards due</th></tr></thead>
+      <tbody>{courses.map((c) => <tr key={c.id}><td><button className="link" onClick={() => onOpen(c.id)}>{c.code ? `${c.code} · ` : ''}{c.name}</button>{c.clanName && <small className="muted"> · {c.clanName}</small>}</td>
+        <td className="c-num">{c.topics.length}</td><td className="c-num">{confident(c)}</td><td className="c-num">{c.openTasks}</td><td>{c.nextExam ? `${c.nextExam.name} · ${new Date(c.nextExam.at).toLocaleDateString()}` : '—'}</td><td className="c-num">{c.dueCards}</td></tr>)}</tbody></table>
   );
 }
 
 function Notes() {
   const [notes, reload] = useLoad(api.clan.notes);
   const [clans] = useLoad(api.clan.list);
+  const [courses] = useLoad(api.study.courses);
+  const [msg, setMsg] = useState('');
   const [sel, setSel] = useState<Note | null>(null);
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -157,9 +171,13 @@ function Notes() {
             <select value="" onChange={async (e) => { const clanId = e.target.value; await api.clan.shareNote(sel.id, clanId, true); reload(); setSel({ ...sel, sharedWith: [...sel.sharedWith, clanId] }); }} aria-label="Share to CLAN">
               <option value="">Share to CLAN…</option>{clans?.filter((c) => !sel.sharedWith.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            <select value="" onChange={async (e) => { const [courseId, topicId] = e.target.value.split(':'); await api.study.link(courseId!, { module: 'notes', entityId: sel.id, topicId: topicId || null }); setMsg('Added to the course — the note itself stays here and stays private.'); }} aria-label="Add to course">
+              <option value="">Add to course…</option>{courses?.map((c) => <optgroup key={c.id} label={c.name}><option value={`${c.id}:`}>{c.name}</option>{c.topics.map((t) => <option key={t.id} value={`${c.id}:${t.id}`}>{c.name} › {t.title}</option>)}</optgroup>)}
+            </select>
             <button onClick={() => api.clan.remind({ text: `Review “${sel.title}”`, dueAt: Date.now() + 86_400_000, target: { module: 'notes', id: sel.id } })}>Remind me tomorrow</button>
             <button className="danger" onClick={async () => { await api.clan.removeNote(sel.id); setSel(null); reload(); }}>Delete</button>
           </div>
+          {msg && <p className="muted small-text" role="status">{msg}</p>}
           {sel.sharedWith.length > 0 && <p className="muted small-text">Shared with {sel.sharedWith.map((c) => clans?.find((x) => x.id === c)?.name ?? 'a CLAN').join(', ')}. Members see your latest version.</p>}
         </section>
       ) : <div className="empty-place"><b>Pick a note or start a new one.</b><span className="muted">Notes are private until you share them into a CLAN.</span></div>}

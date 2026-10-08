@@ -313,3 +313,4 @@ export * from './clan.ts';
 export * from './direct.ts';
 export * from './chat.ts';
 export * from './intake.ts';
+export * from './study.ts';

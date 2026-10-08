@@ -18,6 +18,7 @@ import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroo
 import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
+import { registerStudy } from './study.ts';
 import { DesktopDirect } from './direct.ts';
 import { mediaBinary, mediaWorkDir, registerScreen } from './screen.ts';
 import { ScreenShareEvents } from '@clan/core';
@@ -347,6 +348,7 @@ app.whenReady().then(() => {
   registerScreen();
   clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName);
   chatHooks = registerChat({ clan, server: () => server, trust, files: studentFiles });
+  registerStudy(clan);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

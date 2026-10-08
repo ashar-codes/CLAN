@@ -13,13 +13,14 @@ export function Inbox({ onChanged }: { onChanged?(): void }) {
   const [received] = useLoad<ReceivedFile[]>(api.chat.received);
   const [cols] = useLoad(api.clan.collections);
   const [clans] = useLoad(api.clan.list);
+  const [courses] = useLoad(api.study.courses);
   const [err, setErr] = useState('');
   useEffect(() => api.capture.onAdded(reload), [reload]);
   const file = async (it: InboxItem, v: string) => {
     setErr('');
-    const [kind, id] = v.split(':') as [string, string];
+    const [kind, id, topicId] = v.split(':') as [string, string, string?];
     try {
-      await api.capture.file(it.id, kind === 'collection' ? { kind: 'collection', collectionId: id } : kind === 'done' ? { kind: 'done' } : { kind: kind as 'clan' | 'course', clanId: id });
+      await api.capture.file(it.id, kind === 'collection' ? { kind: 'collection', collectionId: id } : kind === 'done' ? { kind: 'done' } : kind === 'course' ? { kind: 'course', courseId: id, topicId: topicId || null } : { kind: 'clan', clanId: id });
       reload(); onChanged?.();
     } catch (e) { setErr(errText(e)); }
   };
@@ -34,7 +35,7 @@ export function Inbox({ onChanged }: { onChanged?(): void }) {
           <select value="" aria-label={`File ${it.title}`} onChange={(e) => void file(it, e.target.value)}>
             <option value="">File to…</option>
             {it.kind === 'link' && <optgroup label="Saved collection">{cols?.filter((c) => c.kind !== 'inbox').map((c) => <option key={c.id} value={`collection:${c.id}`}>{c.name}</option>)}</optgroup>}
-            {!!clans?.filter((c) => c.type === 'CLASSROOM').length && <optgroup label="Course">{clans.filter((c) => c.type === 'CLASSROOM').map((c) => <option key={c.id} value={`course:${c.id}`}>{c.name}</option>)}</optgroup>}
+            {courses?.map((c) => <optgroup key={c.id} label={`Course · ${c.name} (stays private)`}><option value={`course:${c.id}:`}>{c.name}</option>{c.topics.map((t) => <option key={t.id} value={`course:${c.id}:${t.id}`}>{c.name} › {t.title}</option>)}</optgroup>)}
             {!!clans?.length && <optgroup label="Share into a CLAN">{clans.map((c) => <option key={c.id} value={`clan:${c.id}`}>{c.name}</option>)}</optgroup>}
             <option disabled>A person — use CLANmate › Send in a live room</option>
             <option value="done:">Keep in Personal Space</option>

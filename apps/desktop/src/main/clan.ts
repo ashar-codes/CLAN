@@ -7,7 +7,7 @@ import type { HomeView } from '../shared.ts';
 
 const Id = z.uuid();
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const ACTIVITY: Record<string, string> = { CLANCreated: 'CLAN created', MemberJoined: 'CLAN membership added', NoteCreated: 'Note written', NoteShared: 'Note shared', SavedItemAdded: 'Link saved', SavedItemShared: 'Link shared', ResourceShared: 'File added', ReminderCreated: 'Reminder set' };
+const ACTIVITY: Record<string, string> = { CourseCreated: 'Course added', ExamCreated: 'Exam added', StudySessionEnded: 'Study session ended', CLANCreated: 'CLAN created', MemberJoined: 'CLAN membership added', NoteCreated: 'Note written', NoteShared: 'Note shared', SavedItemAdded: 'Link saved', SavedItemShared: 'Link shared', ResourceShared: 'File added', ReminderCreated: 'Reminder set' };
 
 export type DesktopClan = ClanApp & { classroomClanFor(title: string): string | null };
 
@@ -21,12 +21,16 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
     const recent = c.db.prepare(`SELECT type, ts FROM core_events WHERE type IN (${Object.keys(ACTIVITY).map(() => '?').join(',')}) ORDER BY seq DESC LIMIT 8`).all(...Object.keys(ACTIVITY)) as { type: string; ts: number }[];
     return {
       me: { id: c.me, name: c.identity.displayName(c.me) ?? 'Me' },
-      library: { notes: c.notes.mine(me, 500).length, saved: c.saved.items(me).length, courses: c.clans.list(c.me).filter((x) => x.type === 'CLASSROOM').length, files: c.files.list(me, { kind: 'personal', ownerId: c.me }).length },
+      library: { notes: c.notes.mine(me, 500).length, saved: c.saved.items(me).length, courses: c.courses.list(me).length, files: c.files.list(me, { kind: 'personal', ownerId: c.me }).length },
       inboxCount: c.capture.inbox(me).length, // Personal Space › Inbox: everything captured and not yet filed
       diaryToday: !!c.diary.day(me, new Date().toLocaleDateString('en-CA')),
       clans: c.clans.list(c.me).map((x) => ({ id: x.id, name: x.name, type: x.type, members: c.clans.members(x.id).filter((m) => m.status === 'active').length })),
       continueNotes: c.notes.mine(me, 3).map((n) => ({ id: n.id, title: n.title, updatedAt: n.updatedAt })),
-      deadlines: c.reminders.upcoming(me, now + 14 * 86_400_000),
+      // Semester board pins and the Today list: the Agenda projection (nothing copied).
+      today: c.agenda.today(me),
+      upcoming: c.agenda.range(me, now, now + 14 * 86_400_000).filter((i) => i.status !== 'done').slice(0, 6),
+      session: c.study.active(me),
+      latestCourse: c.courses.list(me).sort((x, y) => y.updatedAt - x.updatedAt)[0] ?? null,
       inbox: c.saved.items(me, c.saved.inbox(me)).slice(0, 5),
       activity: recent.map((r) => ({ label: ACTIVITY[r.type]!, ts: r.ts })),
       aiProvider: null,
@@ -41,17 +45,12 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
     return { id: x.id, name: x.name, type: x.type, expiresAt: x.expiresAt, members: members.length, files: c.files.list(me, { kind: 'clan', clanId: x.id }).length,
       sessions: c.clans.sessionsOf(x.id).length, host: owner?.userId === c.me ? 'You' : owner?.displayName ?? null, mine: owner?.userId === c.me };
   }));
-  /** Knowledge Campus: CLASSROOM CLANs are the courses we really know about. No progress is inferred. */
-  handle('study:courses', () => c.clans.list(c.me).filter((x) => x.type === 'CLASSROOM').map((x) => {
-    const notes = c.notes.inClan(me, x.id);
-    return { id: x.id, name: x.name, sessions: c.clans.sessionsOf(x.id).length, files: c.files.list(me, { kind: 'clan', clanId: x.id }).length,
-      notes: notes.length, recentNotes: notes.filter((n) => n.updatedAt > Date.now() - 7 * 86_400_000).length, exams: 0 };
-  }));
   handle('files:personal', () => c.files.list(me, { kind: 'personal', ownerId: c.me }));
   /** Called by the member UI once the host approved it. Values come from the authenticated session (hello) + the paired host key. */
   handle('clan:joined', (raw) => {
     const a = z.object({ sessionId: Id, clanId: Id.nullable(), type: ClanType, name: z.string().trim().min(1).max(80), hostKey: z.string().max(64), expiresAt: z.number().int().nullable(), hostName: z.string().trim().min(1).max(80).nullable().optional() }).parse(raw);
     c.clans.recordJoined({ id: a.clanId ?? a.sessionId, type: a.type, name: a.name, hostDeviceId: keyFingerprint(a.hostKey), hostName: a.hostName ?? `${a.name} host`, expiresAt: a.expiresAt, me: c.me });
+    if (a.type === 'CLASSROOM') c.courses.linkClassrooms(me); // a joined Classroom gets its linked Course right away
   });
   handle('clan:detail', (id) => {
     const clan = c.clans.get(Id.parse(id));
@@ -79,9 +78,6 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   handle('diary:day', (day) => c.diary.day(me, Day.parse(day)));
   handle('diary:write', (raw) => c.diary.write(me, z.object({ day: Day, body: z.string(), mood: z.string().nullable().optional() }).parse(raw) as never));
   handle('diary:recent', () => c.diary.recent(me, 14));
-
-  handle('reminders:create', (raw) => c.reminders.create(me, z.object({ text: z.string(), dueAt: z.number().int(), target: z.object({ module: z.string(), id: z.string() }).optional() }).parse(raw)));
-  handle('reminders:done', (id) => c.reminders.done(me, Id.parse(id)));
 
   handle('search', (q) => c.search.query(me, z.string().max(200).parse(q)));
   handle('me:rename', (name) => c.identity.rename(c.me, z.string().trim().min(1).max(80).parse(name)));

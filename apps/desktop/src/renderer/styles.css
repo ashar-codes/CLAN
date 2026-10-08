@@ -355,3 +355,79 @@ table.mini { width: 100%; border-collapse: collapse; font-size: .9rem; } table.m
 .inbox-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .inbox-item select { max-width: 220px; }
 .qc-err { position: absolute; right: 0; bottom: 70px; }
+
+/* ---- Study Engine (tokens only; follows night mode automatically) ---- */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.left { text-align: left; } .overdue { color: var(--brick); }
+.study-tabs { flex-wrap: wrap; border-radius: 18px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .5rem; }
+.new-course, .board-forms > * { display: grid; gap: .55rem; }
+.board-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+.num-input { width: 5.5rem; }
+.inline-edit { border: 1px solid transparent; background: none; font-weight: 600; padding: .2rem .35rem; min-width: 8rem; flex: 1; }
+.inline-edit:hover, .inline-edit:focus { border-color: var(--border); background: var(--surface); }
+.topic-list { list-style: none; margin: 0; padding: 0; }
+.line.missing { opacity: .6; }
+.chip-check { display: inline-flex; gap: .35rem; align-items: center; padding: .3rem .6rem; border-radius: 999px; background: var(--paper-2); margin: 0 .3rem .3rem 0; font-size: .85rem; }
+.scope { border: 0; padding: 0; margin: 0; } .scope legend { margin-bottom: .3rem; color: var(--ink-2); }
+/* topic marks: the student's own, shown as an accent — never a score */
+.conf, .chip.conf-not_started { } .conf { border-radius: 999px; font-size: .82rem; padding: .25rem .55rem; }
+.conf-learning { background: var(--study-soft); } .conf-review { background: var(--notebook-soft); } .conf-confident { background: var(--campus-soft); }
+.tower { position: relative; }
+.tower .floor.st-not_started, .tower .floor.st-learning, .tower .floor.st-review { background: color-mix(in srgb, var(--c) 28%, var(--surface)); }
+.tower .floor.st-review { box-shadow: inset 4px 0 0 var(--notebook); } .tower .floor.st-learning { box-shadow: inset 4px 0 0 var(--study); }
+.exam-flag { position: absolute; top: -6px; right: 14px; color: var(--brick); font-size: 1.1rem; }
+/* tasks */
+.task { border-bottom: 1px solid var(--border); } .task .line { border-bottom: 0; }
+.task.st-done b, .task.st-cancelled b { text-decoration: line-through; opacity: .6; }
+.task.pr-high { box-shadow: inset 3px 0 0 var(--brick); padding-left: .4rem; }
+.task-body { display: grid; gap: .3rem; padding: 0 0 .6rem 1.8rem; }
+/* exams */
+.exam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .8rem; }
+.exam-card { display: flex; gap: .9rem; align-items: center; text-align: left; }
+.countdown { display: grid; justify-items: center; min-width: 4.6rem; padding: .5rem .7rem; border-radius: 16px; background: var(--paper-2); color: var(--ink); }
+.countdown b { font-size: 1.9rem; line-height: 1; } .countdown small { font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: .68rem; }
+.countdown.near { background: var(--brick-soft); color: var(--brick); }
+.countdown.big { min-width: 6.5rem; padding: .8rem 1rem; } .countdown.big b { font-size: 2.8rem; }
+.cc-hero { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+.cc-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+.cc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+/* flashcards: physical-card feel, fast interaction */
+.deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .9rem; }
+.deck { display: grid; gap: .25rem; text-align: left; position: relative; padding-top: 2.2rem; }
+.deck-stack { position: absolute; top: .6rem; left: .9rem; } .deck-stack i { position: absolute; width: 34px; height: 22px; border-radius: 4px; background: var(--surface); border: 1.5px solid var(--line); }
+.deck-stack i:nth-child(2) { left: 4px; top: -3px; } .deck-stack i:nth-child(3) { left: 8px; top: -6px; background: var(--notebook-soft); }
+.review { max-width: 640px; margin: 0 auto; width: 100%; }
+.flashcard { min-height: 220px; display: grid; place-items: center; gap: .6rem; padding: 1.6rem; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-2);
+  background-image: repeating-linear-gradient(transparent 0 31px, color-mix(in srgb, var(--study) 12%, transparent) 31px 32px); font-size: 1.25rem; transition: transform var(--t-base) var(--ease-out); }
+.flashcard.flipped { background-color: var(--notebook-soft); } .flashcard:active { transform: scale(.99); }
+.fc-face { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 600; }
+.grades { display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem; }
+.grade { display: grid; gap: .1rem; justify-items: center; padding: .7rem .4rem; min-height: 56px; }
+.g-again { border-color: var(--brick); } .g-hard { border-color: var(--notebook); } .g-good { border-color: var(--campus); } .g-easy { border-color: var(--study); }
+/* semester board */
+.ag-day { display: grid; gap: .2rem; padding: .4rem 0; border-bottom: 1px solid var(--border); } .ag-day:last-child { border-bottom: 0; }
+.ag-item { display: flex; gap: .4rem; align-items: center; } .ag-item.overdue b { color: var(--brick); }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-head { font-size: .75rem; font-weight: 700; color: var(--ink-2); text-align: center; }
+.cal-cell { min-height: 92px; padding: .35rem; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); display: grid; align-content: start; gap: 3px; min-width: 0; }
+.cal-week .cal-cell { min-height: 220px; } .cal-cell.pad { background: none; border: 0; } .cal-cell.today { border-color: var(--study); box-shadow: inset 0 0 0 1px var(--study); }
+.cal-date { font-size: .75rem; font-weight: 700; color: var(--ink-2); }
+.cal-ev { font-size: .74rem; text-align: left; padding: .15rem .35rem; border-radius: 6px; border: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--paper-2); }
+.k-exam.cal-ev, .dot-ic.k-exam { background: var(--brick-soft); } .dot-ic.k-exam { background: var(--brick); }
+.k-task.cal-ev { background: var(--study-soft); } .dot-ic.k-task { background: var(--study); }
+.k-assignment.cal-ev { background: var(--burgundy-soft); } .dot-ic.k-assignment { background: var(--burgundy); }
+.k-reminder.cal-ev { background: var(--notebook-soft); } .dot-ic.k-reminder { background: var(--notebook); }
+.k-session.cal-ev { background: var(--campus-soft); } .dot-ic.k-session { background: var(--campus); }
+.today-row.overdue small { color: var(--brick); }
+/* study session */
+.session-bar { position: fixed; top: 64px; right: 22px; z-index: 32; display: grid; gap: .35rem; width: min(380px, calc(100vw - 32px)); border-color: color-mix(in srgb, var(--study) 45%, var(--border)); box-shadow: 0 0 0 4px var(--study-soft), var(--shadow-2); }
+.session-clock { font-size: 1.7rem; }
+.shell.is-focus .session-bar { opacity: 1; }
+.qc-into { justify-self: end; font-size: .82rem; max-width: 260px; }
+@media (max-width: 640px) {
+  .cal { grid-template-columns: minmax(0, 1fr); } .cal-head, .cal-cell.pad { display: none; } .cal-cell { min-height: 0; }
+  .grades { grid-template-columns: repeat(2, 1fr); }
+  .session-bar { top: auto; bottom: 84px; right: 16px; left: 16px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .flashcard { transition: none; } }

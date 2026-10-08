@@ -86,3 +86,15 @@ Milestone 3 (Windows Direct Mode) — or first, if phones matter for the pilot: 
 
 ## Next
 Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi-AP) and real phones; then Milestone 3.
+
+## Study Engine delivered (tag `clan-study-engine`)
+* Real modules: courses (topics with own marks, lectures, references to notes/files/saved incl. past papers), tasks,
+  exams (+ Exam Command Center: "N of M topics marked Confident", nothing estimated), reminders (recurrence, snooze,
+  dismiss, ReminderDue), flashcards (SM-2 + review history), study sessions (Focus), assignments (projection), agenda
+  (Today, Semester Board, AI-ready contexts). Every Classroom gets one linked Course; nothing copied. See STUDY.md, FLASHCARDS.md.
+* Desktop: Campus on real courses (floors = topics), course interior (9 sections), Semester Board (Agenda/Week/Month),
+  Tasks, Exams, Flashcard review (keyboard/touch/screen reader), session bar + Focus, History, My Space Today/Desk/Board,
+  Quick Capture Task/Reminder + direct filing into a course/topic, study notices (conservative defaults).
+* Mobile: phone-local Study screen on the same algorithms (typecheck + model test; device runtime UNVERIFIED).
+* Tests 240 → 250; E2E 11 → 13 (full study flow with restart; Classroom assignment in Course/Today, not a Task).
+* Renderer main chunk 329.0 → 372.5 kB (98.7 → 107.7 kB gzip); CSS +6 kB; Campus 3D chunk unchanged (lazy).

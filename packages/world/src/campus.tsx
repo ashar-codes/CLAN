@@ -43,6 +43,7 @@ function Building({ c, at, selected, onSelect }: { c: CourseBuildingViewModel; a
         );
       })}
       {Array.from({ length: c.resources }, (_, r) => <mesh key={r} position={[1.05, 0.12, -0.55 + r * 0.32]}><boxGeometry args={[0.22, 0.24, 0.22]} /><meshStandardMaterial color={token('--mustard')} /></mesh>)}
+      {c.examSoon && <mesh position-y={Math.max(1, c.lectures.length) * FLOOR + 0.45}><coneGeometry args={[0.28, 0.6, 4]} /><meshStandardMaterial color={token('--brick')} /></mesh>}
       {selected && <mesh rotation-x={-Math.PI / 2} position-y={0.01}><ringGeometry args={[1.15, 1.25, 4, 1, Math.PI / 4]} /><meshBasicMaterial color={token('--clay')} /></mesh>}
     </group>
   );

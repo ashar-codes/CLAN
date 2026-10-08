@@ -7,6 +7,8 @@ export type NearbyPersonViewModel = { id: string; name: string; spec: CLANmateSp
 export type CourseBuildingViewModel = {
   id: string; code: string; name: string; color: string; term: number;
   lectures: { id: string; title: string; done: boolean }[]; studyingNow: number; resources: number; prerequisites: string[];
+  /** A real upcoming exam soon: a marker on the roof. */
+  examSoon?: boolean;
 };
 
 export const loadCommons = () => import('./commons.tsx');

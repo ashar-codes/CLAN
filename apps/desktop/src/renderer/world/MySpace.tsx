@@ -2,10 +2,11 @@
 // and the same actions exist as quick actions and a conventional "Today" panel (the Minimal experience shows only those).
 import type { KeyboardEvent, ReactNode } from 'react';
 import { ClanPlace, CLANBeacon, CLANmate, mateFor, type BeaconState } from '@clan/design';
-import type { HomeView } from '../../shared.ts';
+import type { AgendaItem, HomeView } from '../../shared.ts';
+import { openItem, useStudy } from './study/common.tsx';
 import type { Experience } from './experience.ts';
 
-export type SpaceTarget = 'commons' | 'clans' | 'study' | 'notes' | 'saved' | 'me' | 'diary' | 'guide' | 'exams';
+export type SpaceTarget = 'commons' | 'clans' | 'study' | 'notes' | 'saved' | 'me' | 'diary' | 'guide' | 'exams' | 'board' | 'tasks' | `course:${string}`;
 
 function Obj({ label, hint, onGo, children }: { label: string; hint: string; onGo(): void; children: ReactNode }) {
   return (
@@ -17,7 +18,9 @@ function Obj({ label, hint, onGo, children }: { label: string; hint: string; onG
   );
 }
 
-const days = (ts: number) => Math.max(0, Math.ceil((ts - Date.now()) / 86_400_000));
+const days = (ts: number | null) => (ts === null ? 0 : Math.max(0, Math.ceil((ts - Date.now()) / 86_400_000)));
+const KIND: Record<AgendaItem['kind'], string> = { exam: 'Exam', task: 'Task', assignment: 'Classroom Assignment', reminder: 'Reminder', session: 'Planned study' };
+const hhmm = (ts: number | null) => (ts === null ? '' : new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
 export function MySpace({ h, nearby, beacon, experience, go, quick }: {
   h: HomeView; nearby: number; beacon: BeaconState; experience: Experience; go(t: SpaceTarget): void; quick: ReactNode;
@@ -28,8 +31,12 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
     ...Array.from({ length: Math.min(notes, 5) }, () => 'var(--study)'),
     ...Array.from({ length: Math.min(saved, 4) }, () => 'var(--notebook)'),
   ];
-  const pins = h.deadlines.slice(0, 3);
+  const { go: goStudy, session } = useStudy();
+  const pins = h.upcoming.slice(0, 3);
   const latest = h.continueNotes[0];
+  const desk = session ? { label: 'Studying', hint: session.goal || 'study session running', go: () => goStudy({ tab: session.courseId ? 'campus' : 'history', ...(session.courseId ? { courseId: session.courseId } : {}) }) }
+    : h.latestCourse ? { label: h.latestCourse.code || h.latestCourse.name, hint: `open ${h.latestCourse.name}`, go: () => go(`course:${h.latestCourse!.id}`) }
+    : { label: latest ? 'Continue' : 'Start writing', hint: latest ? `continue “${latest.title}”` : 'start a note', go: () => go('notes') };
   return (
     <div className="space">
       {experience !== 'minimal' && (
@@ -51,13 +58,13 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
             <text x="160" y="368" className="obj-label">Library</text>
           </Obj>
 
-          <Obj label="Semester board" hint={pins.length ? `${pins.length} coming up` : 'nothing due'} onGo={() => go('exams')}>
+          <Obj label="Semester board" hint={pins.length ? `${pins.length} coming up` : 'nothing due'} onGo={() => go('board')}>
             <rect x="300" y="60" width="220" height="168" rx="10" fill="#d8b98f" stroke="var(--wood)" strokeWidth="6" />
             {pins.length === 0 && <text x="410" y="150" className="obj-hint dark">nothing due</text>}
             {pins.map((r, i) => (
               <g key={r.id} transform={`translate(${316 + i * 66} ${84 + (i % 2) * 12}) rotate(${i === 1 ? 4 : -3})`}>
                 <rect width="56" height="62" rx="3" fill={i === 0 ? '#fbe9be' : '#fffbf3'} /> {/* paper notes stay paper at night */}
-                <text x="28" y="30" textAnchor="middle" className="pin-num">{days(r.dueAt)}</text>
+                <text x="28" y="30" textAnchor="middle" className="pin-num">{days(r.at)}</text>
                 <text x="28" y="46" textAnchor="middle" className="pin-sub">days</text>
                 <circle cx="28" cy="4" r="4" fill="var(--brick)" />
               </g>
@@ -67,10 +74,11 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
 
           <g aria-hidden><rect x="420" y="322" width="390" height="20" rx="6" fill="var(--wood)" /><rect x="440" y="342" width="14" height="130" fill="var(--wood-dark)" /><rect x="776" y="342" width="14" height="130" fill="var(--wood-dark)" /></g>
 
-          <Obj label="Desk" hint={latest ? `continue “${latest.title}”` : 'start a note'} onGo={() => go('notes')}>
+          <Obj label="Desk" hint={desk.hint} onGo={desk.go}>
             <path d="M470 322l14-70h150l14 70z" fill="#22304a" /><path d="M490 262h138l-10 52H480z" fill="var(--study-soft)" />
             <path d="M500 276h70M500 288h96M500 300h50" stroke="#22304a" strokeWidth="5" strokeLinecap="round" opacity=".45" />
-            <text x="560" y="242" className="obj-label">{latest ? 'Continue' : 'Start writing'}</text>
+            {session && <circle cx="640" cy="262" r="7" fill="var(--study)" />}
+            <text x="560" y="242" className="obj-label">{desk.label}</text>
           </Obj>
 
           <Obj label="Journal" hint="your private Diary" onGo={() => go('diary')}>
@@ -110,9 +118,14 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
         <div className="space-hello"><span className="eyebrow">My Space · {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</span>
           <h1 className="title world">Hi {h.me.name === 'Me' ? 'there' : h.me.name}</h1></div>
         {quick}
-        <section className="today-list" aria-label="Today">
+        <section className="today-list" aria-label="Today" data-testid="today">
+          {h.today.slice(0, 8).map((i) => (
+            <button key={i.kind + i.id + i.at} className={`today-row ${i.overdue ? 'overdue' : ''}`} onClick={() => openItem(i, goStudy)} data-testid="today-item">
+              <span className={`dot-ic k-${i.kind}`} /><span className="grow"><b>{i.title}</b><br /><small className="muted">{KIND[i.kind]}{i.at ? ` · ${days(i.at) === 0 ? (i.overdue ? 'overdue' : `today ${hhmm(i.at)}`) : `in ${days(i.at)} day${days(i.at) === 1 ? '' : 's'}`}` : ''}{i.kind === 'assignment' ? ` · ${i.status}` : ''}</small></span>
+            </button>
+          ))}
+          {h.today.length === 0 && <button className="today-row" onClick={() => go('board')}><span className="dot-ic notebook" />Nothing due today · open the Semester Board</button>}
           <button className="today-row" onClick={() => go('notes')}><span className="dot-ic study" />{latest ? <>Continue <b>{latest.title}</b></> : 'Write your first note'}</button>
-          <button className="today-row" onClick={() => go('exams')}><span className="dot-ic notebook" />{pins.length ? <><b>{pins.length}</b> coming up · next {pins[0]!.text}</> : 'Nothing due in two weeks'}</button>
           <button className="today-row" onClick={() => go('saved')}><span className="dot-ic brick" />{h.inboxCount ? <><b>{h.inboxCount}</b> in your Inbox</> : 'Inbox is empty'}</button>
           <button className="today-row" onClick={() => go('commons')}><CLANBeacon state={nearby ? 'available' : 'away'} size={16} />{nearby ? <><b>{nearby}</b> CLAN{nearby === 1 ? '' : 's'} nearby</> : 'No CLANs nearby'}</button>
           <button className="today-row" onClick={() => go('diary')}><span className="dot-ic campus" />{h.diaryToday ? 'Diary written today' : 'Write today’s Diary'}</button>

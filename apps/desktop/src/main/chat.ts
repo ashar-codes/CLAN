@@ -112,26 +112,27 @@ export function registerChat(o: { clan: ClanApp; server: () => RunningServer | n
   const enrich = async () => { for (const it of clan.saved.pendingMeta()) clan.saved.applyMeta(it.id, await fetchLinkMeta(it.url)); };
   const later = () => { void enrich().catch(() => {}); };
   const captured = (item: unknown) => { win()?.webContents.send('capture:added', item); later(); return item; };
-  handle('capture:add', async (_e, raw) => captured(await clan.capture.capture(me, z.discriminatedUnion('kind', [
+  const Into = z.object({ courseId: z.uuid(), topicId: z.uuid().nullable().optional() }).optional();
+  handle('capture:add', async (_e, raw, into) => captured(await clan.capture.capture(me, z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('note'), title: z.string().max(200).optional(), body: z.string().max(100_000).optional() }),
     z.object({ kind: z.literal('link'), url: z.string().max(2048), title: z.string().max(300).optional(), note: z.string().max(5000).optional(), tags: z.array(z.string()).max(20).optional(), collectionId: z.uuid().optional() }),
     z.object({ kind: z.literal('text'), text: z.string().max(20_000) }),
-  ]).parse(raw))));
-  const captureFiles = async (paths: string[]) => {
+  ]).parse(raw), Into.parse(into))));
+  const captureFiles = async (paths: string[], into?: z.infer<typeof Into>) => {
     const out = [];
-    for (const p of paths) { if ((await stat(p)).isFile()) out.push(captured(await clan.capture.capture(me, { kind: 'file', path: p, name: basename(p) }))); }
+    for (const p of paths) { if ((await stat(p)).isFile()) out.push(captured(await clan.capture.capture(me, { kind: 'file', path: p, name: basename(p) }, into))); }
     return out.length;
   };
   handle('capture:dropped', (_e, paths) => captureFiles(Paths.parse(paths)));
-  handle('capture:pick', async (e) => {
+  handle('capture:pick', async (e, into) => {
     const w = BrowserWindow.fromWebContents(e.sender) ?? undefined;
     const pick = w ? await dialog.showOpenDialog(w, { properties: ['openFile', 'multiSelections'] }) : await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] });
-    return pick.canceled ? 0 : captureFiles(pick.filePaths.slice(0, 20));
+    return pick.canceled ? 0 : captureFiles(pick.filePaths.slice(0, 20), Into.parse(into));
   });
   handle('capture:inbox', () => clan.capture.inbox(me));
   handle('capture:file', (_e, id, raw) => clan.capture.file(me, z.uuid().parse(id), z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('collection'), collectionId: z.uuid() }), z.object({ kind: z.literal('clan'), clanId: z.uuid() }),
-    z.object({ kind: z.literal('course'), clanId: z.uuid() }), z.object({ kind: z.literal('done') }),
+    z.object({ kind: z.literal('course'), courseId: z.uuid(), topicId: z.uuid().nullable().optional() }), z.object({ kind: z.literal('done') }),
   ]).parse(raw)));
 
   // clan://capture?url=…|text=… from other apps or the browser. Parsed strictly; only links and text, into the Inbox.

@@ -33,6 +33,14 @@ export class Files {
     return this.attach(p, ref.objectId, ref.name ?? this.nameOf(ref), to);
   }
 
+  /** One file the caller can read (by ref id), or null — the same check as listing its scope. */
+  get(p: Principal, refId: string): (FileView & { scope: Scope; createdBy: string }) | null {
+    const ref = this.store.getRef(refId);
+    if (!ref || ref.module !== 'files' || !this.perms.canRead(p, ref.scope) || !this.perms.agentMay(p, 'files')) return null;
+    const names = ref.scope.kind === 'clan' ? classroomNames(this.db, this.clans.sessionsOf(ref.scope.clanId)) : new Map<string, string>();
+    return { ...this.view(ref, names), scope: ref.scope, createdBy: ref.createdBy };
+  }
+
   list(p: Principal, scope: Scope): FileView[] {
     if (!this.perms.canRead(p, scope) || !this.perms.agentMay(p, 'files')) return [];
     const names = scope.kind === 'clan' ? classroomNames(this.db, this.clans.sessionsOf(scope.clanId)) : new Map<string, string>();

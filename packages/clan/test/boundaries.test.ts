@@ -8,9 +8,10 @@ const root = join(import.meta.dirname, '../../..');
 const src = join(import.meta.dirname, '../src');
 const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));
 const imports = (f: string) => [...readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*'([^']+)'/g)].map((m) => m[1]!);
-const PREFIX: Record<string, string[]> = { clans: ['clans_'], files: ['resources_'], notes: ['notes_'], saved: ['saved_'], diary: ['diary_'], reminders: ['reminders_'], share: [], chat: ['chat_'], capture: ['capture_'], notifications: ['notify_'] };
+const PREFIX: Record<string, string[]> = { clans: ['clans_'], files: ['resources_'], notes: ['notes_'], saved: ['saved_'], diary: ['diary_'], reminders: ['reminders_'], share: [], chat: ['chat_'], capture: ['capture_'], notifications: ['notify_'],
+  courses: ['courses_'], tasks: ['tasks_'], exams: ['exams_'], flashcards: ['flashcards_'], study: ['study_'], assignments: ['assign_'], agenda: [] };
 /** Read-only classroom readers (see their headers). */
-const LEGACY_READERS: Record<string, string[]> = { 'modules/clans/classroom-import.ts': ['sessions', 'members'], 'modules/files/classroom-adopt.ts': ['resources'] };
+const LEGACY_READERS: Record<string, string[]> = { 'modules/clans/classroom-import.ts': ['sessions', 'members'], 'modules/files/classroom-adopt.ts': ['resources'], 'modules/assignments/classroom-read.ts': ['assignments', 'submissions'] };
 
 describe('module boundaries', () => {
   it('core never imports modules', () => {
@@ -38,7 +39,7 @@ describe('module boundaries', () => {
       const tables = [...text.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE|TABLE|EXISTS \(SELECT 1 FROM)\s+([a-z_]+)/g)].map((m) => m[1]!).filter((t) => !['json_each', 'excluded', 'pragma_table_info'].includes(t));
       const allowed = [...(PREFIX[mod] ?? []), ...(LEGACY_READERS[rel] ?? [])];
       for (const t of tables) expect(allowed.some((a) => t === a || t.startsWith(a)), `${rel} uses table ${t}`).toBe(true);
-      if (LEGACY_READERS[rel]) expect(text, rel).not.toMatch(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+(sessions|members|resources)\b/);
+      if (LEGACY_READERS[rel]) expect(text, rel).not.toMatch(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+(sessions|members|resources|assignments|submissions)\b/);
     }
   });
 

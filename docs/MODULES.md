@@ -14,13 +14,20 @@
 | notes | product | `notes_notes`, `notes_shares` | `Notes` | NoteCreated, NoteUpdated, NoteShared |
 | saved | product | `saved_collections`, `saved_items`, `saved_shares` | `Saved` | SavedItemAdded, SavedItemChanged, SavedItemShared |
 | diary | product | `diary_entries` | `Diary` | none (private) |
-| reminders | product | `reminders_reminders` | `Reminders` | ReminderCreated |
+| reminders | product | `reminders_reminders` (+ recurrence, anchor, snooze, dismissed, fired) | `Reminders` | ReminderCreated, ReminderDue |
+| courses | product | `courses_courses`, `courses_topics`, `courses_lectures`, `courses_lecture_topics`, `courses_links` (references only) | `Courses` | CourseCreated, CourseChanged, TopicCreated, TopicConfidenceChanged |
+| tasks | product | `tasks_tasks`, `tasks_checklist`, `tasks_refs` | `Tasks` | TaskChanged |
+| exams | product | `exams_exams`, `exams_topics`, `exams_refs` | `Exams` | ExamCreated (v2), ExamChanged |
+| flashcards | product | `flashcards_decks`, `flashcards_cards`, `flashcards_reviews` | `Flashcards` (SM-2) | DeckChanged, FlashcardReviewed |
+| study | product | `study_sessions` | `Study` (sessions) | StudySessionStarted, StudySessionEnded |
+| assignments | product (projection) | `assign_seen` (member device's last host list); host reads `assignments`/`submissions` read-only | `Assignments` | — |
+| agenda | product (read projection) | — | `Agenda` (Today, Semester Board, Course/Lecture/Exam/StudyContext) | — |
 | share | product | — | `Share` (Share-to-CLAN) | — |
 | screenshare | product (events) | `presentations` (server migration 6: control state only, never media) | `ScreenShareEvents` | PresentationRequested, PresentationApproved, PresentationDeclined, PresentationStarted, PresentationSourceChanged, PresentationStopped |
 | chat | product | `chat_threads`, `chat_messages`, `chat_reactions`, `chat_cursors`, `chat_names`, `chat_me`, `chat_outbox` | `Chat` (host authority + member cache + Outbox) | MessageCreated, MessageEdited, MessageRemoved, ReactionChanged, ResourceSentToMember |
 | capture | product | `capture_items` (pointers to canonical notes/links/files) | `Capture` | CaptureItemCreated |
-| notifications | product (consumer) | `notify_notices`, `notify_prefs` | `Notifications` (core contract) | — (consumes MessageCreated) |
-| tasks, courses, exams, flashcards, recordings, whiteboard, ai, profile | contracts only | — | `modules/contracts.ts` | ExamCreated (defined) |
+| notifications | product (consumer) | `notify_notices`, `notify_prefs`, `notify_sent` | `Notifications` (core contract) | — (consumes MessageCreated, ReminderDue, StudySession*; `tick()` checks tasks/exams/sessions/cards due) |
+| recordings, whiteboard, ai, profile | contracts only | — | `modules/contracts.ts` | — |
 | classroom (legacy) | `@classroom/server` | `sessions`, `members`, `resources`, `assignments`, `uploads`, `submissions`, … | server API (hosts every CLAN type) | its own `events` log |
 
 **Session capabilities** (who may do what in a live CLAN session) are in `@classroom/protocol` `capabilitiesFor(type, host|member)`

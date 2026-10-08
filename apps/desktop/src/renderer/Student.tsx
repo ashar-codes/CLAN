@@ -149,7 +149,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: [] }); } // register the peer server as soon as we're in
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
-        if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
+        if (m.t === 'assignments') { setAssignments(m.assignments as StudentAssignmentView[]); void api.study.assignmentsSeen(infoRef.current.clanId ?? infoRef.current.sessionId, m.assignments).catch(() => {}); } // offline projection for Today / Course
         if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
         if (m.t === 'peer.revoked') { revoked.current = [...revoked.current, ...m.fingerprints]; void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: m.fingerprints }); }
         if (m.t === 'hello' || m.t === 'class.state') { infoRef.current = m.classroom; void api.peerState(connOf(), { peerAssist: m.classroom.peerAssist, revoked: [] }); }

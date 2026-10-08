@@ -2,8 +2,11 @@ import type { DiscoveredClassroom } from '@classroom/server/discovery';
 import type { Iface } from '@classroom/server';
 import type { ChatMessageView, ChatThreadView, ClassroomInfo, ClientMessage, JoinPolicy, MemberStatus, Receipt, ResourceView, StudentProfile, TransferState } from '@classroom/protocol';
 import type { KeystoreStatus } from './main/keystore.ts';
-import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice } from '@clan/core';
-export type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice };
+import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice,
+  Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem } from '@clan/core';
+import type { Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState, countdown, readiness } from '@classroom/protocol';
+export type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice,
+  Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem, Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState };
 
 export type Capabilities = {
   platform: string;
@@ -40,7 +43,11 @@ export type HomeView = {
   diaryToday: boolean;
   clans: { id: string; name: string; type: ClanType; members: number }[];
   continueNotes: { id: string; title: string; updatedAt: number }[];
-  deadlines: Reminder[];
+  today: AgendaItem[];
+  /** Next two weeks (semester board pins). */
+  upcoming: AgendaItem[];
+  session: StudySession | null;
+  latestCourse: Course | null;
   inbox: SavedItem[];
   activity: { label: string; ts: number }[];
   /** No AI provider ships yet; the Guide entry says so instead of pretending. */
@@ -53,7 +60,76 @@ export type ClanDetail = {
 export type SearchHit = { module: string; entityId: string; title: string; snippet: string };
 
 export type ClanPlaceView = { id: string; name: string; type: ClanType; expiresAt: number | null; members: number; files: number; sessions: number; host: string | null; mine: boolean };
-export type CourseView = { id: string; name: string; sessions: number; files: number; notes: number; recentNotes: number; exams: number };
+/** Campus building: floors = topics (solid = marked Confident), lit windows = real activity this week, exam flag = exam within 14 days. */
+export type CourseView = { id: string; name: string; code: string; term: string; clanId: string | null; clanName: string | null;
+  topics: { id: string; title: string; state: TopicState }[]; recent: number; files: number; openTasks: number;
+  nextExam: { id: string; name: string; at: number; soon: boolean } | null; dueCards: number };
+export type CourseDetail = { course: Course; clanName: string | null; topics: Topic[]; lectures: Lecture[]; links: CourseLink[]; tasks: Task[]; exams: Exam[];
+  decks: Deck[]; sessions: StudySession[]; assignments: AssignmentItem[]; reminders: Reminder[] };
+export type Countdown = ReturnType<typeof countdown>;
+export type ExamCenter = { exam: Exam; course: Course; countdown: Countdown; topics: Topic[]; readiness: ReturnType<typeof readiness>; covered: Topic[]; remaining: Topic[];
+  pastPapers: CourseLink[]; resources: CourseLink[]; notes: CourseLink[]; saved: CourseLink[]; decks: Deck[]; dueCards: number; tasks: Task[]; sessions: StudySession[]; reminders: Reminder[] };
+export type HistoryRow = { courseId: string | null; course: string; sessions: number; minutes: number; topics: number; reviews: number };
+type LinkModule = 'notes' | 'files' | 'saved';
+
+/** Study Engine (window.classroom.study). */
+export type StudyApi = {
+  courses(): Promise<CourseView[]>;
+  createCourse(a: { name: string; code?: string; instructor?: string; term?: string; schedule?: string; clanId?: string | null }): Promise<Course>;
+  updateCourse(id: string, a: Partial<{ name: string; code: string; instructor: string; term: string; schedule: string; clanId: string | null }>): Promise<Course>;
+  archiveCourse(id: string): Promise<void>;
+  linkClassrooms(): Promise<number>;
+  course(id: string): Promise<CourseDetail>;
+  addTopic(courseId: string, title: string): Promise<Topic>;
+  renameTopic(id: string, title: string): Promise<void>;
+  moveTopic(id: string, index: number): Promise<void>;
+  removeTopic(id: string): Promise<void>;
+  setConfidence(id: string, state: TopicState): Promise<void>;
+  addLecture(courseId: string, a: { title: string; at?: number | null; topicIds?: string[] }): Promise<Lecture>;
+  setLecture(id: string, a: { status?: Lecture['status']; title?: string; at?: number | null }): Promise<void>;
+  link(courseId: string, a: { module: LinkModule; entityId: string; topicId?: string | null; lectureId?: string | null; kind?: ResourceKind | null }): Promise<CourseLink>;
+  unlink(id: string): Promise<void>;
+  classify(id: string, kind: ResourceKind): Promise<void>;
+  importFiles(courseId: string, a?: { topicId?: string | null; lectureId?: string | null; kind?: ResourceKind }): Promise<number>;
+  linkable(): Promise<Record<LinkModule, { id: string; title: string }[]>>;
+  tasks(a?: { courseId?: string; open?: boolean }): Promise<Task[]>;
+  createTask(a: { title: string; description?: string; courseId?: string | null; topicId?: string | null; clanId?: string | null; dueAt?: number | null; priority?: Task['priority']; checklist?: string[] }): Promise<Task>;
+  updateTask(id: string, a: Partial<{ title: string; description: string; dueAt: number | null; priority: Task['priority'] }>): Promise<Task>;
+  taskStatus(id: string, s: TaskStatus): Promise<Task>;
+  checkItem(id: string, itemId: string, done: boolean): Promise<void>;
+  addItem(id: string, text: string): Promise<void>;
+  attachToTask(id: string, module: LinkModule, entityId: string): Promise<void>;
+  exams(): Promise<(Exam & { countdown: Countdown })[]>;
+  createExam(a: { courseId: string; name: string; at: number; location?: string; topicIds?: string[]; notes?: string }, reminders: (7 | 1)[]): Promise<Exam>;
+  updateExam(id: string, a: Partial<{ name: string; at: number; location: string; topicIds: string[]; notes: string }>): Promise<Exam>;
+  examStatus(id: string, s: ExamStatus, result?: { grade?: string; total?: string; reflection?: string }): Promise<Exam>;
+  attachToExam(id: string, module: LinkModule, entityId: string): Promise<void>;
+  examCenter(id: string): Promise<ExamCenter>;
+  remind(a: { text: string; dueAt: number; target?: { module: string; id: string }; recurrence?: Recurrence }): Promise<Reminder>;
+  reminderDone(id: string): Promise<void>;
+  dismiss(id: string): Promise<void>;
+  snooze(id: string, until: number): Promise<void>;
+  removeReminder(id: string): Promise<void>;
+  reminders(): Promise<Reminder[]>;
+  today(): Promise<AgendaItem[]>;
+  range(from: number, to: number): Promise<AgendaItem[]>;
+  assignmentsSeen(clanId: string, list: unknown): Promise<void>;
+  decks(a?: { courseId?: string; examId?: string }): Promise<Deck[]>;
+  createDeck(a: { name: string; courseId?: string | null; topicId?: string | null; examId?: string | null }): Promise<Deck>;
+  addCard(deckId: string, a: { front: string; back: string; note?: string; ref?: { module: LinkModule; id: string } }): Promise<Card>;
+  editCard(id: string, a: Partial<{ front: string; back: string; note: string }>): Promise<void>;
+  removeCard(id: string): Promise<void>;
+  cards(deckId: string, offset?: number): Promise<Card[]>;
+  queue(deckId: string): Promise<Card[]>;
+  review(id: string, g: Grade): Promise<Card>;
+  dueCount(): Promise<number>;
+  activeSession(): Promise<StudySession | null>;
+  planSession(a: { courseId?: string | null; topicId?: string | null; goal?: string; at: number; minutes?: number | null }): Promise<StudySession>;
+  startSession(a: { sessionId?: string; courseId?: string | null; topicId?: string | null; goal?: string; minutes?: number | null; focus?: boolean }): Promise<StudySession>;
+  endSession(id: string, reflection?: string): Promise<StudySession>;
+  cancelSession(id: string): Promise<void>;
+  history(): Promise<HistoryRow[]>;
+};
 
 /** CLAN services (window.classroom.clan). */
 export type ClanApi = {
@@ -61,7 +137,6 @@ export type ClanApi = {
   joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null; hostName?: string | null }): Promise<void>;
   list(): Promise<Clan[]>;
   places(): Promise<ClanPlaceView[]>;
-  courses(): Promise<CourseView[]>;
   personalFiles(): Promise<FileView[]>;
   addPersonalFile(): Promise<number>;
   detail(id: string): Promise<ClanDetail>;
@@ -80,7 +155,6 @@ export type ClanApi = {
   writeDiary(a: { day: string; body: string; mood?: string | null }): Promise<DiaryEntry>;
   diaryRecent(): Promise<DiaryEntry[]>;
   remind(a: { text: string; dueAt: number; target?: { module: string; id: string } }): Promise<Reminder>;
-  reminderDone(id: string): Promise<void>;
   search(q: string): Promise<SearchHit[]>;
   rename(name: string): Promise<void>;
   privacy(): Promise<{ aiDiary: boolean }>;
@@ -115,11 +189,12 @@ export type NotifyApi = {
   on(cb: (n: DeliveredNotice) => void): () => void;
 };
 export type CaptureApi = {
-  add(i: { kind: 'note'; title?: string; body?: string } | { kind: 'link'; url: string; title?: string; note?: string; tags?: string[]; collectionId?: string } | { kind: 'text'; text: string }): Promise<InboxItem>;
+  /** `into`: file straight into one of your courses (optionally a topic) instead of the Inbox. */
+  add(i: { kind: 'note'; title?: string; body?: string } | { kind: 'link'; url: string; title?: string; note?: string; tags?: string[]; collectionId?: string } | { kind: 'text'; text: string }, into?: { courseId: string; topicId?: string | null }): Promise<InboxItem>;
   dropped(files: File[]): Promise<number>;
-  pick(): Promise<number>;
+  pick(into?: { courseId: string; topicId?: string | null }): Promise<number>;
   inbox(): Promise<InboxItem[]>;
-  file(id: string, to: { kind: 'collection'; collectionId: string } | { kind: 'clan' | 'course'; clanId: string } | { kind: 'done' }): Promise<void>;
+  file(id: string, to: { kind: 'collection'; collectionId: string } | { kind: 'clan'; clanId: string } | { kind: 'course'; courseId: string; topicId?: string | null } | { kind: 'done' }): Promise<void>;
   onAdded(cb: () => void): () => void;
 };
 
@@ -129,6 +204,7 @@ export type DesktopApi = {
   chat: ChatApi;
   notify: NotifyApi;
   capture: CaptureApi;
+  study: StudyApi;
   capabilities(): Promise<Capabilities>;
   getProfile(): Promise<OwnProfile>;
   saveProfile(p: Pick<StudentProfile, 'fullName' | 'rollNo' | 'deviceName'>): Promise<OwnProfile>;

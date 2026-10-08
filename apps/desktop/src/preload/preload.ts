@@ -10,12 +10,12 @@ const listen = <T>(channel: string, cb: (v: T) => void) => {
 const inv = (ch: string) => (...a: unknown[]) => ipcRenderer.invoke(ch, ...a);
 const api: DesktopApi = {
   clan: {
-    home: inv('clan:home'), joined: inv('clan:joined'), places: inv('clan:places'), courses: inv('study:courses'), personalFiles: inv('files:personal'), addPersonalFile: inv('files:addPersonal'), list: inv('clan:list'), detail: inv('clan:detail'),
+    home: inv('clan:home'), joined: inv('clan:joined'), places: inv('clan:places'), personalFiles: inv('files:personal'), addPersonalFile: inv('files:addPersonal'), list: inv('clan:list'), detail: inv('clan:detail'),
     notes: inv('notes:mine'), createNote: inv('notes:create'), updateNote: inv('notes:update'), removeNote: inv('notes:remove'), shareNote: inv('notes:share'),
     collections: inv('saved:collections'), savedItems: inv('saved:items'), save: inv('saved:add'), createCollection: inv('saved:collection'),
     moveSaved: inv('saved:move'), shareSaved: inv('saved:share'),
     diaryDay: inv('diary:day'), writeDiary: inv('diary:write'), diaryRecent: inv('diary:recent'),
-    remind: inv('reminders:create'), reminderDone: inv('reminders:done'), search: inv('search'),
+    remind: inv('reminders:create'), search: inv('search'),
     rename: inv('me:rename'), privacy: inv('privacy:get'), setAiDiary: inv('privacy:aiDiary'),
   } as DesktopApi['clan'],
   chat: {
@@ -33,6 +33,17 @@ const api: DesktopApi = {
     dropped: (files) => ipcRenderer.invoke('capture:dropped', files.slice(0, 20).map((f) => webUtils.getPathForFile(f)).filter(Boolean)),
     onAdded: (cb) => listen('capture:added', () => cb()),
   } as DesktopApi['capture'],
+  study: {
+    courses: inv('study:courses'), createCourse: inv('study:createCourse'), updateCourse: inv('study:updateCourse'), archiveCourse: inv('study:archiveCourse'), linkClassrooms: inv('study:linkClassrooms'),
+    course: inv('study:course'), addTopic: inv('study:addTopic'), renameTopic: inv('study:renameTopic'), moveTopic: inv('study:moveTopic'), removeTopic: inv('study:removeTopic'), setConfidence: inv('study:confidence'),
+    addLecture: inv('study:addLecture'), setLecture: inv('study:setLecture'), link: inv('study:link'), unlink: inv('study:unlink'), classify: inv('study:classify'), importFiles: inv('study:importFiles'), linkable: inv('study:linkable'),
+    tasks: inv('tasks:list'), createTask: inv('tasks:create'), updateTask: inv('tasks:update'), taskStatus: inv('tasks:status'), checkItem: inv('tasks:check'), addItem: inv('tasks:addItem'), attachToTask: inv('tasks:attach'),
+    exams: inv('exams:list'), createExam: inv('exams:create'), updateExam: inv('exams:update'), examStatus: inv('exams:status'), attachToExam: inv('exams:attach'), examCenter: inv('exams:center'),
+    remind: inv('reminders:create'), reminderDone: inv('reminders:done'), dismiss: inv('reminders:dismiss'), snooze: inv('reminders:snooze'), removeReminder: inv('reminders:remove'), reminders: inv('reminders:upcoming'),
+    today: inv('study:today'), range: inv('study:range'), assignmentsSeen: inv('study:assignmentsSeen'),
+    decks: inv('cards:decks'), createDeck: inv('cards:createDeck'), addCard: inv('cards:add'), editCard: inv('cards:edit'), removeCard: inv('cards:remove'), cards: inv('cards:list'), queue: inv('cards:queue'), review: inv('cards:review'), dueCount: inv('cards:dueCount'),
+    activeSession: inv('session:active'), planSession: inv('session:plan'), startSession: inv('session:start'), endSession: inv('session:end'), cancelSession: inv('session:cancel'), history: inv('session:history'),
+  } as DesktopApi['study'],
   capabilities: () => ipcRenderer.invoke('caps'),
   getProfile: () => ipcRenderer.invoke('profile:get'),
   saveProfile: (p) => ipcRenderer.invoke('profile:save', p),

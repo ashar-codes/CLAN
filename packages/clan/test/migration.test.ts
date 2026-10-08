@@ -77,7 +77,7 @@ describe('classroom → CLAN migration', () => {
     const { app } = setup({ db: L.db, storageDir: storage });
     const created = () => (L.db.prepare("SELECT count(*) n FROM core_events WHERE type = 'CLANCreated'").get() as { n: number }).n;
     expect(created()).toBe(2);
-    expect(app.syncClassrooms()).toEqual({ clans: 0, sessions: 0, members: 0, files: 0 });
+    expect(app.syncClassrooms()).toEqual({ courses: 0, clans: 0, sessions: 0, members: 0, files: 0 });
     // reopening the same database (app restart) changes nothing
     setup({ db: L.db, storageDir: storage });
     expect(created()).toBe(2);
@@ -115,5 +115,28 @@ describe('classroom → CLAN migration', () => {
     expect(() => member.app.clans.recordJoined({ id: randomUUID(), type: 'PERSONAL' as never, name: 'x', hostDeviceId: 'h', hostName: 'h', me: member.app.me })).toThrow();
     member.app.clans.archive(sg.id);
     expect(member.app.clans.list(member.app.me)).toEqual([]); // ended CLAN leaves My CLANs
+  });
+});
+
+describe('Classroom → Course', () => {
+  it('each CLASSROOM CLAN gets one linked Course (idempotent, references only); its assignments are projected, never copied into Tasks', () => {
+    const storage = tmp();
+    const L = legacyDb(storage);
+    const { app } = setup({ db: L.db, storageDir: storage });
+    const me = { kind: 'user' as const, userId: app.me };
+    const courses = app.courses.list(me);
+    expect(courses.map((c) => [c.name, c.clanId]).sort()).toEqual([['Databases', L.s3], ['Operating Systems', L.s1]]);
+    expect(app.syncClassrooms().courses).toBe(0);
+    // reopening the same database changes nothing
+    expect(setup({ db: L.db, storageDir: storage }).app.courses.list(me)).toHaveLength(2);
+    // the host sees its classroom assignment through the course; nothing is duplicated
+    const os = app.courses.forClan(me, L.s1)!;
+    expect(app.assignments.list(me, { clanId: os.clanId! })).toMatchObject([{ id: L.asg, title: 'Lab 1', role: 'host', submitted: 1 }]);
+    expect(app.tasks.list(me)).toEqual([]);
+    expect(app.courses.links(me, os.id)).toEqual([]); // the CLAN's files stay in the CLAN until the student links them
+    // an archived course is not recreated
+    app.courses.archive(me, os.id);
+    expect(app.syncClassrooms().courses).toBe(0);
+    expect(app.courses.list(me).map((c) => c.name)).toEqual(['Databases']);
   });
 });

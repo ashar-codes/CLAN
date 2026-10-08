@@ -6,22 +6,7 @@ import type { Principal, Scope } from '../core/permissions.ts';
 
 // Chat is a real module now: modules/chat (and the wire types in @classroom/protocol chat.ts).
 
-// Tasks
-export type Task = { id: string; ownerId: string; scope: Scope; title: string; dueAt: number | null; doneAt: number | null; ref?: { module: string; id: string } };
-export interface TasksModule { list(p: Principal, scope: Scope): Task[]; create(p: Principal, t: Omit<Task, 'id' | 'doneAt'>): Task }
-
-// Courses (a CLASSROOM CLAN can be linked to one Course; lectures are the floors of the campus building)
-export type Course = { id: string; code: string; name: string; term: string | null; clanId: string | null; lectures: { id: string; title: string; at: number | null }[] };
-export interface CoursesModule { mine(p: Principal): Course[] }
-
-// Exams
-export type Exam = { id: string; courseId: string | null; title: string; at: number; place: string | null; topics: { name: string; confidence: number }[] };
-export const ExamCreated = defineEvent('ExamCreated', 1, z.object({ examId: z.string(), ownerId: z.string(), at: z.number().int() }));
-export interface ExamsModule { upcoming(p: Principal, until: number): Exam[] }
-
-// Flashcards
-export type Flashcard = { id: string; deckId: string; front: string; back: string; dueAt: number; source?: { module: string; id: string } };
-export interface FlashcardsModule { due(p: Principal, at: number): Flashcard[] }
+// Courses, Tasks, Exams, Flashcards, Reminders and Study Sessions are real modules now (see docs/STUDY.md).
 
 // Recordings (audio/video live in the Resource Store; this holds metadata + a ref)
 export type Recording = { id: string; scope: Scope; title: string; refId: string; durationMs: number; recordedAt: number };

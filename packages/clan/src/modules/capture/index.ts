@@ -10,6 +10,7 @@ import type { Clans } from '../clans/index.ts';
 import type { Files } from '../files/index.ts';
 import type { Notes } from '../notes/index.ts';
 import { SavedItemChanged, type Saved } from '../saved/index.ts';
+import type { Courses } from '../courses/index.ts';
 
 export const schema: ModuleSchema = {
   module: 'capture', prefix: 'capture',
@@ -28,14 +29,15 @@ export type CaptureInput =
   | { kind: 'link'; url: string; title?: string; note?: string; tags?: string[]; collectionId?: string }
   | { kind: 'text'; text: string }
   | { kind: 'file'; path: string; name: string; mime?: string };
-export type CaptureTarget = { kind: 'collection'; collectionId: string } | { kind: 'clan'; clanId: string } | { kind: 'course'; clanId: string } | { kind: 'done' };
+/** `course`: filed into one of your Courses (optionally a topic) as a reference — still private. */
+export type CaptureTarget = { kind: 'collection'; collectionId: string } | { kind: 'clan'; clanId: string } | { kind: 'course'; courseId: string; topicId?: string | null } | { kind: 'done' };
 export type InboxItem = { id: string; kind: CaptureInput['kind']; title: string; detail: string; module: 'notes' | 'saved' | 'files'; entityId: string; createdAt: number };
 
 type Row = { id: string; owner_id: string; kind: InboxItem['kind']; module: InboxItem['module']; entity_id: string; created_at: number };
 
 export class Capture {
-  private db: Db; private bus: EventBus; private m: { clans: Clans; files: Files; notes: Notes; saved: Saved }; private now: () => number;
-  constructor(db: Db, bus: EventBus, m: { clans: Clans; files: Files; notes: Notes; saved: Saved }, now = () => Date.now()) {
+  private db: Db; private bus: EventBus; private m: { clans: Clans; files: Files; notes: Notes; saved: Saved; courses: Courses }; private now: () => number;
+  constructor(db: Db, bus: EventBus, m: { clans: Clans; files: Files; notes: Notes; saved: Saved; courses: Courses }, now = () => Date.now()) {
     this.db = db; this.bus = bus; this.m = m; this.now = now;
     // Moving a captured link to a collection in Saved files it, wherever that happened.
     bus.subscribe('capture.saved', SavedItemChanged, (e) => {
@@ -46,7 +48,9 @@ export class Capture {
     }, { persistent: true });
   }
 
-  async capture(p: Principal, input: CaptureInput): Promise<InboxItem> {
+  /** Captures straight into a course (and topic) when given; otherwise into the Inbox. */
+  async capture(p: Principal, input: CaptureInput, into?: { courseId: string; topicId?: string | null }): Promise<InboxItem> {
+    if (into) this.m.courses.mine(p, into.courseId); // fail before creating anything
     if (p.kind !== 'user') throw new Error('Only you can capture into your Inbox.');
     let module: InboxItem['module'], entityId: string;
     switch (input.kind) {
@@ -64,6 +68,7 @@ export class Capture {
     const row = this.db.prepare('SELECT * FROM capture_items WHERE module = ? AND entity_id = ?').get(module, entityId) as Row;
     if (row.id === id) this.bus.publish(CaptureItemCreated, 'capture', { itemId: id, ownerId: p.userId, kind: input.kind });
     if (input.kind === 'link' && input.collectionId && input.collectionId !== this.m.saved.inbox(p)) this.mark(entityId, 'saved', { kind: 'collection', collectionId: input.collectionId });
+    if (into) this.file(p, row.id, { kind: 'course', ...into });
     return this.describe(row)!;
   }
 
@@ -81,10 +86,11 @@ export class Capture {
     if (to.kind === 'collection') {
       if (r.module !== 'saved') throw new Error('Collections hold links. Share notes and files into a CLAN instead.');
       this.m.saved.move(p, r.entity_id, to.collectionId);
-    } else if (to.kind === 'clan' || to.kind === 'course') {
+    } else if (to.kind === 'course') {
+      this.m.courses.link(p, to.courseId, { module: r.module, entityId: r.entity_id, topicId: to.topicId ?? null });
+    } else if (to.kind === 'clan') {
       const clan = this.m.clans.get(to.clanId);
       if (!clan || !this.m.clans.isActiveMember(clan.id, p.userId)) throw new Error('You can only file into your CLANs.');
-      if (to.kind === 'course' && clan.type !== 'CLASSROOM') throw new Error('That is not a course.');
       if (r.module === 'saved') this.m.saved.share(p, r.entity_id, clan.id);
       else if (r.module === 'notes') this.m.notes.share(p, r.entity_id, clan.id);
       else this.m.files.share(p, r.entity_id, { kind: 'clan', clanId: clan.id });

@@ -5,6 +5,8 @@ import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type Dire
 import { ClassContent } from './ClassContent';
 import { ChatSection, useMobileChat } from './Chat';
 import { InboxCard } from './Inbox';
+import { StudyScreen } from './study/Study';
+import { recordAssignments } from './study/store';
 import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
 import { opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
@@ -27,6 +29,7 @@ export default function App() {
   const [profile, setProfile] = useState<OwnProfile | null>(null);
   const [editing, setEditing] = useState(false);
   const [joined, setJoined] = useState<PairedJoin | null>(null);
+  const [studying, setStudying] = useState(false);
 
   useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); }); }, []);
   if (!profile) return null;
@@ -37,10 +40,12 @@ export default function App() {
       <KeyboardAvoidingView style={s.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {editing ? (
           <ProfileForm c={c} initial={profile} onSaved={(p) => { setProfile(p); setEditing(false); }} />
+        ) : studying ? (
+          <StudyScreen c={c} onBack={() => setStudying(false)} />
         ) : joined ? (
           <InClass c={c} joined={joined} onLeave={() => setJoined(null)} />
         ) : (
-          <JoinScreen c={c} profile={profile as StudentProfile} onJoined={setJoined} onEdit={() => setEditing(true)} />
+          <JoinScreen c={c} profile={profile as StudentProfile} onJoined={setJoined} onEdit={() => setEditing(true)} onStudy={() => setStudying(true)} />
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -72,7 +77,7 @@ function ProfileForm({ c, initial, onSaved }: { c: C; initial: OwnProfile; onSav
   );
 }
 
-function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentProfile; onJoined(j: PairedJoin): void; onEdit(): void }) {
+function JoinScreen({ c, profile, onJoined, onEdit, onStudy }: { c: C; profile: StudentProfile; onJoined(j: PairedJoin): void; onEdit(): void; onStudy(): void }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -129,6 +134,7 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
         </View>
       )}
       <Button c={c} primary label={busy ? 'Joining…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
+      <Button c={c} label="My study: courses, tasks, exams, cards" onPress={onStudy} />
       <InboxCard c={c} />
       <Text style={{ color: c.muted, marginTop: 24 }}>
         {found.length ? `Nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for CLANs on this Wi-Fi… Make sure you are on the same network as the host. Internet is not needed.'}
@@ -176,7 +182,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') setStatus(m.status);
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
-        if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
+        if (m.t === 'assignments') { setAssignments(m.assignments as StudentAssignmentView[]); if (joined.classroom.clanType === 'CLASSROOM') recordAssignments(joined.classroom.clanId ?? joined.classroom.sessionId, joined.classroom.title, m.assignments as StudentAssignmentView[]); }
         if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
         if (m.t === 'presentation') setPresenting(m.state);
       },

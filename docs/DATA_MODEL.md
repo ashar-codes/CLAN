@@ -71,7 +71,7 @@ them in `expo-secure-store`. Session tokens are held in memory only.
 | Resource | `resources_objects` + `resources_refs` | content once (SHA-256); uses are refs with a scope |
 | Note | `notes_notes` (+ `notes_shares` references) | |
 | SavedItem / SavedCollection | `saved_items` / `saved_collections` (+ `saved_shares`) | links + metadata only |
-| Reminder | `reminders_reminders` | target = (module, id) reference |
+| Reminder | `reminders_reminders` | target = (module, id) reference; `recurrence` none/daily/weekly/monthly from `anchor_at`; `snoozed_until` delays one occurrence; `fired_at` = last occurrence rung |
 | Diary entry | `diary_entries` | owner only |
 | AIContextReference | not stored | returned by the ContextBroker |
 | Thread | `chat_threads` | per **CLAN** (not session): one group thread, direct threads by sorted handle pair; host-authoritative, cached on members |
@@ -79,9 +79,17 @@ them in `expo-secure-store`. Session tokens are held in memory only.
 | Reaction / ReadCursor | `chat_reactions` (PK message, person, reaction) / `chat_cursors` (delivered, read per person) | MessageRecipient = the direct pair + cursors |
 | Outbox | `chat_outbox` | sender device: unacknowledged sends, re-sent with the same id |
 | Capture item | `capture_items` | Inbox pointer to a note / saved link / file ref; `filed_at`, `filed_to` |
-| Notice | `notify_notices`, `notify_prefs` | this device's notices (participants only) and preferences |
+| Notice | `notify_notices`, `notify_prefs`, `notify_sent` | this device's notices (participants only), preferences, and one key per notified occurrence (ticks are idempotent) |
 | Person-scoped file | `resources.audience` (+ `shared_by`, server migration 7) | NULL = the CLAN table; JSON chat handles = only them. `share_uploads` = members' resumable shares |
-| Course, Exam, Task, Recording | — | contracts only (`modules/contracts.ts`) |
+| Course | `courses_courses` | the student's own; optional `clan_id` → a CLASSROOM CLAN (UNIQUE per owner; archived ones are not recreated) |
+| Topic / Lecture | `courses_topics` (explicit `position`, own `confidence`) / `courses_lectures` (+ `courses_lecture_topics`, optional classroom `session_id`) | |
+| Course reference | `courses_links` | (module notes/files/saved, entity id, optional topic/lecture, file `kind` incl. `past_paper`); one per placement (unique index over coalesced topic/lecture). Never content |
+| Task | `tasks_tasks` (+ `tasks_checklist`, `tasks_refs`) | optional course/topic/CLAN; status todo/in_progress/done/cancelled |
+| Exam | `exams_exams` (+ `exams_topics` scope, `exams_refs`) | grade/total/reflection only when the student enters them |
+| Flashcards | `flashcards_decks`, `flashcards_cards` (SM-2 state), `flashcards_reviews` (every answer) | see FLASHCARDS.md |
+| Study session | `study_sessions` | planned/active/ended/cancelled, start/end, goal, reflection. Nothing else is recorded |
+| Classroom assignment (projection) | host: classroom `assignments`/`submissions` (read-only); member: `assign_seen` | replaced wholesale by each host list; never a Task |
+| Recording | — | contract only (`modules/contracts.ts`) |
 | Search index | `search_docs` | projection; `SearchIndex.rebuild()` recreates it from module providers |
 | Event log | `core_events`, `core_consumed` | append-only; consumer progress |
 
