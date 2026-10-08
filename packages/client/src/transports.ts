@@ -22,12 +22,33 @@ export interface PeerDiscovery {
   peersFor(resourceId: string): Promise<{ fingerprint: string; url: string; endorsement: PeerEndorsement; have: string }[]>;
 }
 
-/** Placeholder for Milestone 4 (screen sharing). Topology is the transport's business: local SFU on the teacher,
- *  an elected relay peer, or several relays. Publishing rights still come from the teacher (control plane). */
+/** Screen-share quality profiles: classroom content favours sharpness (text, slides, code) over motion. */
+export type ScreenProfile = 'auto' | 'text' | 'motion';
+export const SCREEN_PROFILES: Record<ScreenProfile, { maxWidth: number; maxHeight: number; fps: number; maxBitrate: number; contentHint: 'detail' | 'motion'; keepResolution: boolean }> = {
+  text: { maxWidth: 1920, maxHeight: 1080, fps: 8, maxBitrate: 2_500_000, contentHint: 'detail', keepResolution: true },
+  motion: { maxWidth: 1280, maxHeight: 720, fps: 30, maxBitrate: 3_000_000, contentHint: 'motion', keepResolution: false },
+  auto: { maxWidth: 1920, maxHeight: 1080, fps: 15, maxBitrate: 3_000_000, contentHint: 'detail', keepResolution: true },
+};
+export type MediaQuality = 'good' | 'fair' | 'poor' | 'unknown';
+export type MediaDiagnostics = { transport: string; codec: string | null; width: number | null; height: number | null; fps: number | null; bitrateKbps: number | null; packetsLost: number | null; rttMs: number | null; layer: string | null };
+/** A received screen, attachable to the room wall. */
+export type ScreenView = { attach(el: HTMLMediaElement): void; detach(el: HTMLMediaElement): void; hasAudio: boolean };
+
+/**
+ * Real-time media for a CLAN (screen sharing now; voice/whiteboard later). Implementations own the topology — today a
+ * host-local SFU. Product code depends only on this interface; publishing rights come from the host (control plane).
+ */
 export interface MediaTransport {
-  readonly topology: 'teacher-sfu' | 'relay-peer' | 'multi-relay';
-  publish(track: unknown, opts: { maxBitrate?: number }): Promise<{ stop(): void }>;
-  subscribe(publisherId: string): Promise<{ stop(): void }>;
+  readonly topology: 'host-sfu';
+  connect(o: { url: string; token: string }): Promise<void>;
+  publishScreen(stream: MediaStream, profile: ScreenProfile): Promise<void>;
+  replaceScreen(stream: MediaStream): Promise<void>;
+  unpublishScreen(): Promise<void>;
+  onScreen(cb: (view: ScreenView | null, presenterIdentity: string | null) => void): () => void;
+  onState(cb: (s: 'connected' | 'reconnecting' | 'disconnected') => void): () => void;
+  quality(): MediaQuality;
+  diagnostics(): Promise<MediaDiagnostics>;
+  disconnect(): Promise<void>;
 }
 
 /** What students see ("Excellent/Good/Poor/Disconnected") and what scheduling may use. */

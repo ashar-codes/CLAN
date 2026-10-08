@@ -30,7 +30,7 @@ export interface FlashcardsModule { due(p: Principal, at: number): Flashcard[] }
 export type Recording = { id: string; scope: Scope; title: string; refId: string; durationMs: number; recordedAt: number };
 export interface RecordingsModule { list(p: Principal, scope: Scope): Recording[] }
 
-// Screen share + Whiteboard (live sessions in a CLAN or study room; media goes through the classroom MediaTransport)
+// Whiteboard (live in a CLAN room; same wall surface as screen sharing). Screen sharing itself: modules/screenshare.
 export type ScreenShareSession = { id: string; clanId: string; presenterId: string; startedAt: number; endedAt: number | null };
 export type WhiteboardStroke = { id: string; boardId: string; authorId: string; points: [number, number][]; color: string; width: number };
 export interface ScreenShareModule { active(p: Principal, clanId: string): ScreenShareSession | null }

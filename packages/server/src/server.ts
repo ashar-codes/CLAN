@@ -21,6 +21,9 @@ import { Assignments } from './assignments.ts';
 import { Resources } from './resources.ts';
 import { ApiError, contentDisposition, DEFAULT_LIMITS, parseRange, RateLimit, Storage, UUID_RE, type Limits } from './storage.ts';
 import { Classroom, JoinError, type ClanSession, type NetworkMode, type Principal } from './classroom.ts';
+import { MediaService } from './media.ts';
+import { mediaIdentity, Presentations } from './presentation.ts';
+import { WebSocket as UpstreamSocket } from 'ws';
 import { openDb, type Db } from './db.ts';
 import { advertise } from './discovery.ts';
 
@@ -30,6 +33,8 @@ export type ServerOptions = {
   clan?: ClanSession;
   /** Host's canonical display name; members see it only after pairing (never in discovery). */
   hostName?: string;
+  /** Local SFU for screen sharing (desktop host: bundled livekit-server). Omitted → screen sharing unavailable. */
+  media?: { binary: string; workDir: string; presenterGraceMs?: number };
   /** Direct network credentials: released, sealed, only inside a completed OPAQUE exchange. */
   direct?: Omit<DirectPackage, 'v' | 'sessionId' | 'bootstrapPort'>;
   /** Interface address to bind. Never 0.0.0.0 in the product: bind only the classroom interface. */
@@ -68,6 +73,8 @@ export type RunningServer = {
   tls: { certificate: string; spkiSha256: string; notAfter: number };
   teacherPublicKey: string;
   resources: Resources;
+  presentations: Presentations;
+  media: MediaService | null;
   assignments: Assignments;
   storage: Storage;
   port: number;
@@ -103,6 +110,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   await storage.init();
   const resources = new Resources(db, classroom, storage, limits, signer);
   const peers = new PeerRegistry(classroom, signer);
+  const media = opts.media ? new MediaService({ binary: opts.media.binary, host: opts.host, workDir: opts.media.workDir }) : null;
+  const presentations = new Presentations(db, classroom, media, { hostName: opts.hostName, graceMs: opts.media?.presenterGraceMs });
   const assignments = new Assignments(db, classroom, storage, limits, signer);
   await resources.sweepRemoved();
   await assignments.sweep();
@@ -281,6 +290,39 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     return { peerAssist: on, sources: on ? peers.sources(id, me) : [], swarm: on ? peers.swarm(me) : 0 };
   });
 
+  // Media credential: only after normal CLAN authentication; scoped to this session's random room and this member.
+  app.post('/api/media/token', async (req) => {
+    const p = auth(req);
+    if (!media) throw new ApiError(503, 'media_unavailable', 'Screen sharing is not available on this host.');
+    const identity = mediaIdentity(p);
+    const name = p.role === 'teacher' ? (opts.hostName ?? 'Host') : classroom.member(p.memberId)!.fullName;
+    try {
+      const t = await media.token({ identity, name, canPublish: presentations.current?.identity === identity });
+      return { token: t.token, identity, expiresAt: t.expiresAt, codec: media.codec };
+    } catch (e) { throw new ApiError(503, 'media_unavailable', (e as Error).message); }
+  });
+  // LiveKit signalling, carried inside the pinned CLAN TLS channel to the loopback-only SFU.
+  app.register(async (scope) => {
+    scope.route({
+      method: 'GET', url: '/media/*',
+      handler: async (req, reply) => {
+        if (media?.state !== 'ready') return reply.code(503).send({ code: 'media_unavailable' });
+        const r = await fetch(`http://127.0.0.1:${new URL(media.signalUrl).port}${req.url.slice('/media'.length)}`).catch(() => null);
+        return reply.code(r?.status ?? 502).send(r ? await r.text() : '');
+      },
+      wsHandler: (ws, req) => {
+        if (media?.state !== 'ready') return ws.close(1013, 'media unavailable');
+        const up = new UpstreamSocket(media.signalUrl + req.url.slice('/media'.length));
+        const queue: unknown[] = [];
+        up.on('open', () => { for (const m of queue.splice(0)) up.send(m as Buffer); });
+        up.on('message', (d, bin) => { if (ws.readyState === ws.OPEN) ws.send(d, { binary: bin }); });
+        ws.on('message', (d: Buffer, bin: boolean) => { if (up.readyState === up.OPEN) up.send(d, { binary: bin }); else queue.push(d); });
+        const end = () => { if (up.readyState <= 1) up.close(); if (ws.readyState <= 1) ws.close(); };
+        up.on('close', end); up.on('error', end); ws.on('close', end); ws.on('error', end);
+      },
+    });
+  });
+
   app.get('/api/assignments', async (req) => {
     const p = auth(req);
     return { assignments: p.role === 'teacher' ? assignments.listForTeacher() : assignments.listForStudent(p.memberId) };
@@ -365,6 +407,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   // Removal/blocking revokes the peer role and tells every peer to refuse that device from now on.
   classroom.on('member', (memberId: string, status: string) => {
     if (status === 'approved') return;
+    void presentations.removed(memberId); // stops their presentation and drops their media connection now
     const fp = peers.revoke(memberId);
     if (fp) for (const [ws, p] of sockets) if (p.role === 'student') send(ws, { t: 'peer.revoked', fingerprints: [fp] });
   });
@@ -373,13 +416,19 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   classroom.on('state', () => {
     const info = classroom.info();
     toAll({ t: 'class.state', classroom: info });
-    if (info.ended) for (const ws of sockets.keys()) ws.close(WS_CLOSE.ended, 'class ended');
+    if (info.ended) { void presentations.end().then(() => media?.close()); for (const ws of sockets.keys()) ws.close(WS_CLOSE.ended, 'class ended'); }
   });
+  // Presentation control state to everyone; pending requests only to those who may decide on them.
+  const presentationMsg = (p: Principal): ServerMessage => ({ t: 'presentation', state: presentations.view(), policy: presentations.policy, mine: presentations.mine(p),
+    requests: classroom.can(p, 'MANAGE_PRESENTERS') ? [...presentations.requests.keys()].map((memberId) => ({ memberId, name: classroom.member(memberId)?.fullName ?? 'Someone' })) : [] });
+  presentations.on('state', () => { for (const [ws, p] of sockets) if (p.role === 'teacher' || classroom.status(p.memberId) === 'approved') send(ws, presentationMsg(p)); });
+  media?.on('failed', () => { void presentations.stop('media_failed'); });
   classroom.on('member', (memberId: string, status: string) => {
     for (const [ws, p] of sockets) {
       if (p.role !== 'student' || p.memberId !== memberId) continue;
       send(ws, { t: 'member.status', status: status as never });
       if (status !== 'approved') ws.close(WS_CLOSE.removed, status);
+      else send(ws, presentationMsg(p)); // what they may do changed (e.g. Present appears once approved)
     }
   });
 
@@ -412,7 +461,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
             send(ws, { t: 'timeline', events: classroom.timeline() });
           }
           schedule();
-          if (memberId) classroom.connected(memberId, true);
+          if (memberId) { classroom.connected(memberId, true); presentations.presence(memberId, true); }
+          send(ws, presentationMsg(principal));
           return;
         }
 
@@ -445,6 +495,13 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
             case 'assignment.create': return void assignments.create(msg.assignment);
             case 'assignment.close': return assignments.close(msg.assignmentId);
             case 'class.peerAssist': return classroom.setPeerAssist(msg.enabled);
+            case 'present.request': return presentations.request(principal);
+            case 'present.approve': return presentations.approve(msg.memberId);
+            case 'present.decline': return presentations.decline(msg.memberId);
+            case 'present.policy': return presentations.setPolicy(msg.policy);
+            case 'present.start': return void presentations.start(principal, msg).catch(fail);
+            case 'present.source': return presentations.source(principal, msg);
+            case 'present.stop': return void presentations.stopBy(principal, msg.presentationId).catch(fail);
             case 'peer.probeResult': {
               if (!probe || probe.id !== msg.probeId || probe.memberId !== (principal as { memberId: string }).memberId || msg.tried === 0) return;
               clearTimeout(probe.timer); probe = null;
@@ -461,7 +518,10 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
         clearTimeout(authTimer);
         const p = sockets.get(ws);
         sockets.delete(ws);
-        if (p?.role === 'student' && !shuttingDown) classroom.connected(p.memberId, false);
+        if (p?.role === 'student' && !shuttingDown) {
+          classroom.connected(p.memberId, false);
+          presentations.presence(p.memberId, classroom.roster().some((m) => m.id === p.memberId && m.connected));
+        }
       });
     });
   });
@@ -484,6 +544,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     assignments,
     storage,
     peers,
+    presentations,
+    media,
     port,
     url: `https://${hostPart}:${httpsPort}`,
     bootstrapUrl: `http://${hostPart}:${port}`,
@@ -509,12 +571,14 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     teacherPublicKey,
     async close() {
       await stopAdvertising?.();
+      await presentations.end();
       classroom.end();
       shuttingDown = true;
       clearInterval(statsTimer);
       clearTimeout(certTimer);
       if (pending) clearTimeout(pending);
       pairing.destroy();
+      await media?.close();
       await Promise.all([app.close(), boot.close()]);
       classroom.removeAllListeners();
       if (!opts.db) db.close();

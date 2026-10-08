@@ -18,6 +18,8 @@ import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroo
 import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
 import { DesktopDirect } from './direct.ts';
+import { mediaBinary, mediaWorkDir, registerScreen } from './screen.ts';
+import { ScreenShareEvents } from '@clan/core';
 import { connect as tcpConnect } from 'node:net';
 import { decodeDirectQr } from '@classroom/protocol';
 import { TransferError } from '@classroom/client';
@@ -147,6 +149,18 @@ function registerIpc() {
     })));
     return { tried: targets.length, reachable: ok.filter(Boolean).length };
   });
+  /** Media credential via the pinned CLAN channel (renderer HTTP has no CORS to the host, by design). */
+  ipcMain.handle('media:token', async (_e, raw: unknown) => {
+    const c = z.object({ url: z.string().regex(/^https:\/\/[\w.:[\]-]+$/), token: z.string().min(16).max(128), sessionId: z.uuid() }).parse(raw);
+    const own = server && server.url === c.url && server.classroom.id === c.sessionId;
+    const tr = own ? pinnedTransport({ certificate: server!.tls.certificate, spkiSha256: server!.tls.spkiSha256 }) : trust.session(c.sessionId)?.transport;
+    const base = own ? server!.url : trust.session(c.sessionId)?.url;
+    if (!tr || !base) throw new Error('Not connected to that CLAN.');
+    const r = await tr.fetch(`${base}/api/media/token`, { method: 'POST', headers: { authorization: `Bearer ${c.token}` } });
+    const b = await r.json().catch(() => ({})) as { token?: string; message?: string };
+    if (!r.ok || !b.token) throw new Error(b.message ?? 'Screen sharing is unavailable.');
+    return { token: b.token };
+  });
   ipcMain.handle('direct:availability', () => direct.availability());
   ipcMain.handle('direct:status', async () => (server && direct.net?.active ? { ...(await direct.net.status()), connected: server.classroom.roster().filter((m) => m.connected).length, p2p: server.classroom.p2p } : null));
   ipcMain.handle('direct:qr', async () => { if (!server) throw new Error('No active CLAN.'); return direct.qr(server); });
@@ -194,9 +208,17 @@ function registerIpc() {
     const hostName = loadProfile().fullName || (named && named !== 'Me' ? named : undefined);
     try {
       server = await startClassroomServer({ title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: a.connectivity === 'direct' ? 'direct' : 'lan', identity: await trust.teacherIdentity(),
-        clan: { type, id: clanId, description: a.description, expiresAt }, hostName,
+        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, media: { binary: mediaBinary(), workDir: mediaWorkDir() },
         direct: directNet ? { ssid: directNet.ssid, passphrase: directNet.passphrase, auth: 'WPA2', host: directNet.hostAddress, expiresAt: expiresAt ?? Date.now() + 12 * 3600_000 } : undefined });
       if (directNet) await direct.publish(server);
+      // Presentation control events onto the CLAN event bus (IDs/status only; never media).
+      const sid = server.classroom.id;
+      server.presentations.on('event', (ev: import('@classroom/server').PresentationEvent) => {
+        if (ev.type === 'PresentationStarted') clan.bus.publish(ScreenShareEvents.PresentationStarted, 'screenshare', { sessionId: sid, presentationId: ev.presentationId, presenter: ev.presenter, source: ev.source, audio: ev.audio });
+        else if (ev.type === 'PresentationSourceChanged') clan.bus.publish(ScreenShareEvents.PresentationSourceChanged, 'screenshare', { sessionId: sid, presentationId: ev.presentationId, source: ev.source, audio: ev.audio });
+        else if (ev.type === 'PresentationStopped') clan.bus.publish(ScreenShareEvents.PresentationStopped, 'screenshare', { sessionId: sid, presentationId: ev.presentationId, reason: ev.reason });
+        else if ('memberId' in ev) clan.bus.publish(ScreenShareEvents[ev.type], 'screenshare', { sessionId: sid, memberId: ev.memberId });
+      });
     } catch (err) { await server?.close(); server = null; await direct.stop(); throw err; }
     clan.syncClassrooms();
     clearTimeout(expiryTimer);
@@ -310,12 +332,14 @@ app.whenReady().then(() => {
   trust = new Trust(keystore, app.getPath('userData'));
   trust.installVerifyProc(session.defaultSession);
   // Nothing needs camera/mic/notifications yet; grant capabilities explicitly as features land.
-  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  // Only screen capture (display-capture) may be requested, and only after the user picked a source in CLAN. No mic/camera.
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'display-capture'));
   process.on('uncaughtException', (e) => logError('main', e));
   direct = new DesktopDirect();
   void direct.recover(); // a crash may have left a Direct network or firewall rules behind
   powerMonitor.on('resume', () => { void direct.net?.restart().catch((e) => logError('direct', e)); }); // same SSID/passphrase: members rejoin with their device keys
   registerIpc();
+  registerScreen();
   clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

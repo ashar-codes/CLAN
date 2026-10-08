@@ -16,13 +16,16 @@
 | diary | product | `diary_entries` | `Diary` | none (private) |
 | reminders | product | `reminders_reminders` | `Reminders` | ReminderCreated |
 | share | product | — | `Share` (Share-to-CLAN) | — |
-| chat, tasks, courses, exams, flashcards, recordings, screen share, whiteboard, ai, profile | contracts only | — | `modules/contracts.ts` | ExamCreated (defined) |
+| screenshare | product (events) | `presentations` (server migration 6: control state only, never media) | `ScreenShareEvents` | PresentationRequested, PresentationApproved, PresentationDeclined, PresentationStarted, PresentationSourceChanged, PresentationStopped |
+| chat, tasks, courses, exams, flashcards, recordings, whiteboard, ai, profile | contracts only | — | `modules/contracts.ts` | ExamCreated (defined) |
 | classroom (legacy) | `@classroom/server` | `sessions`, `members`, `resources`, `assignments`, `uploads`, `submissions`, … | server API (hosts every CLAN type) | its own `events` log |
 
 **Session capabilities** (who may do what in a live CLAN session) are in `@classroom/protocol` `capabilitiesFor(type, host|member)`
 and enforced by the host server. **CLAN types → module capabilities** (`CAPABILITIES`): CLASSROOM files/notes/chat/screenShare/assignments/teacherAuthority ·
 STUDY_GROUP and PROJECT_TEAM files/notes/chat/studyRoom/screenShare · FRIENDS files/chat · TEMPORARY files/notes/chat/expires
 (must have `expires_at`; access ends then). Code asks `clans.has(id, capability)`, never `type === …`.
+Presentation capabilities: PRESENT, REQUEST_TO_PRESENT, MANAGE_PRESENTERS (defaults in MEDIA.md). Media runs behind
+`MediaTransport`; only `renderer/world/media/livekit.ts` (client) and `server/src/media.ts` (host) know LiveKit.
 
 Adding a module: `modules/<name>/index.ts` with `schema` (prefixed tables), a service class taking its collaborators, its
 event definitions; register the schema in `SCHEMAS` and wire it in `openClan`.

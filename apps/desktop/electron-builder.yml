@@ -14,12 +14,17 @@ mac:
     NSBluetoothAlwaysUsageDescription: CLAN uses Bluetooth to find a nearby CLAN host when it runs its own network. Only pairing messages are exchanged.
   extraResources:
     - { from: ../../native/macos-ble/clan-ble, to: clan-ble }
+    # Local SFU for screen sharing: sh native/livekit/fetch.sh (builds from source on macOS)
+    - { from: "../../native/livekit/bin/darwin-${arch}/livekit-server", to: livekit-server }
 win:
   target: [nsis]
   # Built on Windows: dotnet publish native/windows-direct -c Release (see docs/WINDOWS_DIRECT_MODE.md)
   extraResources:
     - { from: ../../native/windows-direct/bin/publish/CLAN.DirectHelper.exe, to: CLAN.DirectHelper.exe }
+    - { from: "../../native/livekit/bin/win32-${arch}/livekit-server.exe", to: livekit-server.exe }
 nsis:
   include: build/installer.nsh
 linux:
   target: [AppImage]
+  extraResources:
+    - { from: "../../native/livekit/bin/linux-${arch}/livekit-server", to: livekit-server }

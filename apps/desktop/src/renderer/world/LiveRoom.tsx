@@ -4,6 +4,7 @@ import { mateFor, RoomStage, type RoomPerson } from '@clan/design';
 import type { Member, ResourceView } from '@classroom/protocol';
 import { api } from '../App.tsx';
 import { flyPacket } from './flight.ts';
+import { RoomSurface, type Presentation } from './Presentation.tsx';
 
 const KIND = (m: string) => (/pdf/.test(m) ? 'pdf' : /image/.test(m) ? 'img' : /video/.test(m) ? 'video' : /zip|compressed/.test(m) ? 'zip' : /presentation|powerpoint/.test(m) ? 'slides' : 'file');
 type Action = { label: string; enabled: boolean; why?: string; run?(): void };
@@ -27,15 +28,16 @@ function Wheel({ person, at, actions, onClose, children }: { person: RoomPerson;
 
 const LATER = (what: string) => ({ enabled: false, why: `${what} arrives in a later update` });
 
-export function HostRoom({ code, hostName, members, resources, onRemove, onBlock, onShared }: {
+export function HostRoom({ code, hostName, members, resources, onRemove, onBlock, onShared, pres, onPresent, onStopPresenter }: {
   code: string; hostName: string | null; members: Member[]; resources: { id: string; name: string; mime: string }[];
   onRemove(id: string): void; onBlock(id: string): void; onShared(msg: string): void;
+  pres: Presentation; onPresent(): void; onStopPresenter(): void;
 }) {
   const [sel, setSel] = useState<{ p: RoomPerson; at: DOMRect; m?: Member } | null>(null);
   const roster = members.filter((m) => m.status === 'approved');
   const people: RoomPerson[] = [
-    { id: 'host', name: hostName ?? 'You', spec: mateFor(hostName ?? 'host'), beacon: 'available', host: true, you: true },
-    ...roster.map((m) => ({ id: m.id, name: m.fullName, spec: mateFor(m.fullName), beacon: m.connected ? 'available' as const : 'away' as const })),
+    { id: 'host', name: hostName ?? 'You', spec: mateFor(hostName ?? 'host'), beacon: pres.live?.presenter === 'host' ? 'presenting' : 'available', host: true, you: true },
+    ...roster.map((m) => ({ id: m.id, name: m.fullName, spec: mateFor(m.fullName), beacon: pres.live?.presenter === m.id ? 'presenting' as const : m.connected ? 'available' as const : 'away' as const })),
   ];
   const drop = async (files: File[]) => {
     const table = document.querySelector('[data-testid="room-table"]'), me = document.querySelector('[data-person="host"]');
@@ -46,14 +48,16 @@ export function HostRoom({ code, hostName, members, resources, onRemove, onBlock
   return (
     <>
       <RoomStage people={people} items={resources.map((r) => ({ id: r.id, name: r.name, kind: KIND(r.mime) }))} selected={sel?.p.id}
-        wall={<div className="wall-code"><span>Join with</span><b aria-label="Join code" className="c-num">{code.slice(0, 3)} {code.slice(3)}</b><span>in the CLAN app · drop files on the table to share them</span></div>}
+        wall={<RoomSurface mode={pres.live ? 'SCREEN_SHARE' : 'DEFAULT'} screen={pres.live ? { pres, live: pres.live } : undefined}><div className="wall-code"><span>Join with</span><b aria-label="Join code" className="c-num">{code.slice(0, 3)} {code.slice(3)}</b><span>in the CLAN app · drop files on the table to share them</span></div></RoomSurface>}
         dropLabel="Drop files here to share with everyone" onDropFiles={drop}
         onPerson={(p, el) => setSel({ p, at: el.getBoundingClientRect(), m: roster.find((m) => m.id === p.id) })} />
       {sel && (
         <Wheel person={sel.p} at={sel.at} onClose={() => setSel(null)} actions={[
           { label: 'Send', ...LATER('Sending to one person'), why: 'Sending to one person arrives later — drop on the table to share with everyone' },
           { label: 'Chat', ...LATER('Chat') }, { label: 'Study', ...LATER('Study rooms') },
-          { label: 'Profile', enabled: true, run: () => {} }, { label: 'Invite', ...LATER('Inviting') }, { label: 'Screen', ...LATER('Screen sharing') },
+          { label: 'Profile', enabled: true, run: () => {} }, { label: 'Invite', ...LATER('Inviting') },
+          sel.p.id === 'host' ? { label: 'Present', enabled: !pres.presenting, run: () => { setSel(null); onPresent(); } }
+            : pres.live?.presenter === sel.p.id ? { label: 'Stop', enabled: true, run: () => { setSel(null); onStopPresenter(); } } : { label: 'Screen', enabled: false, why: 'They are not presenting' },
         ]}>
           {sel.m ? <><span className="muted small-text">{sel.m.deviceName} · {sel.m.connected ? 'connected' : 'away'}</span>
             <div className="row"><button className="small" onClick={() => { onRemove(sel.m!.id); setSel(null); }}>Remove</button><button className="small danger" onClick={() => { onBlock(sel.m!.id); setSel(null); }}>Block</button></div></>
@@ -64,15 +68,16 @@ export function HostRoom({ code, hostName, members, resources, onRemove, onBlock
   );
 }
 
-export function MemberRoom({ hostName, hostLabel, people, resources }: {
+export function MemberRoom({ hostName, hostLabel, people, resources, pres, presenterName }: {
   hostName: string | null; hostLabel: string; people: { name: string; host: boolean; connected: boolean }[] | null; resources: ResourceView[];
+  pres: Presentation; presenterName: string | null;
 }) {
   const [arrived, setArrived] = useState<string | null>(null);
   const [youName, setYou] = useState('You');
   useEffect(() => { api.getProfile().then((p) => p.fullName && setYou(p.fullName)).catch(() => {}); }, []);
   const seen = useRef(new Set<string>());
   const list: RoomPerson[] = (people && people.length ? people : [{ name: hostName ?? hostLabel, host: true, connected: true }, { name: youName, host: false, connected: true }])
-    .map((p, i) => ({ id: p.host ? 'host' : p.name === youName ? 'you' : `m${i}`, name: p.host ? (hostName ?? p.name) : p.name, spec: mateFor(p.host ? (hostName ?? 'host') : p.name), beacon: p.connected ? 'available' : 'away', host: p.host, you: !p.host && p.name === youName }));
+    .map((p, i) => ({ id: p.host ? 'host' : p.name === youName ? 'you' : `m${i}`, name: p.host ? (hostName ?? p.name) : p.name, spec: mateFor(p.host ? (hostName ?? 'host') : p.name), beacon: pres.live && (p.host ? pres.live.presenter === 'host' : p.name === presenterName) ? 'presenting' : p.connected ? 'available' : 'away', host: p.host, you: !p.host && p.name === youName }));
   useEffect(() => api.onFileState((s) => {
     const r = resources.find((x) => x.id === s.resourceId);
     if (!r) return;
@@ -86,7 +91,7 @@ export function MemberRoom({ hostName, hostLabel, people, resources }: {
   return (
     <>
       <RoomStage people={list} items={resources.map((r) => ({ id: r.id, name: r.name, kind: KIND(r.mime) }))}
-        wall={<div className="wall-msg"><b>{hostName ? `${hostName}’s room` : 'The room'}</b><span>{arrived ?? `The wall shows the ${hostLabel.toLowerCase()}’s screen or a whiteboard when those arrive.`}</span></div>} />
+        wall={<RoomSurface mode={pres.live ? 'SCREEN_SHARE' : 'DEFAULT'} screen={pres.live ? { pres, live: pres.live } : undefined}><div className="wall-msg"><b>{hostName ? `${hostName}’s room` : 'The room'}</b><span>{arrived ?? `When someone presents, their screen appears on this wall.`}</span></div></RoomSurface>} />
     </>
   );
 }

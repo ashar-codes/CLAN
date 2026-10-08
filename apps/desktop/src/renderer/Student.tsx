@@ -5,6 +5,8 @@ import type { Joined, OwnProfile } from '../shared.ts';
 import { StudentAssignments, StudentFiles as FilesCard } from './Files.tsx';
 import { api } from './App.tsx';
 import { MemberRoom } from './world/LiveRoom.tsx';
+import { RoomSurface, usePresentation, type PresentationMsg } from './world/Presentation.tsx';
+import { RoomPresentation } from './world/RoomPresentation.tsx';
 import { useExperience } from './world/experience.ts';
 
 type Names = { fullName: string; rollNo: string; deviceName: string };
@@ -115,6 +117,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [pushed, setPushed] = useState<string | null>(null);
   const [can, setCan] = useState<ClanCapability[]>([]);
   const experience = useExperience();
+  const [presMsg, setPresMsg] = useState<PresentationMsg | null>(null);
+  const presRef = useRef<ReturnType<typeof usePresentation> | null>(null);
   const [people, setPeople] = useState<{ name: string; host: boolean; connected: boolean }[]>([]);
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
   const revoked = useRef<string[]>([]);
@@ -127,6 +131,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       onMessage: (m) => {
         if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
         if (m.t === 'members') setPeople(m.members);
+        if (m.t === 'presentation') setPresMsg(m);
+        if (m.t === 'error' && ['busy', 'forbidden', 'media_unavailable', 'not_presenting'].includes(m.code)) void presRef.current?.refused(m.message);
         if (m.t === 'peer.probe') void api.peerProbe(m.targets).then((r) => connRef.current?.send({ t: 'peer.probeResult', probeId: m.probeId, ...r })).catch(() => {});
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: [] }); } // register the peer server as soon as we're in
@@ -158,6 +164,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
     if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt, hostName: info.hostName }).catch(() => {});
   }, [status, info.sessionId, info.clanId, info.clanType, info.title, info.expiresAt, joined.teacherPublicKey]);
   const L = clanLabels(info.clanType);
+  const pres = usePresentation({ baseUrl: session.url, bearer: session.token, sessionId: info.sessionId, msg: presMsg, send: (m) => connRef.current?.send(m), me: session.memberId });
+  presRef.current = pres;
 
   const over = info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
     : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
@@ -190,7 +198,9 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.hostName && <p className="muted small-text" data-testid="host-name">Hosted by {info.hostName}</p>}{info.description && <p className="muted small-text">{info.description}</p>}</div>
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>
       </header>
-      {experience !== 'minimal' && <MemberRoom hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : null} resources={resources} />}
+      <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost={false} />
+      {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}
+      {experience !== 'minimal' && <MemberRoom pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : null} resources={resources} />}
       <section className="grid">
         <FilesCard conn={conn} resources={resources} pushed={pushed} send={send} host={L.host.toLowerCase()} />
         {can.includes('SUBMIT_ASSIGNMENT') && <StudentAssignments conn={conn} assignments={assignments} />}

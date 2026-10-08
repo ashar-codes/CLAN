@@ -33,6 +33,8 @@ Errors: `400 invalid`, `403 bad_code` (pairing failed — no other detail), `410
 | POST | `/api/uploads` | bearer (student) | `UploadInit` → `UploadStatus` (idempotent on `idempotencyKey`) |
 | GET | `/api/uploads/:id` | bearer (owner) | `UploadStatus` (current offset, signed receipt when complete) |
 | PUT | `/api/uploads/:id` | bearer (owner) | raw bytes, `Content-Type: application/offset+octet-stream`, `Upload-Offset` |
+| POST | `/api/media/token` | bearer (approved) | starts the SFU if needed → `{token, identity, expiresAt, codec}`: LiveKit JWT for the CLAN's random room, identity = memberId or `host`, ≤ 600 s, `canPublish` only for the current presenter; `503 media_unavailable` |
+| GET / WS | `/media/*` | LiveKit token | relay to the loopback SFU signaling port (`503` until it is running) |
 
 Signed payloads (JCS, RFC 8785; Ed25519 over the UTF-8 bytes):
 * join proof `{type:"classroom-lan/join-proof", v:1, sessionId, pairingId, challenge, deviceKeyFingerprint, fullName, rollNo, deviceName}` — also MACed with K_join;
@@ -59,9 +61,14 @@ First message must be `{t:"auth", token}` within 5 s. Then:
 
 Client → server: `ping`; teacher-only `member.approve|reject|remove|block`, `class.lock`, `class.policy`, `class.end`,
 `resource.available|remove|push`, `assignment.create|close`; student-only `transfer.state`.
+Presentations (capability-checked, MEDIA.md): `present.request` (REQUEST_TO_PRESENT), `present.approve|decline {memberId}` and
+`present.policy {policy:'open'|'request'}` (MANAGE_PRESENTERS), `present.start {source:'screen'|'window', audio, takeover?}`,
+`present.source {source, audio}`, `present.stop {presentationId?}` (the presenter, or MANAGE_PRESENTERS). Refusals:
+`error` with `busy` (someone else presenting), `forbidden`, `media_unavailable`, `not_presenting`.
 Teacher-only messages from a student get `{t:"error", code:"forbidden"}`.
 
-Server → client: `hello`, `pong`, `class.state`, `member.status`, `resources`, `assignments`, `resource.push`, `error`;
+Server → client: `hello`, `pong`, `class.state`, `member.status`, `resources`, `assignments`, `resource.push`, `error`,
+`presentation {state: PresentationView|null, policy, requests, mine:'none'|'requested'|'approved'}` (on hello, approval and every change);
 teachers also get `roster`, `timeline` and `stats` (active transfers, bytes/s, failures — every 1 s).
 `resources`/`assignments` broadcasts are coalesced to at most one per 150 ms so 40 students reporting progress
 don't flood the teacher UI.

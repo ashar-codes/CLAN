@@ -11,3 +11,5 @@ export { Assignments } from './assignments.ts';
 export { Storage, DEFAULT_LIMITS, ApiError, parseRange, contentDisposition, hashFile, type Limits } from './storage.ts';
 export * from './direct.ts';
 export { vpnInterfaces } from './netinfo.ts';
+export { MediaService, MEDIA_TOKEN_TTL_S } from './media.ts';
+export { Presentations, PRESENTER_GRACE_MS, type PresentationEvent } from './presentation.ts';

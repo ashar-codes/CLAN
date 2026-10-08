@@ -106,6 +106,10 @@ export type DesktopApi = {
   directQr(): Promise<{ dataUrl: string; expiresAt: number }>;
   joinQr(qr: string, code: string): Promise<Joined>;
   peerProbe(targets: string[]): Promise<{ tried: number; reachable: number }>;
+  mediaPermission(): Promise<{ platform: string; screen: string; audio: boolean; testCapture: boolean }>;
+  mediaSources(): Promise<{ id: string; kind: 'screen' | 'window'; name: string; thumbnail: string }[]>;
+  mediaChoose(id: string, audio: boolean): Promise<void>;
+  mediaToken(c: { url: string; token: string; sessionId: string }): Promise<{ token: string }>;
   stopClassroom(): Promise<void>;
   discover(onList: (list: DiscoveredClassroom[]) => void): () => void;
 

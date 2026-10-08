@@ -170,6 +170,20 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE sessions ADD COLUMN description TEXT NOT NULL DEFAULT '';
   ALTER TABLE sessions ADD COLUMN expires_at INTEGER;
   `,
+  // 6: screen sharing — control state only (who presented what kind of source, when). Never media or window titles.
+  `
+  CREATE TABLE presentations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    presenter TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('screen','window')),
+    audio INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER NOT NULL,
+    stopped_at INTEGER,
+    stop_reason TEXT
+  );
+  CREATE INDEX presentations_session ON presentations(session_id);
+  `,
 ];
 
 export type Db = DatabaseSync;

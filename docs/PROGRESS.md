@@ -60,6 +60,13 @@
 Milestone 3 (Windows Direct Mode) — or first, if phones matter for the pilot: a mobile OPAQUE binding compatible with
 `@serenity-kit/opaque` 1.x plus the pinned native transport (see ANDROID_NETWORKING.md / APPLE_PERMISSIONS.md).
 
+## Screen Sharing delivered (tag `clan-screen-sharing`)
+* Local LiveKit SFU (bundled, lazy, crash/stale/port/end handled) behind `MediaTransport`; signaling through pinned TLS.
+* Presenting with PRESENT / REQUEST_TO_PRESENT / MANAGE_PRESENTERS, Classroom approval, one presenter + takeover, desktop
+  source picker, source switching, Text/Motion/Auto profiles, VP8 simulcast; wall = media surface; presenter bar; wheel Present.
+* Short-lived scoped tokens, SFU-enforced publish rights, immediate revocation on stop/removal. Tests 215 → 227; E2E +3.
+* Not done: phone viewing (pinned binary WebSocket needed), mobile presenting, real-Wi-Fi measurement. See MEDIA.md.
+
 ## Milestones 2.6 and 2.75 delivered
 * 2.6: mobile joins with the same OPAQUE 1.1 (official WASM in an isolated WebView, narrow bridge), native pinned TLS modules
   (iOS SecTrust, Android OkHttp), device-key reconnect, peer-assisted downloads on mobile (no seeding). No device run yet.

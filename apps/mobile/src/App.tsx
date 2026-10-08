@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
 import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
-import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type DirectPackage, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
+import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type DirectPackage, type ClassroomInfo, type ClientMessage, type MemberStatus, type PresentationView, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
@@ -157,6 +157,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
   const [resources, setResources] = useState<ResourceView[]>([]);
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
   const [pushed, setPushed] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState<PresentationView | null>(null);
   const ref = useRef<ClassroomConnection | null>(null);
   useEffect(() => {
     const conn = new ClassroomConnection(joined.url, joined.token, {
@@ -167,6 +168,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
         if (m.t === 'assignments') setAssignments(m.assignments as StudentAssignmentView[]);
         if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
+        if (m.t === 'presentation') setPresenting(m.state);
       },
       onQuality: setQuality,
       onClosed: (reason) => {
@@ -205,6 +207,12 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
             <Text style={{ color: c.text }}>{QUALITY[quality]}</Text>
           </View>
           <RoomHeader c={c} title={info.title} host={info.hostName} files={resources.length} type={L.type} />
+          {presenting && (
+            // ponytail: phones show who is presenting but can't view yet — LiveKit signaling is binary and the pinned native socket is text-only (docs/MEDIA.md).
+            <View accessibilityLiveRegion="polite" style={[s.pill, { borderColor: c.border }]}>
+              <Text style={{ color: c.text }}>{`${presenting.presenterName} is presenting their ${presenting.source}${presenting.state === 'reconnecting' ? ' (reconnecting…)' : ''}. Viewing on phones is coming soon — use a computer to watch.`}</Text>
+            </View>
+          )}
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
         </>

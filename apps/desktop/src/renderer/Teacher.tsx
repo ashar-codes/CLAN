@@ -5,6 +5,8 @@ import { TeacherAssignments, TeacherFiles } from './Files.tsx';
 import type { Capabilities, DirectAvailability, DirectStatus, PastClass, StartedClassroom } from '../shared.ts';
 import { api } from './App.tsx';
 import { HostRoom } from './world/LiveRoom.tsx';
+import { RoomSurface, usePresentation, type PresentationMsg } from './world/Presentation.tsx';
+import { RoomPresentation } from './world/RoomPresentation.tsx';
 import { useExperience } from './world/experience.ts';
 
 const POLICY_ORDER: JoinPolicy[] = ['approval', 'known', 'open'];
@@ -123,6 +125,9 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const [stats, setStats] = useState<TransferStats | null>(null);
   const [can, setCan] = useState<ClanCapability[]>([]);
   const [shared, setShared] = useState('');
+  const [presMsg, setPresMsg] = useState<PresentationMsg | null>(null);
+  const [ask, setAsk] = useState(0);
+  const presRef = useRef<ReturnType<typeof usePresentation> | null>(null);
   const experience = useExperience();
   const conn = useRef<ClassroomConnection | null>(null);
 
@@ -136,7 +141,8 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         else if (m.t === 'resources') setResources(m.resources as TeacherResourceView[]);
         else if (m.t === 'assignments') setAssignments(m.assignments as TeacherAssignmentView[]);
         else if (m.t === 'stats') setStats(m.stats);
-        else if (m.t === 'error') setNotice(m.message);
+        else if (m.t === 'presentation') setPresMsg(m);
+        else if (m.t === 'error') { if (['busy', 'forbidden', 'media_unavailable', 'not_presenting'].includes(m.code) && presRef.current) void presRef.current.refused(m.message); else setNotice(m.message); }
       },
       onQuality: setQuality,
       onClosed: () => onEnded(),
@@ -151,6 +157,8 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const gone = members.filter((m) => m.status === 'removed' || m.status === 'blocked' || m.status === 'rejected');
   const names = new Map(members.map((m) => [m.id, m.fullName]));
   const L = clanLabels(info?.clanType ?? 'CLASSROOM');
+  const pres = usePresentation({ baseUrl: started.url, bearer: started.teacherToken, sessionId: info?.sessionId ?? '00000000-0000-4000-8000-000000000000', msg: presMsg, send: (m) => conn.current?.send(m), me: 'host' });
+  presRef.current = pres;
   const end = async () => { if (confirm(`End this ${L.session} for everyone?`)) { await api.stopClassroom(); onEnded(); } };
 
   if (!info) return <main className="center"><p className="muted">Starting…</p></main>;
@@ -166,7 +174,9 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
       </header>
       {notice && <p className="error" onClick={() => setNotice('')}>{notice}</p>}
       {shared && <div className="toast" role="status">{shared}</div>}
-      {experience !== 'minimal' && <HostRoom code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={(m) => { setShared(m); setTimeout(() => setShared(''), 3000); }}
+      <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost ask={ask} />
+      {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}
+      {experience !== 'minimal' && <HostRoom pres={pres} onPresent={() => setAsk((n) => n + 1)} onStopPresenter={() => pres.live && send({ t: 'present.stop', presentationId: pres.live.id })} code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={(m) => { setShared(m); setTimeout(() => setShared(''), 3000); }}
         onRemove={(id) => send({ t: 'member.remove', memberId: id })} onBlock={(id) => confirm('Block this device from this ' + L.session + '?') && send({ t: 'member.block', memberId: id })} />}
 
       <section className="grid">

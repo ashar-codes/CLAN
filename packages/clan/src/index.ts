@@ -61,3 +61,4 @@ export type { Reminder } from './modules/reminders/index.ts';
 export type { FileView } from './modules/files/index.ts';
 export type { ShareInput, ShareTarget, ShareResult } from './modules/share/index.ts';
 export { AI_GRANTEE } from './core/context.ts';
+export * as ScreenShareEvents from './modules/screenshare/index.ts';

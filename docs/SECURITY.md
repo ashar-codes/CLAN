@@ -120,6 +120,21 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
 * Native helper: fixed, schema-validated command set; no shell; firewall rules are program/port/LocalSubnet/Wireless-scoped.
 * Mock backend can never be selected in a packaged build (`createDirectBackend`).
 
+## Screen sharing (MEDIA.md)
+* Being on the Wi-Fi/LAN grants nothing: a media token needs an authenticated, approved CLAN session. Tokens are LiveKit
+  JWTs for one random room id (no CLAN name), bound to the member identity, ≤ 600 s, subscribe-only unless that identity is
+  the current presenter. Other CLANs' tokens are rejected (separate per-process API secret and room).
+* Expiry is only a backstop: stop/removal/block revokes publish rights and removes the participant on the SFU immediately;
+  presentation ends with `member_removed` (tested).
+* The SFU's API key/secret are generated per host process, never leave the host process, and the config file holding them is
+  0600 and deleted once the server is up. Signaling is bound to 127.0.0.1 and reached only through the existing pinned
+  TLS server (`/media/*`); RTC is UDP on the CLAN interface only (no TCP, no IPv6 global, no external IP lookup).
+* Media is DTLS-SRTP (WebRTC). No certificate checks are relaxed anywhere.
+* The renderer can't capture silently: the main process grants display media only for the source the user just picked from
+  the list it offered; anything else is denied. Electron permission handler allows `display-capture` only. No microphone.
+* No recording, no frame persistence; the test pattern source exists only in unpackaged builds with `CLAN_TEST_CAPTURE=1`.
+* Gap: phones can't view yet (MEDIA.md) — not worked around with an unpinned socket.
+
 ## Known gaps (tracked)
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
   code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.

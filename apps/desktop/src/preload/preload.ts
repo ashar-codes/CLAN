@@ -28,6 +28,10 @@ const api: DesktopApi = {
   directQr: () => ipcRenderer.invoke('direct:qr'),
   joinQr: (qr, code) => ipcRenderer.invoke('student:joinQr', qr, code),
   peerProbe: (t) => ipcRenderer.invoke('student:peerProbe', t),
+  mediaPermission: () => ipcRenderer.invoke('media:permission'),
+  mediaSources: () => ipcRenderer.invoke('media:sources'),
+  mediaChoose: (id, audio) => ipcRenderer.invoke('media:choose', id, audio),
+  mediaToken: (c) => ipcRenderer.invoke('media:token', c),
   discover(onList) {
     const h = (_e: unknown, list: Parameters<typeof onList>[0]) => onList(list);
     ipcRenderer.on('discover:list', h);

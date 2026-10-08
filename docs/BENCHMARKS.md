@@ -174,6 +174,28 @@ teacher-direct. (`--threshold-sweep`.)
 * Simulator detail: each worker process hosts ~10 students, so it is given a larger libuv thread pool (real apps each have their
   own); with the default 4 threads the shared pool, not the network, dominated (60 × 100 MB: ~190 s vs ~20–37 s).
 
+## Screen sharing — SIMULATED / LOCALHOST (Screen Sharing phase)
+
+**Not Wi-Fi capacity.** One MacBook Pro (Apple M1 Pro, 8 cores): the real bundled LiveKit SFU, one synthetic presenter and
+N headless viewers (`@livekit/rtc-node`, 10 per worker process) all on the same machine over its LAN IP. 1280×720 synthetic
+screen (moving block + time/sequence stamps) at 15 fps, VP8 simulcast, 20 s per run. `node tools/sim/bench-media.ts`.
+
+| viewers | joined | frames delivered | latency p50 / p95 (ms) | SFU CPU | SFU RSS MB | SFU in / out Mb/s |
+|---|---|---|---|---|---|---|
+| 1 | 1/1 | 100% | 22 / 28 | 4% | 55 | 2.0 / 0.2 |
+| 5 | 5/5 | 100% | 22 / 26 | 4% | 68 | 2.0 / 1.0 |
+| 10 | 10/10 | 100% | 22 / 26 | 4% | 79 | 2.0 / 1.7 |
+| 20 | 20/20 | 100% | 26 / 32 | 6% | 92 | 2.0 / 4.1 |
+| 40 | 40/40 | 100% | 30 / 36 | 8% | 114 | 2.1 / 6.7 |
+
+* **Presenter outbound = SFU inbound ≈ 2 Mb/s, flat** from 1 to 40 viewers: the presenter uploads once.
+* **Host outbound is a lower bound.** Headless viewers send no render-size hints, so the SFU forwards the low simulcast
+  layer (≈ 0.17 Mb/s each). A desktop viewer watching full-size gets the 720p/1080p layer, ≈ the presenter's ~2–3 Mb/s each:
+  plan for **viewers × 2–3 Mb/s** of host outbound and Wi-Fi airtime (40 viewers ≈ 80–120 Mb/s — beyond one busy AP).
+* Latency is capture → encode → SFU → decode on one machine, clocks shared; frames delivered counts distinct frames.
+* CPU is the SFU process only (`ps`, % of one core); viewers' decode load is on the same machine and not counted.
+* Not measured: real Wi-Fi, real screens, renderer-side decode cost on low-end laptops, 60 viewers.
+
 ## Real-network benchmark (not yet run)
 
 * `node tools/sim/lan-bench.ts` — raw LAN capacity: students open the printed address in any browser.
@@ -189,4 +211,4 @@ Procedure: WINDOWS_DIRECT_MODE.md › Validation package + `tools/sim/lan-bench.
 
 ## Not yet measured
 
-Screen-share CPU/bandwidth (Milestone 4). Upload throughput benchmark beyond the integration tests.
+Screen sharing on real Wi-Fi and real screens. Upload throughput benchmark beyond the integration tests.

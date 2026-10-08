@@ -14,11 +14,14 @@
     "@serenity-kit/opaque": "1.1.0",
     "bonjour-service": "^1.4.4",
     "fastify": "^5.12.5",
+    "livekit-server-sdk": "2.19.1",
     "reflect-metadata": "^0.2.2",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@classroom/client": "workspace:*",
+    "@livekit/rtc-node": "1.1.0",
     "@types/ws": "^8.18.2"
   }
 }

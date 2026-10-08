@@ -129,6 +129,10 @@ export type Member = {
 export type TimelineEvent = { id: number; ts: number; type: string; actor: string | null; data: Record<string, unknown> };
 
 /** TXT record published over DNS-SD. */
+/** Who is presenting what. Window titles and frames are never part of it. */
+export type PresentationView = { id: string; presenter: 'host' | string; presenterName: string; source: 'screen' | 'window'; audio: boolean; startedAt: number; state: 'live' | 'reconnecting' };
+export type MediaJoin = { url: string; token: string; identity: string; expiresAt: number };
+
 /** DNS-SD TXT. Untrusted hint only: name + type, nothing else before pairing. */
 export type Advertisement = { v: string; sid: string; title: string; type?: string };
 
@@ -239,6 +243,14 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('class.peerAssist'), enabled: z.boolean() }),
   // student
   z.object({ t: z.literal('transfer.state'), resourceId: id, state: TransferState, bytes: z.number().int().nonnegative() }),
+  // presentation (screen sharing) — authority checked server-side per capability; see MESSAGE_CAPABILITY
+  z.object({ t: z.literal('present.request') }),
+  z.object({ t: z.literal('present.approve'), memberId: id }),
+  z.object({ t: z.literal('present.decline'), memberId: id }),
+  z.object({ t: z.literal('present.policy'), policy: z.enum(['open', 'request']) }),
+  z.object({ t: z.literal('present.start'), source: z.enum(['screen', 'window']), audio: z.boolean(), takeover: z.boolean().optional() }),
+  z.object({ t: z.literal('present.source'), source: z.enum(['screen', 'window']), audio: z.boolean() }),
+  z.object({ t: z.literal('present.stop'), presentationId: id.optional() }),
   z.object({ t: z.literal('peer.probeResult'), probeId: id, tried: z.number().int().min(0).max(8), reachable: z.number().int().min(0).max(8) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
@@ -267,6 +279,8 @@ export type ServerMessage =
   | { t: 'peer.revoked'; fingerprints: string[] }
   /** Host asks a member to test plain TCP reachability of other members' peer servers (topology probe). */
   | { t: 'peer.probe'; probeId: string; targets: string[] }
+  /** Presentation control state (never media). `requests` only reaches principals with MANAGE_PRESENTERS. */
+  | { t: 'presentation'; state: PresentationView | null; policy: 'open' | 'request'; requests: { memberId: string; name: string }[]; mine: 'none' | 'requested' | 'approved' }
   | { t: 'assignments'; assignments: StudentAssignmentView[] | TeacherAssignmentView[] }
   | { t: 'stats'; stats: TransferStats }
   | { t: 'error'; code: string; message: string };
