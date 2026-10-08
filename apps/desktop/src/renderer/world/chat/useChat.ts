@@ -97,11 +97,16 @@ export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: st
     setMore((x) => ({ ...x, [threadId]: p.messages.length === PAGE }));
   }, [http]);
 
+  /** While a direct conversation opens, no composer is shown — so nothing typed meanwhile can go to the wrong conversation. */
+  const [opening, setOpening] = useState<string | null>(null);
   const openDirect = useCallback(async (handle: string) => {
-    const t = await http<ChatThreadView>('POST', '/api/chat/direct', { to: handle });
-    upsertThread(t);
-    await open(t.id);
-    return t.id;
+    setOpening(handle);
+    try {
+      const t = await http<ChatThreadView>('POST', '/api/chat/direct', { to: handle });
+      upsertThread(t);
+      await open(t.id);
+      return t.id;
+    } finally { setOpening(null); }
   }, [http, open]);
 
   const post = useCallback(async (target: Target, body: string, extra: { replyTo?: string; attachment?: AttachmentInput } = {}) => {
@@ -176,7 +181,7 @@ export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: st
 
   const unread = useMemo(() => threads.reduce((n, t) => n + t.unread, 0), [threads]);
   return {
-    me, host, threads, msgs, more, cursors, pending, typing, active, error, unread, clanId, conn: o.conn,
+    me, host, threads, msgs, more, cursors, pending, typing, active, error, unread, clanId, conn: o.conn, opening,
     open, openDirect, loadEarlier, post, retry, discard, onServer, typingPing, delivery, refresh,
     react: (id: string, reaction: string, on: boolean) => o.send({ t: 'chat.react', id, reaction: reaction as never, on }),
     edit: (id: string, body: string) => o.send({ t: 'chat.edit', id, body }),

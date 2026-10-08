@@ -5,15 +5,15 @@
 // person's own readable media/image files.
 import { app, BrowserWindow, ipcMain, powerMonitor, protocol, systemPreferences } from 'electron';
 import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs';
-import { open, statfs, writeFile, type FileHandle } from 'node:fs/promises';
+import { statfs, writeFile } from 'node:fs/promises';
+import { ChunkWriter, CRITICAL_DISK, diskLevel, LOW_DISK } from './chunkWriter.ts';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import type { ClanApp } from '@clan/core';
 
 const Id = z.uuid();
-export const LOW_DISK = 2 * 1024 ** 3, CRITICAL_DISK = 512 * 1024 ** 2;
-type Live = { tapeId: string; fh: FileHandle; path: string; bytes: number; queue: Promise<void>; failed: string | null; startedAt: number; mime: string };
+type Live = { tapeId: string; w: ChunkWriter; path: string; startedAt: number; mime: string };
 let micArmedUntil = 0;
 /** The microphone is granted only right after the student started a tape with “Microphone” ticked. */
 export const micArmed = () => Date.now() < micArmedUntil;
@@ -54,35 +54,31 @@ export function registerTapes(c: ClanApp) {
     }
     const path = join(dir, `${crypto.randomUUID()}.webm.part`);
     const tape = c.recordings.start(me, { ...o, partPath: path });
-    live = { tapeId: tape.id, fh: await open(path, 'a'), path, bytes: 0, queue: Promise.resolve(), failed: null, startedAt: tape.startedAt, mime: o.mime };
+    const w = await ChunkWriter.open(path, () => tell({ tapeId: tape.id, kind: 'write_failed', message: 'CLAN could not write the recording to disk. It stopped; what was recorded is kept.' }));
+    live = { tapeId: tape.id, w, path, startedAt: tape.startedAt, mime: o.mime };
     return tape;
   });
   /** Appended strictly in order; a write failure stops accepting data and tells the window (the partial file is kept). */
   handle('rec:chunk', (tapeId, data) => {
-    const l = live; if (!l || l.tapeId !== tapeId || l.failed) return l?.failed ?? 'no recording';
-    const buf = Buffer.from(z.instanceof(Uint8Array).parse(data));
-    l.queue = l.queue.then(async () => {
-      if (l.failed) return;
-      try { await l.fh.write(buf); l.bytes += buf.length; } catch (e) { l.failed = `write_failed: ${(e as Error).message}`; tell({ tapeId, kind: 'write_failed', message: 'CLAN could not write the recording to disk. It stopped; what was recorded is kept.' }); }
-    });
-    return null;
+    const l = live; if (!l || l.tapeId !== tapeId) return 'no recording';
+    return l.w.append(Buffer.from(z.instanceof(Uint8Array).parse(data)));
   });
   handle('rec:stop', async (tapeId, raw) => {
     const o = z.object({ durationMs: z.number().min(0).max(48 * 3600_000), reason: z.string().max(120) }).parse(raw);
     const l = live; if (!l || l.tapeId !== Id.parse(tapeId)) throw new Error('No recording is running.');
     live = null;
-    await l.queue; await l.fh.close();
-    if (!l.bytes) { c.recordings.fail(me, l.tapeId, o.reason === 'stopped' ? 'nothing was recorded' : o.reason); return c.recordings.get(me, l.tapeId); }
-    return c.recordings.finish(me, l.tapeId, { path: l.path, mime: l.mime, durationMs: o.durationMs, endReason: l.failed ? 'disk write failed' : o.reason });
+    await l.w.close();
+    if (!l.w.bytes) { c.recordings.fail(me, l.tapeId, o.reason === 'stopped' ? 'nothing was recorded' : o.reason); return c.recordings.get(me, l.tapeId); }
+    return c.recordings.finish(me, l.tapeId, { path: l.path, mime: l.mime, durationMs: o.durationMs, endReason: l.w.failed ? 'disk write failed' : o.reason });
   });
-  handle('rec:active', () => { const t = c.recordings.active(me); return t && live?.tapeId === t.id ? { ...t, bytes: live.bytes } : null; });
+  handle('rec:active', () => { const t = c.recordings.active(me); return t && live?.tapeId === t.id ? { ...t, bytes: live.w.bytes } : null; });
   // disk watch while recording
   setInterval(async () => {
     const l = live; if (!l) return;
-    c.recordings.progress(me, l.tapeId, l.bytes);
-    const f = await free();
-    if (f < CRITICAL_DISK) tell({ tapeId: l.tapeId, kind: 'disk_critical', freeBytes: f, message: 'Disk almost full — the recording was stopped and saved.' });
-    else if (f < LOW_DISK) tell({ tapeId: l.tapeId, kind: 'disk_low', freeBytes: f, message: `Disk space is low (${(f / 1024 ** 3).toFixed(1)} GB left).` });
+    c.recordings.progress(me, l.tapeId, l.w.bytes);
+    const f = await free(), level = diskLevel(f);
+    if (level === 'critical') tell({ tapeId: l.tapeId, kind: 'disk_critical', freeBytes: f, message: 'Disk almost full — the recording was stopped and saved.' });
+    else if (level === 'low') tell({ tapeId: l.tapeId, kind: 'disk_low', freeBytes: f, message: `Disk space is low (${(f / 1024 ** 3).toFixed(1)} GB left).` });
   }, 10_000).unref();
   powerMonitor.on('suspend', () => { if (live) try { c.recordings.mark(me, live.tapeId, { kind: 'marker', atMs: Date.now() - live.startedAt, text: 'Computer went to sleep' }); } catch { /* best effort */ } });
   powerMonitor.on('resume', () => { if (live) try { c.recordings.mark(me, live.tapeId, { kind: 'marker', atMs: Date.now() - live.startedAt, text: 'Resumed after sleep' }); } catch { /* best effort */ } });
@@ -128,5 +124,5 @@ export function registerTapes(c: ClanApp) {
     return new Response(Readable.toWeb(createReadStream(o.location, { start, end })) as ReadableStream, { status: 206, headers: { 'content-type': type, 'content-length': String(end - start + 1), 'content-range': `bytes ${start}-${end}/${size}`, 'accept-ranges': 'bytes' } });
   });
   /** On quit with a tape running: close the file so the part is complete up to the last chunk (recovered on next start). */
-  app.on('before-quit', () => { if (live) void live.queue.then(() => live?.fh.close()); });
+  app.on('before-quit', () => { if (live) void live.w.close(); });
 }

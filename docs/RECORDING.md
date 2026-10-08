@@ -44,5 +44,7 @@ transcript exists. `TranscriptionProvider` (protocol) is the boundary; none ship
 |---|---|---|---|---|
 | 1280×720 | 8 % | 560 → 495 MB | 4.9 MB/min | 79 KB/s |
 | 1920×1080 | 11 % | 668 → 563 MB | 4.9 MB/min | 79 KB/s |
+Write path (`main/chunkWriter.ts`) is unit-tested: a ≈2-hour run of 1 s chunks streams in order with flat memory; a disk
+failure stops cleanly, reports once and keeps what was written; disk-watch thresholds.
 The synthetic source compresses far better than real screens; real-content size, multi-hour runs, low-end hardware,
 real screen/window capture, microphone and system audio were **not measured** (no such hardware run).

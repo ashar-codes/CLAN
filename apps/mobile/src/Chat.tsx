@@ -50,10 +50,15 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
     setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, unread: 0 } : t)));
   }, [get, send]);
 
+  /** No composer while a direct conversation opens, so nothing typed meanwhile goes to the wrong conversation. */
+  const [opening, setOpening] = useState(false);
   const openDirect = useCallback(async (to: string) => {
-    const t = await get<ChatThreadView>('/api/chat/direct', { method: 'POST', body: JSON.stringify({ to }) });
-    setThreads((ts) => [...ts.filter((x) => x.id !== t.id), t]);
-    await open(t.id);
+    setOpening(true);
+    try {
+      const t = await get<ChatThreadView>('/api/chat/direct', { method: 'POST', body: JSON.stringify({ to }) });
+      setThreads((ts) => [...ts.filter((x) => x.id !== t.id), t]);
+      await open(t.id);
+    } finally { setOpening(false); }
   }, [get, open]);
 
   const post = useCallback((threadId: string, body: string, extra: Partial<Send> = {}) => {
@@ -74,7 +79,7 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
       if (m.message.author !== ref.current.me) send({ t: 'chat.cursor', threadId: m.thread.id, delivered: m.message.seq, ...(reading ? { read: m.message.seq } : {}) });
     }
   }, [refresh, send]);
-  return { me, host, threads, msgs, pending, active, setActive, open, openDirect, post, onServer };
+  return { me, host, threads, msgs, pending, active, setActive, open, openDirect, post, onServer, opening };
 }
 export type MobileChat = ReturnType<typeof useMobileChat>;
 
@@ -123,7 +128,8 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
         ))}
         {waiting.map((p) => <View key={p.m.id} style={[s.msg, s.own, { borderColor: c.border, opacity: 0.6 }]}><Text style={{ color: c.text }}>{p.m.body}</Text><Text style={{ color: p.failed ? c.danger : c.muted, fontSize: 11 }}>{p.failed ? `Not sent — ${p.failed}` : 'Sending…'}</Text></View>)}
       </View>
-      {t && (
+      {chat.opening && <Text style={{ color: c.muted }} accessibilityLiveRegion="polite">Opening a conversation…</Text>}
+      {t && !chat.opening && (
         <View style={s.row}>
           <TextInput style={[s.input, { color: c.text, borderColor: c.border }]} value={text} onChangeText={setText} maxLength={4000} placeholder="Message" placeholderTextColor={c.muted} accessibilityLabel="Message" multiline />
           <Pressable accessibilityRole="button" disabled={!text.trim()} onPress={() => { chat.post(t.id, text.trim()); setText(''); }} style={[s.chip, { borderColor: c.accent, opacity: text.trim() ? 1 : 0.5 }]}><Text style={{ color: c.accent, fontWeight: '700' }}>Send</Text></Pressable>

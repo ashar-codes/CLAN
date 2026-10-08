@@ -117,4 +117,6 @@ Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi
   PNG/PDF export, phone view/edit (UNVERIFIED on device). See WHITEBOARD.md.
 * Study Tapes: explicit recording with persistent indicator and consent step, chunked WebM to disk, moved into the Resource
   Store, timeline (⭐ 📝 📸 🔖), player, Course/Lecture/Session links, search to timestamp, crash recovery. See RECORDING.md.
-* Tests 267 → 276; E2E 15 → 18 (two board, one tape). Real-hardware capture/audio and low-end performance not measured.
+* Tests 267 → 279; E2E 15 → 18 (two board, one tape).
+* Fixed: a message typed while a direct conversation was opening went to the group conversation (root cause of the
+  intermittent Classroom chat E2E); desktop and phone now show no composer until the conversation is open. Real-hardware capture/audio and low-end performance not measured.

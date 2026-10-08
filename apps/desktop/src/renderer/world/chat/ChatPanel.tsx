@@ -42,7 +42,8 @@ export default function ChatPanel({ chat, role, people, clanName, canSendFiles, 
             <button key={p.handle} className="link small" onClick={() => void chat.openDirect(p.handle)}>{p.name}{p.host ? ' (host)' : ''}</button>
           ))}</div>}
       </nav>
-      {active ? <Conversation key={active.id} t={active} chat={chat} role={role} clanName={clanName} canSendFiles={canSendFiles} conn={conn} />
+      {chat.opening ? <div className="chat-empty muted" role="status" data-testid="chat-opening">Opening a conversation…</div>
+        : active ? <Conversation key={active.id} t={active} chat={chat} role={role} clanName={clanName} canSendFiles={canSendFiles} conn={conn} />
         : <div className="chat-empty muted">{chat.error || 'Loading the conversation…'}</div>}
     </section>
   );
