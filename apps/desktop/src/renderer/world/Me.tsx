@@ -1,17 +1,18 @@
 // Me: who you are in CLAN, how the world looks, privacy — and the Diary, which has its own calm, private space.
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { CLANmate, mateFor } from '@clan/design';
 import type { DiaryEntry, HomeView } from '../../shared.ts';
 import { api } from '../App.tsx';
 import { useLoad } from './useLoad.ts';
 import { experienceIsAuto, setExperience, type Experience } from './experience.ts';
 
+const AISettingsPanel = lazy(() => import('./ai/Settings.tsx'));
+
 const MOODS = ['calm', 'happy', 'proud', 'tired', 'anxious', 'low'];
 const today = () => new Date().toLocaleDateString('en-CA');
 
 export function Me({ experience, section }: { experience: Experience; section: 'profile' | 'diary' }) {
   const [h, reloadHome] = useLoad<HomeView>(api.clan.home);
-  const [privacy, reloadPrivacy] = useLoad(api.clan.privacy);
   const [name, setName] = useState('');
   const [auto, setAuto] = useState(experienceIsAuto());
   useEffect(() => { if (h) setName(h.me.name); }, [h]);
@@ -30,9 +31,9 @@ export function Me({ experience, section }: { experience: Experience; section: '
           <label className="radio"><input type="radio" name="exp" checked={auto} onChange={() => { setExperience('auto'); setAuto(true); }} /><span><b>Automatic</b> <small className="muted">now {experience}</small></span></label>
         </fieldset>
         <Notices />
+        <Suspense fallback={null}><AISettingsPanel /></Suspense>
         <span className="eyebrow">Privacy</span>
-        <label className="check"><input type="checkbox" checked={!!privacy?.aiDiary} onChange={async (e) => { await api.clan.setAiDiary(e.target.checked); reloadPrivacy(); }} /> Let AI read my Diary</label>
-        <p className="muted small-text">Off by default. Notes and links are private until you share them into a CLAN. Your Diary is never shared and never searchable.</p>
+        <p className="muted small-text">AI reading your Diary is off by default (see AI above). Notes and links are private until you share them into a CLAN. Your Diary is never shared and never searchable.</p>
       </section>
       <Diary focus={section === 'diary'} />
     </div>

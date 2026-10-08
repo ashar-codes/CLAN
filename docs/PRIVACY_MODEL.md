@@ -19,7 +19,7 @@ members only; removed members and expired TEMPORARY CLANs lose access at once). 
 
 **Search** (`search_docs`) is a projection filtered by the caller's scopes at query time; Diary can't be registered. Rebuildable.
 
-**AI Context API** (`core/context.ts`; boundary only: no providers, no agent execution):
+**AI Context API** (`core/context.ts`; used by CLAN Intelligence, see AI_CONTEXT.md):
 * An agent is a principal acting **on behalf of** one user with explicit scopes (`notes:read`, …). Missing scope → DENIED.
 * Results are references + short excerpts the user could read anyway; every item's scope is re-checked.
 * Diary is `private`: **DENIED** unless the user grants `ai → diary` (Me → Privacy). Grants can expire and are revocable.
@@ -35,3 +35,8 @@ Link titles are fetched from the linked site when online (the site learns the li
 Writes are user-only: agent principals cannot create or modify notes, saved items, reminders, diary entries or any study data.
 Study reads by agents need `tasks:read` / `exams:read` / `flashcards:read` / `reminders:read`. Course/Lecture/Exam/StudyContext
 (modules/agenda) are reference-only inputs for a later AI phase; nothing is generated. Phone study data stays on the phone.
+
+**CLAN Intelligence** sends only the selected, bounded passages of material the person can already read to the provider
+they configured (none by default; remote providers need internet). Conversations, quiz attempts, paper analyses and
+proposals stay on the device (Me › AI › Delete AI history). Direct chats are AI context only for their participants,
+never for the relaying host. Saved links contribute only their title, address and the student's note.

@@ -1,12 +1,13 @@
 // Study: Knowledge Campus (your Courses), course spaces, Semester Board, tasks, the Exam Command Center, flashcards,
 // notes and personal history. Everything here is real Study Engine data; nothing is estimated.
-import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { loadCampus, type CourseBuildingViewModel } from '@clan/world';
 import type { CourseView, Note, SearchHit } from '../../shared.ts';
 import { api } from '../App.tsx';
 import { errText, useLoad } from './useLoad.ts';
 import type { Experience } from './experience.ts';
 import { useStudy, type StudyTab } from './study/common.tsx';
+import { useAI } from './ai/ctx.tsx';
 import { CourseSpace } from './study/Course.tsx';
 import { Board } from './study/Board.tsx';
 import { Tasks } from './study/Tasks.tsx';
@@ -143,6 +144,8 @@ function CourseList({ courses, onOpen }: { courses: CourseView[]; onOpen(id: str
 }
 
 function Notes() {
+  const { target } = useStudy();
+  const ai = useAI();
   const [notes, reload] = useLoad(api.clan.notes);
   const [clans] = useLoad(api.clan.list);
   const [courses] = useLoad(api.study.courses);
@@ -152,12 +155,26 @@ function Notes() {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [draft, setDraft] = useState({ title: '', body: '' });
   useEffect(() => { if (sel) setDraft({ title: sel.title, body: sel.body }); }, [sel]);
+  useEffect(() => { if (target.noteId && notes) { const n = notes.find((x) => x.id === target.noteId); if (n) setSel(n); } }, [target.noteId, notes]);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  /** Note actions: the AI result is a preview; the student picks Insert / Append / New note (or closes = discard). Save stays explicit. */
+  const noteAI = (action: 'explain' | 'simplify' | 'summarize' | 'questions' | 'flashcards', title: string) => {
+    if (!sel) return;
+    const ta = bodyRef.current, selection = ta && ta.selectionEnd > ta.selectionStart ? draft.body.slice(ta.selectionStart, ta.selectionEnd) : undefined;
+    const at = ta?.selectionEnd ?? draft.body.length;
+    ai.open({ mode: 'run', title, action, scope: { kind: 'note', noteId: sel.id }, selection: action === 'summarize' || action === 'flashcards' || action === 'questions' ? undefined : selection ?? draft.body.slice(0, 3000),
+      onText: async (text, how) => {
+        if (how === 'new') { await api.clan.createNote({ title: `${title}: ${sel.title}`, body: text }); reload(); return; }
+        setDraft((d) => ({ ...d, body: how === 'append' ? `${d.body.replace(/\s+$/, '')}\n\n${text}` : `${d.body.slice(0, at)}${text}${d.body.slice(at)}` }));
+      } });
+  };
   const create = async () => { const n = await api.clan.createNote({ title: 'Untitled' }); reload(); setSel(n); };
   const save = async () => { if (sel) { setSel(await api.clan.updateNote(sel.id, draft)); reload(); } };
   return (
     <div className="study-grid">
       <aside className="stack">
         <form onSubmit={async (e) => { e.preventDefault(); setHits(q.trim() ? await api.clan.search(q) : null); }}><input type="search" placeholder="Search notes and saved" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" /></form>
+        {hits && hits.length > 0 && <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: `About “${q}”`, action: 'ask', scope: { kind: 'search', hits: hits.map((h) => ({ module: h.module, entityId: h.entityId })) }, question: q, ask: true })}>Ask CLAN about these results</button>}
         {hits && <div className="card">{hits.length ? hits.map((h) => <div key={h.module + h.entityId} className="line"><span>{h.title}<br /><small className="muted">{h.snippet}</small></span><span className="muted">{h.module}</span></div>) : <p className="muted">No results.</p>}</div>}
         <button className="primary" onClick={create}>New note</button>
         {notes?.map((n) => <button key={n.id} className={`line link-row ${sel?.id === n.id ? 'on' : ''}`} onClick={() => setSel(n)}>{n.title}<span className="muted">{n.sharedWith.length ? 'shared' : 'private'}</span></button>)}
@@ -165,7 +182,17 @@ function Notes() {
       {sel ? (
         <section className="card stack paper-sheet">
           <input className="note-title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} aria-label="Title" />
-          <textarea className="note-body" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} aria-label="Note" />
+          <div className="row tight note-ai" role="group" aria-label="CLAN note actions">
+            <button className="small ai-link" onClick={() => noteAI('explain', 'Explain')}>Explain selection</button>
+            <button className="small ai-link" onClick={() => noteAI('simplify', 'Simplify')}>Simplify</button>
+            <button className="small ai-link" onClick={() => noteAI('summarize', 'Summarize')}>Summarize</button>
+            <button className="small ai-link" onClick={() => noteAI('questions', 'Questions')}>Turn into questions</button>
+            <button className="small ai-link" onClick={() => noteAI('flashcards', 'Flashcards')}>Generate flashcards</button>
+            <select value="" aria-label="Compare with course material" onChange={(e) => { const [courseId, lectureId] = e.target.value.split(':'); if (courseId) ai.open({ mode: 'run', title: 'Compare My Notes', action: 'compare', scope: { kind: 'note', noteId: sel.id, courseId, lectureId: lectureId || null } }); }}>
+              <option value="">Compare with course material…</option>{courses?.map((c) => <option key={c.id} value={`${c.id}:`}>{c.name}</option>)}
+            </select>
+          </div>
+          <textarea ref={bodyRef} className="note-body" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} aria-label="Note" />
           <div className="row">
             <button className="primary" onClick={save}>Save</button>
             <select value="" onChange={async (e) => { const clanId = e.target.value; await api.clan.shareNote(sel.id, clanId, true); reload(); setSel({ ...sel, sharedWith: [...sel.sharedWith, clanId] }); }} aria-label="Share to CLAN">

@@ -7,10 +7,11 @@
   },
   "dependencies": {
     "@classroom/protocol": "workspace:*",
+    "pdfjs-dist": "6.3.289",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@classroom/server": "workspace:*",
-    "@classroom/client": "workspace:*"
+    "@classroom/client": "workspace:*",
+    "@classroom/server": "workspace:*"
   }
 }

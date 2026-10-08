@@ -24,14 +24,17 @@ import { Flashcards, schema as flashcardsSchema } from './modules/flashcards/ind
 import { Study, schema as studySchema } from './modules/study/index.ts';
 import { Assignments, schema as assignmentsSchema } from './modules/assignments/index.ts';
 import { Agenda } from './modules/agenda/index.ts';
+import { AI, schema as aiSchema, type ProviderSettings } from './modules/ai/index.ts';
+import type { AIProvider } from '@classroom/protocol';
 
 export const SCHEMAS: ModuleSchema[] = [eventsSchema, permissionsSchema, identitySchema, resourcesSchema, searchSchema, clansSchema, notesSchema, savedSchema, diarySchema, remindersSchema, chatSchema, captureSchema, notifySchema,
-  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema];
+  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema];
 
 export type ClanApp = ReturnType<typeof openClan>;
 
 /** Opens CLAN on an existing SQLite handle (the device database). `storageDir` holds Resource Store objects. */
-export function openClan(db: Db, opts: { storageDir: string; now?: () => number; localName?: string }) {
+/** `aiProvider`: the host turns non-secret provider settings into a provider (reading the credential from its secure storage), or null. */
+export function openClan(db: Db, opts: { storageDir: string; now?: () => number; localName?: string; aiProvider?: (s: ProviderSettings) => AIProvider | null }) {
   const now = opts.now ?? (() => Date.now());
   migrateModules(db, SCHEMAS);
   const bus = new EventBus(db, now);
@@ -66,6 +69,8 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   for (const m of [courses, tasks, exams, flashcards]) search.register(m.searchProvider());
   const context = new ContextBroker(permissions);
   for (const p of [notes.contextProvider(), saved.contextProvider(), diary.contextProvider()]) context.register(p);
+  // CLAN Intelligence: reads through module APIs only; writes only via accepted proposals.
+  const ai = new AI(db, { clans, courses, notes, files, saved, chat, exams, tasks, flashcards, study, reminders, store, broker: context }, permissions, opts.aiProvider ?? (() => null), now);
 
   me = identity.localUser(opts.localName);
   bus.deliverPending();
@@ -76,7 +81,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const tick = (t = now()) => { reminders.fire(t); notifications.tick(t); };
   syncClassrooms();
 
-  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, me, syncClassrooms, tick };
+  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, me, syncClassrooms, tick };
 }
 
 export type { Principal, Scope } from './core/permissions.ts';
@@ -104,4 +109,6 @@ export type { StudySession } from './modules/study/index.ts';
 export type { AssignmentItem } from './modules/assignments/index.ts';
 export type { AgendaItem, CourseContext, LectureContext, ExamContext, StudyContext } from './modules/agenda/index.ts';
 export { AI_GRANTEE } from './core/context.ts';
+export type { AISettings, ProviderSettings, AIRequest, RunResult, Preview, SourceUse, AIScope, Include, OpenTarget, Action, AgentDefinition, SourceKind, ProposalView } from './modules/ai/index.ts';
+export { AGENTS } from './modules/ai/index.ts';
 export * as ScreenShareEvents from './modules/screenshare/index.ts';

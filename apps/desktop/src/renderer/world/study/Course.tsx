@@ -8,6 +8,7 @@ import { errText, useLoad } from '../useLoad.ts';
 import { Confidence, day, fromLocal, useStudy, when } from './common.tsx';
 import { TaskList } from './Tasks.tsx';
 import { NewExam } from './Exams.tsx';
+import { useAI } from '../ai/ctx.tsx';
 
 const SECTIONS = ['Overview', 'Topics', 'Lectures', 'Notes', 'Resources', 'Tasks', 'Exams', 'Flashcards', 'Saved'] as const;
 type Section = (typeof SECTIONS)[number];
@@ -17,6 +18,7 @@ export function CourseSpace({ id, onBack }: { id: string; onBack(): void }) {
   const [sec, setSec] = useState<Section>('Overview');
   const [err, setErr] = useState('');
   const { start, go } = useStudy();
+  const ai = useAI();
   const run = async (f: () => Promise<unknown>) => { setErr(''); try { await f(); reload(); } catch (x) { setErr(errText(x)); } };
   if (loadErr) return <div className="stack"><button className="link back" onClick={onBack}>← Campus</button><p className="error">{loadErr}</p></div>;
   if (!d) return null;
@@ -32,12 +34,17 @@ export function CourseSpace({ id, onBack }: { id: string; onBack(): void }) {
           <span className="muted">{[course.instructor, course.schedule, d.clanName && `Classroom: ${d.clanName}`].filter(Boolean).join(' · ') || 'Personal course'}</span></div>
         <button className="primary" onClick={() => start({ courseId: course.id, goal: `Study ${course.name}`, focus: true })}>Start study session</button>
       </div>
+      <div className="row tight" role="group" aria-label="CLAN for this course">
+        <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: `Ask about ${course.name}`, action: 'ask', scope: { kind: 'course', courseId: course.id }, ask: true })}>Ask CLAN</button>
+        <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: 'Quiz me', action: 'quiz', scope: { kind: 'course', courseId: course.id } })}>Quiz me</button>
+        <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: 'Draft flashcards', action: 'flashcards', scope: { kind: 'course', courseId: course.id } })}>Draft flashcards</button>
+      </div>
       <div className="room-tabs" role="tablist" aria-label="Course sections">{SECTIONS.map((s) => <button key={s} role="tab" aria-selected={sec === s} onClick={() => setSec(s)}>{s}{count[s] ? <small> · {count[s]}</small> : null}</button>)}</div>
       {err && <p className="error small-text" role="alert">{err}</p>}
       <section className="card panel-body">
         {sec === 'Overview' && <Overview d={d} />}
         {sec === 'Topics' && <Topics d={d} run={run} />}
-        {sec === 'Lectures' && <Lectures d={d} run={run} />}
+        {sec === 'Lectures' && <Lectures d={d} run={run} onPrepare={(l) => ai.open({ mode: 'run', title: `Prepare ${l.title}`, action: 'prepareLecture', scope: { kind: 'lecture', courseId: course.id, lectureId: l.id } })} />}
         {(sec === 'Notes' || sec === 'Resources' || sec === 'Saved') && <Links d={d} module={sec === 'Notes' ? 'notes' : sec === 'Resources' ? 'files' : 'saved'} run={run} />}
         {sec === 'Tasks' && <TaskList courseId={course.id} topics={d.topics} />}
         {sec === 'Exams' && <>
@@ -107,13 +114,14 @@ function Topics({ d, run }: { d: CourseDetail; run(f: () => Promise<unknown>): P
   );
 }
 
-function Lectures({ d, run }: { d: CourseDetail; run(f: () => Promise<unknown>): Promise<void> }) {
+function Lectures({ d, run, onPrepare }: { d: CourseDetail; run(f: () => Promise<unknown>): Promise<void>; onPrepare(l: CourseDetail['lectures'][number]): void }) {
   const [o, setO] = useState({ title: '', at: '', topicIds: [] as string[] });
   return (
     <>
       {d.lectures.map((l) => (
         <div key={l.id} className="line" data-testid="lecture">
           <span className="grow"><b>{l.title}</b> <small className="muted">{l.at ? when(l.at) : 'no date'}{l.topicIds.length ? ` · ${l.topicIds.map((t) => d.topics.find((x) => x.id === t)?.title).filter(Boolean).join(', ')}` : ''}{l.sessionId ? ' · linked to a class session' : ''}</small></span>
+          <button className="small ai-link" onClick={() => onPrepare(l)}>Prepare</button>
           <select value={l.status} aria-label={`Status of ${l.title}`} onChange={(e) => void run(() => api.study.setLecture(l.id, { status: e.target.value as 'planned' }))}><option value="planned">Planned</option><option value="held">Held</option><option value="cancelled">Cancelled</option></select>
         </div>
       ))}
@@ -130,6 +138,7 @@ function Lectures({ d, run }: { d: CourseDetail; run(f: () => Promise<unknown>):
 
 const MOD_LABEL = { notes: 'note', files: 'file', saved: 'saved link' } as const;
 function Links({ d, module, run }: { d: CourseDetail; module: CourseLink['module']; run(f: () => Promise<unknown>): Promise<void> }) {
+  const ai = useAI();
   const [linkable] = useLoad(api.study.linkable);
   const [topicId, setTopicId] = useState('');
   const [kind, setKind] = useState<ResourceKind>('lecture_material');
@@ -146,6 +155,8 @@ function Links({ d, module, run }: { d: CourseDetail; module: CourseLink['module
             {l.missing && <small className="muted"> · deleted or no longer shared with you</small>}</span>
           {module === 'files' && !l.missing && <select value={l.kind ?? 'other'} aria-label={`Kind of ${l.title}`} onChange={(e) => void run(() => api.study.classify(l.id, e.target.value as ResourceKind))}>{RESOURCE_KINDS.map((k) => <option key={k} value={k}>{RESOURCE_KIND_LABEL[k]}</option>)}</select>}
           {module === 'files' && l.kind === 'past_paper' && <span className="chip">Past paper</span>}
+          {module === 'files' && !l.missing && <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: l.title, action: 'askDocument', scope: { kind: 'resource', refId: l.entityId }, ask: true })}>Ask this document</button>}
+          {module === 'files' && l.kind === 'past_paper' && !l.missing && <button className="small ai-link" onClick={() => ai.open({ mode: 'paper', title: `Analyze ${l.title}`, refId: l.entityId, examId: d.exams.find((e) => e.status === 'upcoming')?.id ?? null })}>Analyze past paper</button>}
           <button className="small" aria-label={`Remove ${l.title} from course`} onClick={() => void run(() => api.study.unlink(l.id))}>Remove from course</button>
         </div>
       ))}

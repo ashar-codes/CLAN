@@ -62,9 +62,11 @@ export const S = {
     for (const t of o.topicIds ?? []) if (s.topics.find((x) => x.id === t)?.courseId !== o.courseId) throw new Error('Topic of another course.');
     return { ...s, exams: [...s.exams, { id: c.id(), courseId: o.courseId, name: text(o.name, 160), at: o.at, location: (o.location ?? '').slice(0, 160), topicIds: o.topicIds ?? [], status: 'upcoming', grade: null, total: null, reflection: null }] };
   },
-  /** A result exists only when the student types one. */
-  setExamStatus: (s: StudyState, id: string, status: ExamStatus, r: { grade?: string; total?: string; reflection?: string } = {}): StudyState =>
-    ({ ...s, exams: s.exams.map((e) => (e.id === id ? { ...e, status, grade: status === 'completed' ? r.grade?.trim() || null : null, total: status === 'completed' ? r.total?.trim() || null : null, reflection: status === 'completed' ? r.reflection?.trim() || null : null } : e)) }),
+  /** A result exists only when the student types one; status changes keep it (an empty string clears a field). */
+  setExamStatus: (s: StudyState, id: string, status: ExamStatus, r: { grade?: string; total?: string; reflection?: string } = {}): StudyState => {
+    const pick = (v: string | undefined, cur: string | null) => (v === undefined ? cur : v.trim() || null);
+    return { ...s, exams: s.exams.map((e) => (e.id === id ? { ...e, status, grade: pick(r.grade, e.grade), total: pick(r.total, e.total), reflection: pick(r.reflection, e.reflection) } : e)) };
+  },
   prep(s: StudyState, examId: string, now: number) {
     const e = s.exams.find((x) => x.id === examId); if (!e) throw new Error('Exam not found.');
     const scope = S.topics(s, e.courseId).filter((t) => e.topicIds.includes(t.id));

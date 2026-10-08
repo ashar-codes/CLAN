@@ -9,7 +9,7 @@ const src = join(import.meta.dirname, '../src');
 const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));
 const imports = (f: string) => [...readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*'([^']+)'/g)].map((m) => m[1]!);
 const PREFIX: Record<string, string[]> = { clans: ['clans_'], files: ['resources_'], notes: ['notes_'], saved: ['saved_'], diary: ['diary_'], reminders: ['reminders_'], share: [], chat: ['chat_'], capture: ['capture_'], notifications: ['notify_'],
-  courses: ['courses_'], tasks: ['tasks_'], exams: ['exams_'], flashcards: ['flashcards_'], study: ['study_'], assignments: ['assign_'], agenda: [] };
+  courses: ['courses_'], tasks: ['tasks_'], exams: ['exams_'], flashcards: ['flashcards_'], study: ['study_'], assignments: ['assign_'], agenda: [], ai: ['ai_'] };
 /** Read-only classroom readers (see their headers). */
 const LEGACY_READERS: Record<string, string[]> = { 'modules/clans/classroom-import.ts': ['sessions', 'members'], 'modules/files/classroom-adopt.ts': ['resources'], 'modules/assignments/classroom-read.ts': ['assignments', 'submissions'] };
 
@@ -22,7 +22,7 @@ describe('module boundaries', () => {
     for (const f of walk(join(src, 'modules'))) {
       const mod = relative(join(src, 'modules'), f).split('/')[0]!;
       for (const i of imports(f)) {
-        if (!i.startsWith('.')) { expect(['zod', 'node:crypto', 'node:path', '@classroom/protocol'], `${relative(src, f)} → ${i}`).toContain(i); continue; }
+        if (!i.startsWith('.')) { expect(['zod', 'node:crypto', 'node:path', 'node:fs/promises', '@classroom/protocol', 'pdfjs-dist/legacy/build/pdf.mjs'], `${relative(src, f)} → ${i}`).toContain(i); continue; }
         const target = relative(src, join(f, '..', i));
         if (target.startsWith('core/')) continue;
         const [, other, file] = target.split('/');

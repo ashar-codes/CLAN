@@ -179,7 +179,12 @@ describe('course references, ordering, projection, lifecycles', () => {
     expect(app.exams.prep(me, e.id).readiness).toBeNull(); // no scope → nothing to count, no invented number
     expect(app.exams.setStatus(me, e.id, 'completed')).toMatchObject({ status: 'completed', grade: null, total: null, reflection: null });
     expect(app.exams.setStatus(me, e.id, 'completed', { grade: 'A-', total: '87%', reflection: 'fine' })).toMatchObject({ grade: 'A-', total: '87%' });
-    expect(app.exams.setStatus(me, e.id, 'cancelled').grade).toBeNull();
+    // regression: reopening / cancelling / editing never erases the recorded result; only an explicit clear does
+    expect(app.exams.setStatus(me, e.id, 'upcoming')).toMatchObject({ status: 'upcoming', grade: 'A-', total: '87%', reflection: 'fine' });
+    expect(app.exams.update(me, e.id, { name: 'Final exam' })).toMatchObject({ grade: 'A-', reflection: 'fine' });
+    expect(app.exams.setStatus(me, e.id, 'completed', { reflection: 'better than I thought' })).toMatchObject({ grade: 'A-', reflection: 'better than I thought' });
+    expect(app.exams.setStatus(me, e.id, 'completed', { grade: '' })).toMatchObject({ grade: null, total: '87%' });
+    expect(app.exams.setStatus(me, e.id, 'cancelled').total).toBe('87%');
     expect(app.agenda.range(me, t, t + 7 * DAY).filter((i) => i.kind === 'exam')).toEqual([]); // cancelled leaves the board
 
     const r = app.reminders.create(me, { text: 'Gym', dueAt: t + 3_600_000, recurrence: 'daily' });

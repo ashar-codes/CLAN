@@ -44,6 +44,13 @@ const api: DesktopApi = {
     decks: inv('cards:decks'), createDeck: inv('cards:createDeck'), addCard: inv('cards:add'), editCard: inv('cards:edit'), removeCard: inv('cards:remove'), cards: inv('cards:list'), queue: inv('cards:queue'), review: inv('cards:review'), dueCount: inv('cards:dueCount'),
     activeSession: inv('session:active'), planSession: inv('session:plan'), startSession: inv('session:start'), endSession: inv('session:end'), cancelSession: inv('session:cancel'), history: inv('session:history'),
   } as DesktopApi['study'],
+  ai: {
+    status: inv('ai:status'), settings: inv('ai:settings'), setSettings: inv('ai:setSettings'), setKey: inv('ai:setKey'), deleteKey: inv('ai:deleteKey'), agents: inv('ai:agents'),
+    preview: inv('ai:preview'), run: inv('ai:run'), cancel: inv('ai:cancel'), onDelta: (cb) => listen('ai:delta', cb), search: inv('ai:search'),
+    proposals: inv('ai:proposals'), accept: inv('ai:accept'), dismiss: inv('ai:dismiss'), answerQuiz: inv('ai:answerQuiz'), analyzePaper: inv('ai:analyzePaper'),
+    confirmPaperTopic: inv('ai:confirmPaperTopic'), proposeScope: inv('ai:proposeScope'), examGaps: inv('ai:examGaps'), openFile: inv('ai:openFile'),
+    conversations: inv('ai:conversations'), deleteHistory: inv('ai:deleteHistory'), usage: inv('ai:usage'), rebuild: inv('ai:rebuild'),
+  } as DesktopApi['ai'],
   capabilities: () => ipcRenderer.invoke('caps'),
   getProfile: () => ipcRenderer.invoke('profile:get'),
   saveProfile: (p) => ipcRenderer.invoke('profile:save', p),

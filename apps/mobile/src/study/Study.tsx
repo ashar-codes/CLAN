@@ -5,10 +5,11 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { GRADES, RECURRENCES, TOPIC_STATE_LABEL, TOPIC_STATES, type Grade, type Recurrence, type TopicState } from '@classroom/protocol';
 import { S, type MCard } from './model';
 import { loadStudy, useStudy } from './store';
+import { GuideTab } from './Guide';
 
 type C = { text: string; muted: string; border: string; surface: string; accent: string; danger: string; bg: string };
-type Tab = 'today' | 'courses' | 'tasks' | 'exams' | 'cards' | 'session';
-const TABS: [Tab, string][] = [['today', 'Today'], ['courses', 'Courses'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['cards', 'Cards'], ['session', 'Session']];
+type Tab = 'today' | 'courses' | 'tasks' | 'exams' | 'cards' | 'session' | 'guide';
+const TABS: [Tab, string][] = [['today', 'Today'], ['courses', 'Courses'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['cards', 'Cards'], ['session', 'Session'], ['guide', 'Ask CLAN']];
 const parse = (v: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?$/.exec(v.trim()); return m ? new Date(+m[1]!, +m[2]! - 1, +m[3]!, +(m[4] ?? 9), +(m[5] ?? 0)).getTime() : null; };
 const when = (t: number | null) => (t === null ? '' : new Date(t).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
 
@@ -34,6 +35,7 @@ export function StudyScreen({ c, onBack }: { c: C; onBack(): void }) {
       {tab === 'exams' && <Exams {...P} />}
       {tab === 'cards' && <Cards {...P} />}
       {tab === 'session' && <Session {...P} />}
+      {tab === 'guide' && <GuideTab {...P} />}
       <Text style={{ color: c.muted, fontSize: 12 }}>Stored on this phone only. Nothing here needs the internet.</Text>
     </ScrollView>
   );

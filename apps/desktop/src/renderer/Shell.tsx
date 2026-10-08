@@ -13,6 +13,8 @@ import { Ctx, SessionBar, useActiveSession, type StudyCtx, type StudyTarget } fr
 import { Saved } from './world/Saved.tsx';
 import { Me } from './world/Me.tsx';
 import { QuickCapture } from './world/QuickCapture.tsx';
+import { useAI } from './world/ai/ctx.tsx';
+import type { AIScope } from '../shared.ts';
 
 type Tab = 'space' | 'commons' | 'clans' | 'study' | 'saved' | 'me';
 const TABS: [Tab, string, string][] = [['space', 'My Space', '⌂'], ['commons', 'Commons', '◎'], ['clans', 'CLANs', '▦'], ['study', 'Study', '▥'], ['saved', 'Saved', '❏'], ['me', 'Me', '☺']];
@@ -26,7 +28,7 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
   const [meSection, setMeSection] = useState<'profile' | 'diary'>('profile');
   const [nearby, setNearby] = useState<NearbyClan[]>([]);
   const [toast, setToast] = useState('');
-  const [guide, setGuide] = useState(false);
+  const ai = useAI();
   const [manualFocus, setFocus] = useState(false);
   // A Focus study session turns Focus Mode on; ending it restores whatever was set before. No penalties, no streaks.
   const focus = manualFocus || !!session?.focus;
@@ -38,12 +40,24 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
   useEffect(() => api.notify.on((n) => { if (document.hasFocus()) setToast(`${n.title}: ${n.body}`); }), []);
 
   const go = (t: SpaceTarget) => {
-    if (t === 'guide') return setGuide(true);
+    if (t === 'guide') return ai.open({ mode: 'run', title: 'Ask CLAN', action: 'ask', scope: here(), ask: true });
     if (t === 'notes' || t === 'exams' || t === 'study' || t === 'board' || t === 'tasks') { setStudyTarget({ tab: t === 'study' ? 'campus' : t }); return setTab('study'); }
     if (t.startsWith('course:')) { setStudyTarget({ tab: 'campus', courseId: t.slice(7) }); return setTab('study'); }
     if (t === 'diary' || t === 'me') { setMeSection(t === 'diary' ? 'diary' : 'profile'); return setTab('me'); }
     setTab(t as Tab);
   };
+  /** Ask CLAN defaults to where the student is. */
+  const here = (): AIScope => tab === 'study' && studyTarget.examId ? { kind: 'exam', examId: studyTarget.examId } : tab === 'study' && studyTarget.courseId ? { kind: 'course', courseId: studyTarget.courseId } : { kind: 'global' };
+  const openSource = (o: Record<string, unknown>) => {
+    const s = (k: string) => String(o[k] ?? '');
+    if (o.module === 'notes') { setStudyTarget({ tab: 'notes', noteId: s('id') }); setTab('study'); }
+    else if (o.module === 'courses') { setStudyTarget({ tab: 'campus', courseId: s('courseId') }); setTab('study'); }
+    else if (o.module === 'exams') { setStudyTarget({ tab: 'exams', examId: s('examId') }); setTab('study'); }
+    else if (o.module === 'chat') setTab('clans');
+    else if (o.module === 'saved') setTab('saved');
+    else if (o.module === 'diary') { setMeSection('diary'); setTab('me'); }
+  };
+  useEffect(() => { ai.nav.current = openSource; return () => { ai.nav.current = null; }; });
   const study: StudyCtx = {
     target: studyTarget, go: (t) => { setStudyTarget(t); setTab('study'); }, session,
     start: async (o) => { try { setSession(await api.study.startSession(o)); setToast(o.focus ? 'Study session started · Focus on' : 'Study session started'); } catch (e) { setToast(String((e as Error).message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); } },
@@ -65,6 +79,7 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
     <div className={`shell ${focus ? 'is-focus' : ''}`}>
       <header className="shell-top">
         <span className="brand-sm">CLAN</span>
+        <button className="ask-clan" onClick={() => go('guide')} aria-label="Ask CLAN">Ask CLAN</button>
         <nav className="tabs-main" aria-label="Main">
           {TABS.map(([t, l, ic]) => <button key={t} className={tab === t ? 'on' : ''} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}><span className="tab-ic" aria-hidden>{ic}</span>{l}</button>)}
         </nav>
@@ -77,13 +92,6 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
         {tab === 'saved' && <Saved experience={experience} />}
         {tab === 'me' && <Me experience={experience} section={meSection} />}
       </main>
-      {guide && (
-        <div className="guide-panel card" role="dialog" aria-label="CLAN Guide">
-          <div className="row between"><span className="eyebrow ai">Guide</span><button className="small" onClick={() => setGuide(false)}>Close</button></div>
-          <p>No AI provider is set up on this device, so the Guide has nothing to say yet.</p>
-          <p className="muted small-text">When one is, it will only see what the screen you’re on shows. Your Diary stays closed to it unless you allow it in Me › Privacy.</p>
-        </div>
-      )}
       {focus && <div className="focus-veil" aria-hidden />}
       <SessionBar onNote={() => go('notes')} />
       <QuickCapture onDone={(m, g) => { setToast(m); reloadHome(); if (g) go(g); }} />

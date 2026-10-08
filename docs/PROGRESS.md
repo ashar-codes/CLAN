@@ -98,3 +98,15 @@ Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi
 * Mobile: phone-local Study screen on the same algorithms (typecheck + model test; device runtime UNVERIFIED).
 * Tests 240 → 250; E2E 11 → 13 (full study flow with restart; Classroom assignment in Course/Today, not a Task).
 * Renderer main chunk 329.0 → 372.5 kB (98.7 → 107.7 kB gzip); CSS +6 kB; Campus 3D chunk unchanged (lazy).
+
+## CLAN Intelligence delivered (tag `clan-intelligence`)
+* Provider-neutral AI core (protocol `ai.ts`): AIProvider, real OpenAI-compatible adapter (streaming, JSON, embeddings,
+  cancel, usage, typed errors), grounded prompting + citation parsing, typed proposals, deterministic test provider.
+* `ai` module: permission-aware context (agent principals over module APIs), local knowledge index (PDF/TXT/MD extraction,
+  per-canonical-object chunks, FTS5, optional vectors), proposals applied only on acceptance by owning modules, local
+  conversations, constrained agents (Guide, Note Coach, Quiz Master, Lecture Prep, Past-paper Analyst, Exam Coach).
+* Desktop: Ask CLAN (contextual Guide), Ask this document, note actions, Compare My Notes, Quiz Me, draft flashcards,
+  Prepare Lecture, past-paper analysis, Exam Coach, chat summary, search → ask, Me › AI (keys in OS secure storage).
+* Mobile: phone Guide over phone study data (typecheck + tests; device runtime UNVERIFIED).
+* Fixed: reopening/editing an exam no longer erases its recorded result.
+* Tests 250 → 267; E2E 13 → 15. Live-model evaluation not run (no credential configured).

@@ -3,10 +3,12 @@ import type { Iface } from '@classroom/server';
 import type { ChatMessageView, ChatThreadView, ClassroomInfo, ClientMessage, JoinPolicy, MemberStatus, Receipt, ResourceView, StudentProfile, TransferState } from '@classroom/protocol';
 import type { KeystoreStatus } from './main/keystore.ts';
 import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice,
-  Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem } from '@clan/core';
-import type { Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState, countdown, readiness } from '@classroom/protocol';
+  Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem,
+  AISettings, AIRequest, RunResult, Preview, AIScope, Include, Action, ProposalView, SourceKind } from '@clan/core';
+import type { Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState, countdown, readiness, Citation, ProposalKind } from '@classroom/protocol';
 export type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice,
-  Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem, Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState };
+  Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem, Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState,
+  AISettings, AIRequest, RunResult, Preview, AIScope, Include, Action, ProposalView, SourceKind, Citation, ProposalKind };
 
 export type Capabilities = {
   platform: string;
@@ -198,6 +200,41 @@ export type CaptureApi = {
   onAdded(cb: () => void): () => void;
 };
 
+export type AIStatus = { provider: { label: string; model: string; local: boolean } | null; message: string | null; diaryGranted: boolean; index: { sources: number; chunks: number; chars: number };
+  hasKey: boolean; localAvailable: boolean; secureStorage: boolean };
+export type PaperQuestion = { id: string; n: number; page: number | null; text: string; suggestedTopicId: string | null; confidence: string | null; method: string | null; topicId: string | null; cite: string; refId: string };
+export type PaperResult = { status: 'ok' | 'unsupported' | 'denied'; reason: string | null; label?: string; topics?: { id: string; title: string }[]; questions: PaperQuestion[] };
+export type QuizResult = { score: number; total: number; results: { i: number; correct: boolean; given: string; expected: string; explanation: string; citations: Citation[]; selfMarked: boolean }[];
+  suggestions: { topicId: string; title: string; message: string; current: TopicState; proposal: ProposalView | null }[] };
+export type ExamGap = { topicId: string; title: string; state: TopicState; reasons: string[]; gap: boolean };
+/** CLAN Intelligence (window.classroom.ai). Keys go in via setKey and never come back out. */
+export type AIApi = {
+  status(): Promise<AIStatus>;
+  settings(): Promise<AISettings>;
+  setSettings(patch: Partial<AISettings>): Promise<AISettings>;
+  setKey(key: string): Promise<void>;
+  deleteKey(): Promise<void>;
+  agents(): Promise<{ id: string; name: string; reads: SourceKind[]; proposals: ProposalKind[]; cannot: string[] }[]>;
+  preview(r: Pick<AIRequest, 'action' | 'scope' | 'include' | 'agent'>): Promise<Preview>;
+  run(runId: string, r: AIRequest): Promise<RunResult>;
+  cancel(runId: string): Promise<void>;
+  onDelta(cb: (d: { runId: string; text: string }) => void): () => void;
+  search(q: string, scope?: AIScope): Promise<Citation[]>;
+  proposals(status?: 'pending' | 'accepted' | 'dismissed' | 'expired' | 'all'): Promise<ProposalView[]>;
+  accept(id: string, edited?: unknown): Promise<ProposalView>;
+  dismiss(id: string): Promise<void>;
+  answerQuiz(quizId: string, answers: { i: number; answer: string; selfCorrect?: boolean }[]): Promise<QuizResult>;
+  analyzePaper(refId: string, examId?: string | null): Promise<PaperResult>;
+  confirmPaperTopic(questionId: string, topicId: string | null): Promise<void>;
+  proposeScope(refId: string, examId: string): Promise<ProposalView | null>;
+  examGaps(examId: string): Promise<ExamGap[]>;
+  openFile(refId: string): Promise<void>;
+  conversations(): Promise<{ id: string; title: string; scope: string; updatedAt: number }[]>;
+  deleteHistory(): Promise<void>;
+  usage(): Promise<{ provider: string; model: string; requests: number; inputTokens: number | null; outputTokens: number | null }[]>;
+  rebuild(): Promise<{ sources: number; chunks: number; chars: number }>;
+};
+
 /** API exposed by the preload as window.classroom. */
 export type DesktopApi = {
   clan: ClanApi;
@@ -205,6 +242,7 @@ export type DesktopApi = {
   notify: NotifyApi;
   capture: CaptureApi;
   study: StudyApi;
+  ai: AIApi;
   capabilities(): Promise<Capabilities>;
   getProfile(): Promise<OwnProfile>;
   saveProfile(p: Pick<StudentProfile, 'fullName' | 'rollNo' | 'deviceName'>): Promise<OwnProfile>;

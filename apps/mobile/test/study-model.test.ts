@@ -17,6 +17,8 @@ it('phone study model: course → topics → exam prep, tasks, SM-2 cards, recur
   expect(S.prep(s, s.exams[0]!.id, now)).toMatchObject({ readiness: { label: '1 of 2 topics marked Confident' }, countdown: { label: '5 days' } });
   expect(() => S.addExam(s, k(), { courseId: 'nope', name: 'x', at: now })).toThrow(/Course not found/);
   expect(S.setExamStatus(s, s.exams[0]!.id, 'completed').exams[0]).toMatchObject({ grade: null, total: null }); // nothing invented
+  const graded = S.setExamStatus(s, s.exams[0]!.id, 'completed', { grade: 'B+' });
+  expect(S.setExamStatus(graded, s.exams[0]!.id, 'upcoming').exams[0]!.grade).toBe('B+'); // reopening keeps it
 
   s = S.addTask(s, k(), { title: 'PS3', courseId: os, dueAt: now + 3_600_000 });
   s = S.addReminder(s, k(), { text: 'Gym', dueAt: now + 60_000, recurrence: 'weekly' });
@@ -43,4 +45,20 @@ it('phone study model: course → topics → exam prep, tasks, SM-2 cards, recur
   s = S.startSession(s, k(), { goal: 'Other' }); // starting another ends the first
   expect(s.sessions.filter((x) => x.endedAt === null)).toHaveLength(1);
   expect(S.history(s, 0).find((r) => r.courseId === os)).toMatchObject({ sessions: 1, minutes: 25, reviews: 1 });
+});
+
+it('phone Guide: grounded answer cites only phone study data; drafted cards are drafts', async () => {
+  const { deterministicProvider } = await import('@classroom/protocol');
+  const { ask, draftCards } = await import('../src/study/ai.ts');
+  const now = Date.now(), k = () => ({ now, id: randomUUID });
+  let s = S.addCourse(EMPTY, k(), { name: 'OS' }); const os = s.courses[0]!.id;
+  s = S.addTopic(s, k(), os, 'Deadlocks');
+  s = S.addDeck(s, k(), { name: 'Terms', courseId: os });
+  s = S.addCard(s, k(), s.decks[0]!.id, 'Coffman conditions', 'Mutual exclusion is a Coffman condition.');
+  const r = await ask(deterministicProvider(), s, { kind: 'course', courseId: os }, 'Coffman conditions mutual exclusion');
+  expect(r.citations.map((c) => c.label)).toEqual(['Card: Terms']);
+  expect((await ask(deterministicProvider(), s, { kind: 'course', courseId: os }, 'photosynthesis chlorophyll')).answer.notFound).toBe(true);
+  const before = s.cards.length;
+  await draftCards(deterministicProvider(), s, os);
+  expect(s.cards.length).toBe(before); // nothing added by drafting
 });

@@ -5,7 +5,7 @@ import type { AgendaItem, StudySession, TopicState } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 
 export type StudyTab = 'campus' | 'board' | 'tasks' | 'exams' | 'cards' | 'notes' | 'history';
-export type StudyTarget = { tab: StudyTab; courseId?: string; examId?: string; deckId?: string };
+export type StudyTarget = { tab: StudyTab; courseId?: string; examId?: string; deckId?: string; noteId?: string };
 export type StudyCtx = {
   target: StudyTarget; go(t: StudyTarget): void;
   session: StudySession | null;

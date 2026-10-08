@@ -8,5 +8,6 @@ export default defineConfig({
     target: 'node24',
     rollupOptions: { output: { format: 'es', entryFileNames: 'main.js' } },
   },
-  ssr: { noExternal: true, external: ['electron'] },
+  // pdfjs-dist stays external: it loads its worker module from its own package at run time (bundling breaks that).
+  ssr: { noExternal: true, external: ['electron', 'pdfjs-dist'] },
 });

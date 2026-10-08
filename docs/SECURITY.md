@@ -135,6 +135,18 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
 * No recording, no frame persistence; the test pattern source exists only in unpackaged builds with `CLAN_TEST_CAPTURE=1`.
 * Gap: phones can't view yet (MEDIA.md) — not worked around with an unpinned socket.
 
+## CLAN Intelligence (AI.md, AI_CONTEXT.md, AI_PROVIDERS.md)
+* Provider credentials: OS secure storage per provider address; write-only from the UI; never in SQLite, logs, prompts or
+  the renderer; only sent as `Authorization` to that address; provider errors redacted. No secure storage → no key stored.
+* Context: built from module APIs as an agent principal; cross-CLAN, removed members, unshared items and non-participant
+  direct chats yield nothing; Diary needs the unexpired grant plus a per-request choice; Exam Coach cannot read it.
+* Prompt injection: sources fenced as untrusted data, rules first, no tools, schema-validated output, citations limited to
+  given sources, proposals created only by code for the agent's allowed kinds, accepted only by the user, re-validated,
+  applied atomically by owning modules. Adversarial tests: injected PDF, tag-breaking markdown, gullible model output.
+* Files opened from a citation: readable by this person and only PDF/TXT/Markdown are opened; anything else is revealed.
+* `pdfjs-dist` 6.3.289 (Mozilla PDF.js) parses untrusted PDFs in the main process (text layer only; font-face loading disabled),
+  no font loading, 60 MB cap; it is loaded lazily on first extraction.
+
 ## Known gaps (tracked)
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
   code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.

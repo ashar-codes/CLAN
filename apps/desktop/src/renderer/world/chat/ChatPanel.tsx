@@ -6,6 +6,7 @@ import { formatBytes } from '@classroom/client';
 import type { Conn, FileState, SavedItem } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import type { ChatPerson, ChatState } from './useChat.ts';
+import { useAI } from '../ai/ctx.tsx';
 
 const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const day = (ts: number) => new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -48,6 +49,7 @@ export default function ChatPanel({ chat, role, people, clanName, canSendFiles, 
 }
 
 function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: ChatThreadView; chat: ChatState; role: 'host' | 'member'; clanName: string; canSendFiles: boolean; conn: Conn | null }) {
+  const ai = useAI();
   const list = chat.msgs[t.id] ?? [];
   const mine = Object.values(chat.pending).filter((p) => ('id' in p.payload.thread ? p.payload.thread.id === t.id : p.payload.thread.kind === t.kind && (t.kind === 'group' || ('to' in p.payload.thread && p.payload.thread.to === t.with?.handle))) && !list.some((m) => m.id === p.payload.id));
   const [text, setText] = useState('');
@@ -83,6 +85,7 @@ function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: Chat
     <div className="chat-conv">
       <header className="chat-head">
         <b>{t.kind === 'group' ? `Everyone in ${clanName}` : t.with?.name}</b>
+        {chat.clanId && <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: 'Summarize discussion', action: 'chatSummary', scope: { kind: 'clan', clanId: chat.clanId!, threadId: t.id }, include: { chat: true } })}>Summarize discussion</button>}
         <span className="muted small-text">{t.kind === 'group' ? 'Group conversation · kept by the host' : `Direct conversation · only you two see it here · relayed and kept by the host${t.with && !t.with.here ? ' · not in the room right now' : ''}`}</span>
       </header>
       <div className="chat-log" role="log" aria-live="polite" aria-label={t.kind === 'group' ? 'Group messages' : `Messages with ${t.with?.name}`}>

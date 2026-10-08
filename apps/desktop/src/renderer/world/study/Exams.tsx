@@ -5,6 +5,7 @@ import type { ExamCenter as Center, Topic } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import { errText, useLoad } from '../useLoad.ts';
 import { Confidence, day, fromLocal, useStudy, when } from './common.tsx';
+import { useAI } from '../ai/ctx.tsx';
 
 export function Exams({ examId }: { examId?: string }) {
   const { go } = useStudy();
@@ -67,6 +68,7 @@ export function NewExam({ courseId, topics, onDone }: { courseId?: string; topic
 
 function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
   const { start, go } = useStudy();
+  const ai = useAI();
   const [c, reload, loadErr] = useLoad<Center>(useCallback(() => api.study.examCenter(id), [id]));
   const [result, setResult] = useState({ grade: '', total: '', reflection: '' });
   const [completing, setCompleting] = useState(false);
@@ -86,6 +88,7 @@ function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
           <small>{exam.status !== 'upcoming' ? exam.status : c.countdown.past ? 'started' : c.countdown.days >= 1 ? (c.countdown.days === 1 ? `day ${c.countdown.hours} h` : 'days') : 'left'}</small>
         </span>
         <div className="grow"><span className="eyebrow">Exam Command Center · {c.course.name}</span><h2 className="title world">{exam.name}</h2><span className="muted">{when(exam.at)}{exam.location ? ` · ${exam.location}` : ''}</span></div>
+        {exam.status === 'upcoming' && <button className="ai-link" onClick={() => ai.open({ mode: 'coach', title: `Exam Coach · ${exam.name}`, examId: exam.id })}>Exam Coach</button>}
         {exam.status === 'upcoming' && <button className="primary" onClick={() => start({ courseId: c.course.id, goal: `Prepare ${exam.name}`, focus: true })}>Start study session</button>}
       </div>
       {err && <p className="error small-text" role="alert">{err}</p>}
@@ -102,7 +105,7 @@ function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
       </section>
 
       <div className="cc-grid">
-        <section className="card panel-body"><span className="eyebrow">Past papers</span>{c.pastPapers.map(ref)}{!c.pastPapers.length && <p className="muted small-text">Mark a course file as “Past paper” to see it here.</p>}</section>
+        <section className="card panel-body"><span className="eyebrow">Past papers</span>{c.pastPapers.map((l) => <div key={l.id} className="row between">{ref(l)}{!l.missing && <button className="small ai-link" onClick={() => ai.open({ mode: 'paper', title: `Analyze ${l.title}`, refId: l.entityId, examId: exam.id })}>Analyze</button>}</div>)}{!c.pastPapers.length && <p className="muted small-text">Mark a course file as “Past paper” to see it here.</p>}</section>
         <section className="card panel-body"><span className="eyebrow">Resources</span>{c.resources.map(ref)}{!c.resources.length && <p className="muted small-text">No files linked to these topics.</p>}</section>
         <section className="card panel-body"><span className="eyebrow">Notes</span>{c.notes.map(ref)}{c.saved.map(ref)}{!c.notes.length && !c.saved.length && <p className="muted small-text">No notes linked to these topics.</p>}</section>
         <section className="card panel-body"><span className="eyebrow">Flashcards</span>
@@ -119,7 +122,7 @@ function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
         <span className="eyebrow">Status</span>
         {exam.status === 'completed' ? <p>Completed{exam.grade ? ` · your grade: ${exam.grade}${exam.total ? ` / ${exam.total}` : ''}` : ''}{exam.reflection ? ` — ${exam.reflection}` : ''}</p>
           : exam.status === 'cancelled' ? <p>Cancelled</p> : null}
-        {exam.status === 'upcoming' && !completing && <div className="row"><button onClick={() => setCompleting(true)}>Mark completed</button><button className="danger" onClick={() => void run(() => api.study.examStatus(exam.id, 'cancelled'))}>Cancel exam</button></div>}
+        {exam.status === 'upcoming' && !completing && <div className="row"><button onClick={() => { setResult({ grade: exam.grade ?? '', total: exam.total ?? '', reflection: exam.reflection ?? '' }); setCompleting(true); }}>Mark completed</button><button className="danger" onClick={() => void run(() => api.study.examStatus(exam.id, 'cancelled'))}>Cancel exam</button></div>}
         {completing && (
           <form className="row wrap" onSubmit={(e) => { e.preventDefault(); void run(() => api.study.examStatus(exam.id, 'completed', result)).then(() => setCompleting(false)); }}>
             <input value={result.grade} onChange={(e) => setResult({ ...result, grade: e.target.value })} placeholder="Your grade (optional)" aria-label="Grade" maxLength={40} />

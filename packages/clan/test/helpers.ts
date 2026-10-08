@@ -6,10 +6,10 @@ import { openClan } from '../src/index.ts';
 
 export const tmp = () => mkdtempSync(join(tmpdir(), 'clan-'));
 /** A device database exactly as the classroom app creates it (legacy migrations 1–4), then CLAN on top. */
-export function setup(o: { db?: ReturnType<typeof openDb>; storageDir?: string; now?: () => number } = {}) {
+export function setup(o: { db?: ReturnType<typeof openDb>; storageDir?: string; now?: () => number; aiProvider?: Parameters<typeof openClan>[1]['aiProvider'] } = {}) {
   const db = o.db ?? openDb(':memory:');
   const storageDir = o.storageDir ?? tmp();
-  return { app: openClan(db, { storageDir, now: o.now }), db, storageDir };
+  return { app: openClan(db, { storageDir, now: o.now, aiProvider: o.aiProvider }), db, storageDir };
 }
 export const user = (userId: string) => ({ kind: 'user' as const, userId });
 export const file = (dir: string, name: string, content: string) => { const p = join(dir, name); writeFileSync(p, content); return p; };

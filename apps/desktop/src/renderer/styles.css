@@ -431,3 +431,32 @@ table.mini { width: 100%; border-collapse: collapse; font-size: .9rem; } table.m
   .session-bar { top: auto; bottom: 84px; right: 16px; left: 16px; width: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .flashcard { transition: none; } }
+
+/* ---- CLAN Intelligence: violet is an accent for Guide actions only ---- */
+.ask-clan { margin-left: auto; order: 3; border-radius: 999px; font-size: .85rem; padding: .35rem .85rem; color: var(--ai); border-color: color-mix(in srgb, var(--ai) 40%, var(--border)); background: var(--surface); }
+button.ai-link { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 30%, var(--border)); }
+button.link.ai-link { border: 0; }
+.ai-sheet { position: fixed; right: 22px; top: 70px; bottom: 22px; z-index: 33; width: min(560px, calc(100vw - 32px)); overflow-y: auto; display: grid; align-content: start; gap: .7rem;
+  border-color: color-mix(in srgb, var(--ai) 40%, var(--border)); box-shadow: 0 0 0 4px var(--ai-soft), var(--shadow-2); animation: enter var(--t-base) var(--ease-out); }
+.ai-sources summary { cursor: pointer; color: var(--ink-2); }
+.ai-groups { display: flex; flex-wrap: wrap; padding-top: .4rem; }
+.chip-check.off { opacity: .55; }
+.ai-stream { white-space: pre-wrap; font: inherit; background: var(--paper-2); border-radius: 12px; padding: .7rem; max-height: 240px; overflow: auto; }
+.ai-answer p { line-height: 1.55; }
+.cites { display: inline-flex; flex-wrap: wrap; gap: .25rem; }
+.cite { font-size: .74rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid var(--border); background: var(--paper-2); color: var(--ink-2); }
+.cite:hover { border-color: var(--study); color: var(--ink); }
+.ai-general { border-left: 3px dashed var(--line); padding-left: .7rem; }
+.ai-local .line { align-items: flex-start; }
+.ai-foot { border-top: 1px solid var(--border); padding-top: .4rem; }
+.proposal { display: grid; gap: .4rem; border-style: dashed; }
+.proposal.st-accepted { border-style: solid; border-color: var(--campus); } .proposal.st-dismissed { opacity: .55; }
+.ai-preview { white-space: pre-wrap; font: inherit; font-size: .85rem; background: var(--paper-2); border-radius: 10px; padding: .6rem; max-height: 200px; overflow: auto; }
+.draft-card { display: grid; gap: .3rem; padding: .5rem; border-radius: 12px; border: 1px solid var(--border); }
+.draft-card.rejected { opacity: .45; } .draft-card.rejected input:not([type=checkbox]), .draft-card.rejected textarea { text-decoration: line-through; }
+.quiz-q { border: 1px solid var(--border); border-radius: 12px; padding: .6rem .8rem; display: grid; gap: .3rem; }
+.quiz-q.ok { border-color: var(--campus); } .quiz-q.wrong { border-color: var(--brick); }
+.plan-day { display: grid; gap: .2rem; padding: .3rem 0; border-bottom: 1px solid var(--border); }
+.paper-q { align-items: flex-start; }
+.note-ai { padding: .2rem 0; }
+@media (max-width: 640px) { .ai-sheet { left: 16px; right: 16px; top: auto; max-height: 80vh; width: auto; } }

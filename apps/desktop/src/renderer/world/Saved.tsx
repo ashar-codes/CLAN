@@ -4,6 +4,7 @@ import type { Collection, SavedItem } from '../../shared.ts';
 import { api } from '../App.tsx';
 import { useLoad, errText } from './useLoad.ts';
 import { Inbox } from './Inbox.tsx';
+import { useAI } from './ai/ctx.tsx';
 import type { Experience } from './experience.ts';
 
 /** Kind from the link itself (no fetching). */
@@ -18,6 +19,7 @@ const ICON = { video: '▶', image: '◩', file: '▤', article: '¶' } as const
 const tone = (c: Collection) => (c.kind === 'inbox' ? 'inbox' : c.kind === 'watch-later' ? 'later' : 'custom');
 
 export function Saved({ experience }: { experience: Experience }) {
+  const ai = useAI();
   const [cols, reloadCols] = useLoad<Collection[]>(api.clan.collections);
   const [items, reloadItems] = useLoad<SavedItem[]>(api.clan.savedItems);
   const [clans] = useLoad(api.clan.list);
@@ -33,6 +35,7 @@ export function Saved({ experience }: { experience: Experience }) {
       <div className="saved-thumb"><span aria-hidden>{ICON[kindOf(i.url)]}</span><span className="chip">{i.source}</span></div>
       <a href={i.url} target="_blank" rel="noreferrer noopener" className="saved-title">{i.title}</a>
       {i.note && <p className="muted small-text">{i.note}</p>}
+      <button className="link small ai-link left" onClick={() => ai.open({ mode: 'run', title: i.title, action: 'ask', scope: { kind: 'saved', savedId: i.id }, ask: true })}>Ask about this (link and your note only)</button>
       {i.tags.length > 0 && <div className="row tight">{i.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
       <div className="row tight">
         <select value={i.collectionId} onChange={async (e) => { const to = e.target.value; await move(i.id, to); }} aria-label="Move to">{cols?.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>

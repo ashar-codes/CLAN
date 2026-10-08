@@ -42,6 +42,7 @@
   },
   "author": "CLAN",
   "dependencies": {
+    "pdfjs-dist": "6.3.289",
     "qrcode": "1.5.4"
   }
 }

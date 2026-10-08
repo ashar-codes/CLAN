@@ -19,6 +19,7 @@ import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
 import { registerStudy } from './study.ts';
+import { Credentials, providerFactory, registerAI } from './ai.ts';
 import { DesktopDirect } from './direct.ts';
 import { mediaBinary, mediaWorkDir, registerScreen } from './screen.ts';
 import { ScreenShareEvents } from '@clan/core';
@@ -346,9 +347,11 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => { void direct.net?.restart().catch((e) => logError('direct', e)); }); // same SSID/passphrase: members rejoin with their device keys
   registerIpc();
   registerScreen();
-  clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName);
+  const aiCreds = new Credentials();
+  clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName, providerFactory(aiCreds));
   chatHooks = registerChat({ clan, server: () => server, trust, files: studentFiles });
   registerStudy(clan);
+  registerAI(clan, aiCreds);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

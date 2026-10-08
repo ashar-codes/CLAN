@@ -11,8 +11,8 @@ const ACTIVITY: Record<string, string> = { CourseCreated: 'Course added', ExamCr
 
 export type DesktopClan = ClanApp & { classroomClanFor(title: string): string | null };
 
-export function registerClan(db: Parameters<typeof openClan>[0], storageDir: string, localName: () => string | undefined): DesktopClan {
-  const c = openClan(db, { storageDir, localName: localName() });
+export function registerClan(db: Parameters<typeof openClan>[0], storageDir: string, localName: () => string | undefined, aiProvider?: Parameters<typeof openClan>[1]['aiProvider']): DesktopClan {
+  const c = openClan(db, { storageDir, localName: localName(), aiProvider });
   const me = { kind: 'user' as const, userId: c.me };
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
 

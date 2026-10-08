@@ -59,13 +59,15 @@ export class Exams {
     this.db.prepare('DELETE FROM exams_topics WHERE exam_id = ?').run(examId);
     for (const t of topicIds) { if (this.courses.topic(p, t).courseId !== courseId) throw new Error('Topic of another course.'); this.db.prepare('INSERT OR IGNORE INTO exams_topics (exam_id, topic_id) VALUES (?, ?)').run(examId, t); }
   }
-  /** Completing may record a result — only what the student types; nothing is ever computed or guessed. */
+  /**
+   * Changes status. A recorded result (grade, total, reflection) is kept across every status change; a field changes only
+   * when the student passes it (an empty string clears it explicitly). Nothing is ever computed or guessed.
+   */
   setStatus(p: Principal, id: string, status: ExamStatus, result?: { grade?: string; total?: string; reflection?: string }) {
-    this.must(p, id);
-    const r = result ?? {};
+    const e = this.must(p, id), r = result ?? {};
+    const pick = (v: string | undefined, cur: string | null, max: number) => (v === undefined ? cur : z.string().trim().max(max).parse(v) || null);
     this.db.prepare('UPDATE exams_exams SET status = ?, grade = ?, total = ?, reflection = ?, updated_at = ? WHERE id = ?')
-      .run(z.enum(EXAM_STATUSES).parse(status), status === 'completed' ? z.string().trim().max(40).parse(r.grade ?? '') || null : null, status === 'completed' ? z.string().trim().max(40).parse(r.total ?? '') || null : null,
-        status === 'completed' ? z.string().max(5000).parse(r.reflection ?? '') || null : null, this.now(), id);
+      .run(z.enum(EXAM_STATUSES).parse(status), pick(r.grade, e.grade, 40), pick(r.total, e.total, 40), pick(r.reflection, e.reflection, 5000), this.now(), id);
     this.bus.publish(ExamChanged, 'exams', { examId: id, ownerId: userOf(p), status });
     return this.must(p, id);
   }
