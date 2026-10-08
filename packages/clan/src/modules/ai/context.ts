@@ -15,22 +15,23 @@ import type { Exams } from '../exams/index.ts';
 import type { Tasks } from '../tasks/index.ts';
 import type { Flashcards } from '../flashcards/index.ts';
 import type { Study } from '../study/index.ts';
+import type { Recordings } from '../recordings/index.ts';
 import { TOPIC_STATE_LABEL } from '@classroom/protocol';
 import { extractFile, markdown, type Extracted } from './extract.ts';
 import { may, type SourceKind } from './agents.ts';
 
-export type Deps = { clans: Clans; courses: Courses; notes: Notes; files: Files; saved: Saved; chat: Chat; exams: Exams; tasks: Tasks; flashcards: Flashcards; study: Study; store: ResourceStore; broker: ContextBroker };
+export type Deps = { clans: Clans; courses: Courses; notes: Notes; files: Files; saved: Saved; chat: Chat; exams: Exams; tasks: Tasks; flashcards: Flashcards; study: Study; recordings: Recordings; store: ResourceStore; broker: ContextBroker };
 export type AIScope =
   | { kind: 'global' } | { kind: 'course'; courseId: string; topicId?: string | null } | { kind: 'lecture'; courseId: string; lectureId: string }
   | { kind: 'exam'; examId: string } | { kind: 'note'; noteId: string; courseId?: string | null; lectureId?: string | null } | { kind: 'resource'; refId: string }
   | { kind: 'saved'; savedId: string } | { kind: 'clan'; clanId: string; threadId?: string | null } | { kind: 'search'; hits: { module: string; entityId: string }[] };
 /** Where a citation opens. */
 export type OpenTarget = { module: 'notes'; id: string } | { module: 'files'; refId: string; page?: number | null } | { module: 'saved'; id: string }
-  | { module: 'chat'; clanId: string; threadId: string; messageId: string } | { module: 'courses'; courseId: string } | { module: 'exams'; examId: string } | { module: 'diary'; day: string };
+  | { module: 'chat'; clanId: string; threadId: string; messageId: string } | { module: 'courses'; courseId: string } | { module: 'exams'; examId: string } | { module: 'diary'; day: string } | { module: 'recordings'; tapeId: string };
 export type Candidate = { key: string; kind: SourceKind; group: string; label: string; version: string; open: OpenTarget; pinned?: boolean; paper?: boolean; load(): Promise<Extracted> | Extracted };
 export type Include = Record<SourceKind, boolean>;
-export const DEFAULT_INCLUDE: Include = { notes: true, resources: true, saved: true, classroom: true, chat: false, study: true, diary: false };
-const GROUP: Record<SourceKind, string> = { notes: 'My notes', resources: 'Files', saved: 'Saved material', classroom: 'Classroom material', chat: 'Chat', study: 'Study data', diary: 'Diary' };
+export const DEFAULT_INCLUDE: Include = { notes: true, resources: true, saved: true, classroom: true, chat: false, study: true, recordings: false, diary: false };
+const GROUP: Record<SourceKind, string> = { notes: 'My notes', resources: 'Files', saved: 'Saved material', classroom: 'Classroom material', chat: 'Chat', study: 'Study data', recordings: 'Study Tapes (timeline only)', diary: 'Diary' };
 
 const text = (t: string): Extracted => (t.trim() ? markdown(t) : { status: 'no_text', sections: [] });
 const day = (t: number) => new Date(t).toLocaleDateString('en-CA');
@@ -99,29 +100,39 @@ export function select(m: Deps, a: Principal & { kind: 'agent' }, scope: AIScope
     }
   };
 
+  /** Study Tapes: only the student's own timeline entries (no transcript exists); off unless included. */
+  const tapes = (o: { courseId?: string; lectureId?: string } = {}) => {
+    if (!on('recordings') || !may(a, 'recordings:read')) return;
+    for (const t of m.recordings.list(a, { ...o, limit: 50 })) {
+      const body = m.recordings.timelineText(a, t.id); if (!body) continue;
+      add({ key: `tape:${t.id}`, kind: 'recordings', group: GROUP.recordings, label: `Study Tape: ${t.title}`, version: `${t.durationMs}:${hash(body)}`, open: { module: 'recordings', tapeId: t.id }, load: () => text(body) });
+    }
+  };
+
   switch (scope.kind) {
     case 'global':
       for (const n of m.notes.mine(a, 500)) note(n.id);
       for (const f of m.files.list(a, { kind: 'personal', ownerId: u }).slice(0, 300)) file(f.refId);
       for (const s of m.saved.items(a).slice(0, 300)) saved(s.id);
       for (const c of m.courses.list(me)) { studyData(c.id); courseRefs(c.id); classroom(c.clanId); }
+      tapes();
       for (const c of m.clans.list(u)) { classroom(c.type === 'CLASSROOM' ? c.id : null); if (on('chat')) chat(c.id); }
       break;
     case 'course': {
       let c; try { c = m.courses.mine(me, scope.courseId); } catch { break; }
-      studyData(c.id); courseRefs(c.id, scope.topicId ? { topicIds: [scope.topicId] } : {}); classroom(c.clanId); if (c.clanId) chat(c.clanId);
+      studyData(c.id); courseRefs(c.id, scope.topicId ? { topicIds: [scope.topicId] } : {}); classroom(c.clanId); if (c.clanId) chat(c.clanId); tapes({ courseId: c.id });
       break;
     }
     case 'lecture': {
       let l; try { l = m.courses.lectures(me, scope.courseId).find((x) => x.id === scope.lectureId); } catch { break; }
       if (!l) break;
-      studyData(scope.courseId); courseRefs(scope.courseId, { lectureId: l.id, topicIds: l.topicIds });
+      studyData(scope.courseId); courseRefs(scope.courseId, { lectureId: l.id, topicIds: l.topicIds }); tapes({ courseId: scope.courseId, lectureId: l.id });
       break;
     }
     case 'exam': {
       const e = may(a, 'exams:read') ? m.exams.get(a, scope.examId) : null;
       if (!e) { notes.push('That exam is not available.'); break; }
-      studyData(e.courseId); courseRefs(e.courseId, e.topicIds.length ? { topicIds: e.topicIds } : {});
+      studyData(e.courseId); courseRefs(e.courseId, e.topicIds.length ? { topicIds: e.topicIds } : {}); tapes({ courseId: e.courseId });
       for (const r of e.refs) { if (r.module === 'notes') note(r.entityId); else if (r.module === 'saved') saved(r.entityId); else file(r.entityId); }
       break;
     }

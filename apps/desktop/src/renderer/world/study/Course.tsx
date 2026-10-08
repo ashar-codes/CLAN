@@ -9,8 +9,10 @@ import { Confidence, day, fromLocal, useStudy, when } from './common.tsx';
 import { TaskList } from './Tasks.tsx';
 import { NewExam } from './Exams.tsx';
 import { useAI } from '../ai/ctx.tsx';
+import { Tapes } from '../tape/Tapes.tsx';
+import { Boards } from '../board/Boards.tsx';
 
-const SECTIONS = ['Overview', 'Topics', 'Lectures', 'Notes', 'Resources', 'Tasks', 'Exams', 'Flashcards', 'Saved'] as const;
+const SECTIONS = ['Overview', 'Topics', 'Lectures', 'Notes', 'Resources', 'Tasks', 'Exams', 'Flashcards', 'Saved', 'Recordings', 'Board'] as const;
 type Section = (typeof SECTIONS)[number];
 
 export function CourseSpace({ id, onBack }: { id: string; onBack(): void }) {
@@ -23,7 +25,7 @@ export function CourseSpace({ id, onBack }: { id: string; onBack(): void }) {
   if (loadErr) return <div className="stack"><button className="link back" onClick={onBack}>← Campus</button><p className="error">{loadErr}</p></div>;
   if (!d) return null;
   const { course } = d;
-  const count: Partial<Record<Section, number>> = { Topics: d.topics.length, Lectures: d.lectures.length, Notes: d.links.filter((l) => l.module === 'notes').length, Resources: d.links.filter((l) => l.module === 'files').length,
+  const count: Partial<Record<Section, number>> = { Recordings: d.tapes.length, Topics: d.topics.length, Lectures: d.lectures.length, Notes: d.links.filter((l) => l.module === 'notes').length, Resources: d.links.filter((l) => l.module === 'files').length,
     Tasks: d.tasks.filter((t) => t.status === 'todo' || t.status === 'in_progress').length, Exams: d.exams.length, Flashcards: d.decks.length, Saved: d.links.filter((l) => l.module === 'saved').length };
   return (
     <div className="stack course-space" data-testid="course-space">
@@ -44,9 +46,11 @@ export function CourseSpace({ id, onBack }: { id: string; onBack(): void }) {
       <section className="card panel-body">
         {sec === 'Overview' && <Overview d={d} />}
         {sec === 'Topics' && <Topics d={d} run={run} />}
-        {sec === 'Lectures' && <Lectures d={d} run={run} onPrepare={(l) => ai.open({ mode: 'run', title: `Prepare ${l.title}`, action: 'prepareLecture', scope: { kind: 'lecture', courseId: course.id, lectureId: l.id } })} />}
+        {sec === 'Lectures' && <Lectures d={d} run={run} tapes={d.tapes} onTape={() => setSec('Recordings')} onPrepare={(l) => ai.open({ mode: 'run', title: `Prepare ${l.title}`, action: 'prepareLecture', scope: { kind: 'lecture', courseId: course.id, lectureId: l.id } })} />}
         {(sec === 'Notes' || sec === 'Resources' || sec === 'Saved') && <Links d={d} module={sec === 'Notes' ? 'notes' : sec === 'Resources' ? 'files' : 'saved'} run={run} />}
         {sec === 'Tasks' && <TaskList courseId={course.id} topics={d.topics} />}
+        {sec === 'Recordings' && <Tapes courseId={course.id} />}
+        {sec === 'Board' && <Boards owner={{ kind: 'course', id: course.id }} />}
         {sec === 'Exams' && <>
           {d.exams.map((e) => <button key={e.id} className="line link-row" onClick={() => go({ tab: 'exams', examId: e.id })}><span><b>{e.name}</b> · {when(e.at)}</span><span className="muted">{e.status}</span></button>)}
           {!d.exams.length && <p className="muted">No exams for this course yet.</p>}
@@ -114,13 +118,14 @@ function Topics({ d, run }: { d: CourseDetail; run(f: () => Promise<unknown>): P
   );
 }
 
-function Lectures({ d, run, onPrepare }: { d: CourseDetail; run(f: () => Promise<unknown>): Promise<void>; onPrepare(l: CourseDetail['lectures'][number]): void }) {
+function Lectures({ d, run, onPrepare, tapes, onTape }: { d: CourseDetail; run(f: () => Promise<unknown>): Promise<void>; onPrepare(l: CourseDetail['lectures'][number]): void; tapes: CourseDetail['tapes']; onTape(): void }) {
   const [o, setO] = useState({ title: '', at: '', topicIds: [] as string[] });
   return (
     <>
       {d.lectures.map((l) => (
         <div key={l.id} className="line" data-testid="lecture">
           <span className="grow"><b>{l.title}</b> <small className="muted">{l.at ? when(l.at) : 'no date'}{l.topicIds.length ? ` · ${l.topicIds.map((t) => d.topics.find((x) => x.id === t)?.title).filter(Boolean).join(', ')}` : ''}{l.sessionId ? ' · linked to a class session' : ''}</small></span>
+          {tapes.filter((t) => t.lectureId === l.id).map((t) => <button key={t.id} className="chip chip-btn" onClick={onTape} title={t.title}>📼 Study Tape</button>)}
           <button className="small ai-link" onClick={() => onPrepare(l)}>Prepare</button>
           <select value={l.status} aria-label={`Status of ${l.title}`} onChange={(e) => void run(() => api.study.setLecture(l.id, { status: e.target.value as 'planned' }))}><option value="planned">Planned</option><option value="held">Held</option><option value="cancelled">Cancelled</option></select>
         </div>

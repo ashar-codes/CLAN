@@ -25,10 +25,12 @@ import { Study, schema as studySchema } from './modules/study/index.ts';
 import { Assignments, schema as assignmentsSchema } from './modules/assignments/index.ts';
 import { Agenda } from './modules/agenda/index.ts';
 import { AI, schema as aiSchema, type ProviderSettings } from './modules/ai/index.ts';
+import { Whiteboard, schema as whiteboardSchema } from './modules/whiteboard/index.ts';
+import { Recordings, TapeChanged, schema as recordingsSchema } from './modules/recordings/index.ts';
 import type { AIProvider } from '@classroom/protocol';
 
 export const SCHEMAS: ModuleSchema[] = [eventsSchema, permissionsSchema, identitySchema, resourcesSchema, searchSchema, clansSchema, notesSchema, savedSchema, diarySchema, remindersSchema, chatSchema, captureSchema, notifySchema,
-  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema];
+  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema];
 
 export type ClanApp = ReturnType<typeof openClan>;
 
@@ -67,10 +69,15 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   search.register(saved.searchProvider());
   search.register(chat.searchProvider());
   for (const m of [courses, tasks, exams, flashcards]) search.register(m.searchProvider());
+  const whiteboard = new Whiteboard(db, bus, permissions, { courseOwner: (id) => courses.ownerOf(id), sessionOwner: (id) => study.ownerOf(id) }, now);
+  const recordings = new Recordings(db, bus, { courses, files, notes }, now);
+  search.register(recordings.searchProvider());
+  // timeline entries are their own search documents (so a hit opens the tape at that moment)
+  bus.subscribe('search.recordings.events', TapeChanged, (e) => { search.forget('recordings', `${e.payload.tapeId}:`); for (const k of recordings.eventKeys(e.payload.tapeId)) search.reindex('recordings', k); }, { persistent: true });
   const context = new ContextBroker(permissions);
   for (const p of [notes.contextProvider(), saved.contextProvider(), diary.contextProvider()]) context.register(p);
   // CLAN Intelligence: reads through module APIs only; writes only via accepted proposals.
-  const ai = new AI(db, { clans, courses, notes, files, saved, chat, exams, tasks, flashcards, study, reminders, store, broker: context }, permissions, opts.aiProvider ?? (() => null), now);
+  const ai = new AI(db, { clans, courses, notes, files, saved, chat, exams, tasks, flashcards, study, recordings, reminders, store, broker: context }, permissions, opts.aiProvider ?? (() => null), now);
 
   me = identity.localUser(opts.localName);
   bus.deliverPending();
@@ -81,7 +88,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const tick = (t = now()) => { reminders.fire(t); notifications.tick(t); };
   syncClassrooms();
 
-  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, me, syncClassrooms, tick };
+  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, me, syncClassrooms, tick };
 }
 
 export type { Principal, Scope } from './core/permissions.ts';
@@ -111,4 +118,7 @@ export type { AgendaItem, CourseContext, LectureContext, ExamContext, StudyConte
 export { AI_GRANTEE } from './core/context.ts';
 export type { AISettings, ProviderSettings, AIRequest, RunResult, Preview, SourceUse, AIScope, Include, OpenTarget, Action, AgentDefinition, SourceKind, ProposalView } from './modules/ai/index.ts';
 export { AGENTS } from './modules/ai/index.ts';
+export type { Board, BoardOwner } from './modules/whiteboard/index.ts';
+export type { Tape, TapeEvent, TapeEventKind } from './modules/recordings/index.ts';
+export { clock as tapeClock } from './modules/recordings/index.ts';
 export * as ScreenShareEvents from './modules/screenshare/index.ts';

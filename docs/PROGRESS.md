@@ -110,3 +110,11 @@ Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi
 * Mobile: phone Guide over phone study data (typecheck + tests; device runtime UNVERIFIED).
 * Fixed: reopening/editing an exam no longer erases its recorded result.
 * Tests 250 → 267; E2E 13 → 15. Live-model evaluation not run (no credential configured).
+
+## Whiteboard + Study Tape (tag `clan-whiteboard-study-tape`)
+* Whiteboard: per-field LWW op model shared by host/desktop/phone, host relay on the pinned WSS (VIEW/EDIT/MANAGE_WHITEBOARD),
+  CLAN boards survive Host again, Course/Session/Personal boards, RoomSurface WHITEBOARD with explicit wall switching,
+  PNG/PDF export, phone view/edit (UNVERIFIED on device). See WHITEBOARD.md.
+* Study Tapes: explicit recording with persistent indicator and consent step, chunked WebM to disk, moved into the Resource
+  Store, timeline (⭐ 📝 📸 🔖), player, Course/Lecture/Session links, search to timestamp, crash recovery. See RECORDING.md.
+* Tests 267 → 276; E2E 15 → 18 (two board, one tape). Real-hardware capture/audio and low-end performance not measured.

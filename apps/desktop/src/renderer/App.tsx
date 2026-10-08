@@ -4,6 +4,7 @@ import { TeacherSetup, TeacherDashboard, type Rehost } from './Teacher.tsx';
 import { StudentFlow } from './Student.tsx';
 import { Shell } from './Shell.tsx';
 import { AIHost } from './world/ai/ctx.tsx';
+import { RecorderHost } from './world/tape/recorder.tsx';
 import type { StartedClassroom } from '../shared.ts';
 import type { ClanType } from '@classroom/protocol';
 
@@ -22,8 +23,8 @@ export function App() {
   const keyBanner = ks.insecureDev
     ? <div className="danger-banner">Development mode: identity keys are stored WITHOUT OS protection (CLASSROOM_DEV_INSECURE_KEYSTORE). Never use this for real classes.</div>
     : ks.regenerated.length ? <div className="warning-banner">Stored keys could not be unlocked and were replaced ({ks.regenerated.join(', ')}). Teachers will see this as a new device and must approve it again.</div> : null;
-  if (keyBanner) return <AIHost>{keyBanner}<Screens screen={screen} setScreen={setScreen} caps={caps} /></AIHost>;
-  return <AIHost><Screens screen={screen} setScreen={setScreen} caps={caps} /></AIHost>;
+  if (keyBanner) return <AIHost><RecorderHost>{keyBanner}<Screens screen={screen} setScreen={setScreen} caps={caps} /></RecorderHost></AIHost>;
+  return <AIHost><RecorderHost><Screens screen={screen} setScreen={setScreen} caps={caps} /></RecorderHost></AIHost>;
 }
 
 function Screens({ screen, setScreen, caps }: { screen: Screen; setScreen(s: Screen): void; caps: Capabilities }) {

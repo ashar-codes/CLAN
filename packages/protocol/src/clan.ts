@@ -13,18 +13,21 @@ export const ClanCapability = z.enum([
   'SUBMIT_ASSIGNMENT', 'PRESENT', 'REQUEST_TO_PRESENT', 'MANAGE_PRESENTERS', 'MANAGE_PERMISSIONS', 'VIEW_MEMBERS',
   /** A member may share files: onto the table (everyone) or to one CLANmate. The host's equivalent is SHARE_RESOURCE. */
   'SEND_FILES',
+  /** Whiteboard: see the board, draw on it, and manage it (wall, member editing, clear). */
+  'VIEW_WHITEBOARD', 'EDIT_WHITEBOARD', 'MANAGE_WHITEBOARD',
 ]);
 export type ClanCapability = z.infer<typeof ClanCapability>;
 export type ClanRole = 'host' | 'member';
 
-const HOST: ClanCapability[] = ['MANAGE_CLAN', 'APPROVE_MEMBERS', 'REMOVE_MEMBERS', 'SHARE_RESOURCE', 'SEND_MESSAGE', 'PRESENT', 'MANAGE_PRESENTERS', 'MANAGE_PERMISSIONS', 'VIEW_MEMBERS'];
+const HOST: ClanCapability[] = ['MANAGE_CLAN', 'APPROVE_MEMBERS', 'REMOVE_MEMBERS', 'SHARE_RESOURCE', 'SEND_MESSAGE', 'PRESENT', 'MANAGE_PRESENTERS', 'MANAGE_PERMISSIONS', 'VIEW_MEMBERS', 'VIEW_WHITEBOARD', 'EDIT_WHITEBOARD', 'MANAGE_WHITEBOARD'];
+const BOARD: ClanCapability[] = ['VIEW_WHITEBOARD', 'EDIT_WHITEBOARD'];
 /** Defaults per type. Only the host may ever hold authority capabilities; members never get them by default. */
 const DEFAULTS: Record<ClanType, Record<ClanRole, readonly ClanCapability[]>> = {
-  CLASSROOM: { host: [...HOST, 'CREATE_ASSIGNMENT'], member: ['SEND_MESSAGE', 'SUBMIT_ASSIGNMENT', 'REQUEST_TO_PRESENT'] },
-  STUDY_GROUP: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS'] },
-  PROJECT_TEAM: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS'] },
-  FRIENDS: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS'] },
-  TEMPORARY: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS'] },
+  CLASSROOM: { host: [...HOST, 'CREATE_ASSIGNMENT'], member: ['SEND_MESSAGE', 'SUBMIT_ASSIGNMENT', 'REQUEST_TO_PRESENT', 'VIEW_WHITEBOARD'] }, // the host may let members edit
+  STUDY_GROUP: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS', ...BOARD] },
+  PROJECT_TEAM: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS', ...BOARD] },
+  FRIENDS: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS', ...BOARD] },
+  TEMPORARY: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS', ...BOARD] },
 };
 export const capabilitiesFor = (type: ClanType, role: ClanRole): readonly ClanCapability[] => DEFAULTS[type][role];
 
@@ -37,6 +40,8 @@ export const MESSAGE_CAPABILITY: Partial<Record<ClientMessage['t'], ClanCapabili
   'present.approve': 'MANAGE_PRESENTERS', 'present.decline': 'MANAGE_PRESENTERS', 'present.policy': 'MANAGE_PRESENTERS',
   'present.request': 'REQUEST_TO_PRESENT',
   'chat.edit': 'SEND_MESSAGE', 'chat.react': 'SEND_MESSAGE', 'chat.typing': 'SEND_MESSAGE',
+  // whiteboard: editing is decided per op by the relay (Classroom member editing can be switched on by the host)
+  'wb.sync': 'VIEW_WHITEBOARD', 'wb.memberEdit': 'MANAGE_WHITEBOARD',
 };
 
 /** Generic join policy names ↔ stored legacy values (sessions.join_policy). */

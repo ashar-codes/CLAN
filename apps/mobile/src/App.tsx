@@ -5,6 +5,7 @@ import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type Dire
 import { ClassContent } from './ClassContent';
 import { ChatSection, useMobileChat } from './Chat';
 import { InboxCard } from './Inbox';
+import { MobileBoard, useMobileBoard } from './board/Board';
 import { StudyScreen } from './study/Study';
 import { recordAssignments } from './study/store';
 import { browse } from './discovery';
@@ -173,9 +174,12 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
   const chat = useMobileChat(chatConn, joined.classroom.clanId ?? joined.classroom.sessionId, useCallback((m: ClientMessage) => ref.current?.send(m), []));
   const chatRef = useRef(chat);
   chatRef.current = chat;
+  const boardRef = useRef<ReturnType<typeof useMobileBoard> | null>(null);
   useEffect(() => {
     const conn = new ClassroomConnection(joined.url, joined.token, {
       onMessage: (m) => {
+        if (m.t.startsWith('wb.')) return boardRef.current?.onServer(m as never);
+        if (m.t === 'hello') boardRef.current?.connected();
         chatRef.current.onServer(m);
         if (m.t === 'members') setPeople(m.members);
         if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); }
@@ -199,6 +203,8 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
     return () => conn.close();
   }, [joined]);
   const send = useCallback((m: ClientMessage) => ref.current?.send(m), []);
+  const board = useMobileBoard(send, joined.memberId);
+  boardRef.current = board;
   const [device, setDevice] = useState<DeviceSigner>();
   useEffect(() => { deviceSigner().then(setDevice); }, []);
   const conn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title,
@@ -229,6 +235,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
               <Text style={{ color: c.text }}>{`${presenting.presenterName} is presenting their ${presenting.source}${presenting.state === 'reconnecting' ? ' (reconnecting…)' : ''}. Viewing on phones is coming soon — use a computer to watch.`}</Text>
             </View>
           )}
+          {board.view?.wall === 'WHITEBOARD' && !presenting && <MobileBoard c={c} board={board} title={`${info.title} board`} />}
           <ChatSection c={c} chat={chat} conn={conn} people={people} />
           <InboxCard c={c} onSend={(it) => { const g = chat.threads.find((t) => t.kind === 'group'); if (g) chat.post(g.id, it.kind === 'text' ? it.text : '', it.kind === 'url' ? { attachment: { kind: 'link', url: it.url, ...(it.title ? { title: it.title } : {}) } } : {}); }} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />

@@ -54,10 +54,10 @@ function personActions(a: PersonActions | undefined, p: RoomPerson & { handle?: 
   ];
 }
 
-export function HostRoom({ code, hostName, members, resources, onRemove, onBlock, onShared, pres, onPresent, onStopPresenter, people: chatPeople }: {
+export function HostRoom({ code, hostName, members, resources, onRemove, onBlock, onShared, pres, onPresent, onStopPresenter, people: chatPeople, board }: {
   code: string; hostName: string | null; members: Member[]; resources: { id: string; name: string; mime: string }[];
   onRemove(id: string): void; onBlock(id: string): void; onShared(msg: string): void;
-  pres: Presentation; onPresent(): void; onStopPresenter(): void; people?: PersonActions;
+  pres: Presentation; onPresent(): void; onStopPresenter(): void; people?: PersonActions; board?: ReactNode;
 }) {
   const [sel, setSel] = useState<{ p: RoomPerson & { handle?: string }; at: DOMRect; m?: Member } | null>(null);
   const roster = members.filter((m) => m.status === 'approved');
@@ -74,7 +74,7 @@ export function HostRoom({ code, hostName, members, resources, onRemove, onBlock
   return (
     <>
       <RoomStage people={people} items={resources.map((r) => ({ id: r.id, name: r.name, kind: KIND(r.mime) }))} selected={sel?.p.id}
-        wall={<RoomSurface mode={pres.live ? 'SCREEN_SHARE' : 'DEFAULT'} screen={pres.live ? { pres, live: pres.live } : undefined}><div className="wall-code"><span>Join with</span><b aria-label="Join code" className="c-num">{code.slice(0, 3)} {code.slice(3)}</b><span>in the CLAN app · table = everyone · a CLANmate = only them</span></div></RoomSurface>}
+        wall={<RoomSurface mode={pres.live ? 'SCREEN_SHARE' : board ? 'WHITEBOARD' : 'DEFAULT'} screen={pres.live ? { pres, live: pres.live } : undefined} board={board}><div className="wall-code"><span>Join with</span><b aria-label="Join code" className="c-num">{code.slice(0, 3)} {code.slice(3)}</b><span>in the CLAN app · table = everyone · a CLANmate = only them</span></div></RoomSurface>}
         dropLabel="Drop files here to share with everyone" onDropFiles={drop}
         onDropOnPerson={chatPeople ? (p, files) => void sendToPerson(chatPeople, people.find((x) => x.id === p.id)!, files, onShared) : undefined}
         onPerson={(p, el) => setSel({ p: people.find((x) => x.id === p.id)!, at: el.getBoundingClientRect(), m: roster.find((m) => m.id === p.id) })} />
@@ -95,9 +95,9 @@ export function HostRoom({ code, hostName, members, resources, onRemove, onBlock
   );
 }
 
-export function MemberRoom({ hostName, hostLabel, people, resources, pres, presenterName, actions, onTableDrop, onToast }: {
+export function MemberRoom({ hostName, hostLabel, people, resources, pres, presenterName, actions, onTableDrop, onToast, board }: {
   hostName: string | null; hostLabel: string; people: { name: string; host: boolean; connected: boolean; handle?: string }[] | null; resources: ResourceView[];
-  pres: Presentation; presenterName: string | null; actions?: PersonActions & { me: string | null };
+  pres: Presentation; presenterName: string | null; actions?: PersonActions & { me: string | null }; board?: ReactNode;
   /** Members who may share files: dropping on the table shares with everyone. */
   onTableDrop?(files: File[]): Promise<string>; onToast?(m: string): void;
 }) {
@@ -133,7 +133,7 @@ export function MemberRoom({ hostName, hostLabel, people, resources, pres, prese
         dropLabel={tableDrop ? 'Drop files here to share with everyone' : undefined} onDropFiles={tableDrop}
         onDropOnPerson={actions?.canSendFiles ? (p, files) => { const x = list.find((y) => y.id === p.id); if (x?.handle) void sendToPerson(actions, x, files, toast); } : undefined}
         onPerson={actions ? (p, el) => setSel({ p: list.find((x) => x.id === p.id)!, at: el.getBoundingClientRect() }) : undefined}
-        wall={<RoomSurface mode={pres.live ? 'SCREEN_SHARE' : 'DEFAULT'} screen={pres.live ? { pres, live: pres.live } : undefined}><div className="wall-msg"><b>{hostName ? `${hostName}’s room` : 'The room'}</b><span>{arrived ?? `When someone presents, their screen appears on this wall.`}</span></div></RoomSurface>} />
+        wall={<RoomSurface mode={pres.live ? 'SCREEN_SHARE' : board ? 'WHITEBOARD' : 'DEFAULT'} screen={pres.live ? { pres, live: pres.live } : undefined} board={board}><div className="wall-msg"><b>{hostName ? `${hostName}’s room` : 'The room'}</b><span>{arrived ?? `When someone presents, their screen appears on this wall.`}</span></div></RoomSurface>} />
       {sel && actions && (
         <Wheel person={sel.p} at={sel.at} onClose={() => setSel(null)} actions={[
           ...personActions(actions, sel.p, () => setSel(null), toast),

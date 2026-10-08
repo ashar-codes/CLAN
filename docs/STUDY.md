@@ -69,6 +69,10 @@ The phone has its own Study screen (Today, Courses, Tasks, Exams, Cards, Session
 (`apps/mobile/src/study`) using the same shared algorithms. Phone data stays on the phone (no desktop sync yet); a joined
 Classroom's assignments are projected the same way. Typecheck + model unit test only; **device runtime UNVERIFIED**.
 
+## Study Tapes and boards
+A Study Session can start a recording (RECORDING.md) and a Course has Recordings and a Board (WHITEBOARD.md); both are
+linked by reference, never copied.
+
 ## Known limits
 No sync of study data between a person's devices. Presence never broadcasts Focus or study state (only your own beacon shows
 it). Dates on the phone are typed (no picker). Lectures are not auto-created from class sessions.

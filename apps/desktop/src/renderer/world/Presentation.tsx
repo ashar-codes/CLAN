@@ -111,7 +111,9 @@ export type Presentation = ReturnType<typeof usePresentation>;
 
 /** The room wall. Modes are modular so a whiteboard or a document can take the wall later. */
 export type SurfaceMode = 'DEFAULT' | 'SCREEN_SHARE' | 'WHITEBOARD' | 'DOCUMENT_PRESENTATION';
-export function RoomSurface({ mode, children, screen }: { mode: SurfaceMode; children: ReactNode; screen?: { pres: Presentation; live: PresentationView } }) {
+/** One owner of the wall at a time: the default content, a presentation, or the whiteboard. */
+export function RoomSurface({ mode, children, screen, board }: { mode: SurfaceMode; children: ReactNode; screen?: { pres: Presentation; live: PresentationView }; board?: ReactNode }) {
+  if (mode === 'WHITEBOARD' && board) return <div className="surface board-surface" data-testid="wall-board">{board}</div>;
   if (mode !== 'SCREEN_SHARE' || !screen) return <div className="surface">{children}</div>;
   return <ScreenWall pres={screen.pres} live={screen.live} />;
 }

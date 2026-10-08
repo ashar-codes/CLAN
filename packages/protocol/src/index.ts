@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ClanCapability, ClanType } from './clan.ts';
 import type { SealedDirect } from './direct.ts';
 import { ChatClientMessage, type ChatServerMessage } from './chat.ts';
+import { WhiteboardClientMessage, type WhiteboardServerMessage } from './whiteboard.ts';
 
 export const PRODUCT_NAME = 'CLAN';
 /**
@@ -270,6 +271,7 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('peer.probeResult'), probeId: id, tried: z.number().int().min(0).max(8), reachable: z.number().int().min(0).max(8) }),
   // chat (capability-checked server-side: SEND_MESSAGE; attachments SEND_FILES/SHARE_RESOURCE)
   ...ChatClientMessage,
+  ...WhiteboardClientMessage,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export const TEACHER_ONLY: ReadonlySet<ClientMessage['t']> = new Set([
@@ -302,7 +304,8 @@ export type ServerMessage =
   | { t: 'assignments'; assignments: StudentAssignmentView[] | TeacherAssignmentView[] }
   | { t: 'stats'; stats: TransferStats }
   | { t: 'error'; code: string; message: string }
-  | ChatServerMessage;
+  | ChatServerMessage
+  | WhiteboardServerMessage;
 
 export const WS_CLOSE = { authFailed: 4001, removed: 4003, ended: 4004, badMessage: 4400 } as const;
 
@@ -315,3 +318,4 @@ export * from './chat.ts';
 export * from './intake.ts';
 export * from './study.ts';
 export * from './ai.ts';
+export * from './whiteboard.ts';

@@ -40,3 +40,9 @@ Study reads by agents need `tasks:read` / `exams:read` / `flashcards:read` / `re
 they configured (none by default; remote providers need internet). Conversations, quiz attempts, paper analyses and
 proposals stay on the device (Me › AI › Delete AI history). Direct chats are AI context only for their participants,
 never for the relaying host. Saved links contribute only their title, address and the student's note.
+
+**Study Tapes** are personal: recorded only on explicit action with a chosen source, a persistent indicator, a consent
+confirmation when other people are captured, stored locally (Resource Store), shared only by an explicit share (a file
+reference), and used by AI only as timeline text when included for a request. **Whiteboards**: CLAN boards are visible to
+the CLAN's members (edit per capability), kept by the host; Personal/Course/Session boards are private to their owner;
+private files can't be placed on a CLAN board; AI never reads or edits boards.

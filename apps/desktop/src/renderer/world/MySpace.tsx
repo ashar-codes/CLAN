@@ -4,6 +4,7 @@ import type { KeyboardEvent, ReactNode } from 'react';
 import { ClanPlace, CLANBeacon, CLANmate, mateFor, type BeaconState } from '@clan/design';
 import type { AgendaItem, HomeView } from '../../shared.ts';
 import { openItem, useStudy } from './study/common.tsx';
+import { useRecorder } from './tape/recorder.tsx';
 import type { Experience } from './experience.ts';
 
 export type SpaceTarget = 'commons' | 'clans' | 'study' | 'notes' | 'saved' | 'me' | 'diary' | 'guide' | 'exams' | 'board' | 'tasks' | `course:${string}`;
@@ -32,9 +33,11 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
     ...Array.from({ length: Math.min(saved, 4) }, () => 'var(--notebook)'),
   ];
   const { go: goStudy, session } = useStudy();
+  const rec = useRecorder();
   const pins = h.upcoming.slice(0, 3);
   const latest = h.continueNotes[0];
-  const desk = session ? { label: 'Studying', hint: session.goal || 'study session running', go: () => goStudy({ tab: session.courseId ? 'campus' : 'history', ...(session.courseId ? { courseId: session.courseId } : {}) }) }
+  const desk = rec.active ? { label: 'Recording', hint: `recording “${rec.active.tape.title}”`, go: () => goStudy({ tab: 'tapes' }) }
+    : session ? { label: 'Studying', hint: session.goal || 'study session running', go: () => goStudy({ tab: session.courseId ? 'campus' : 'history', ...(session.courseId ? { courseId: session.courseId } : {}) }) }
     : h.latestCourse ? { label: h.latestCourse.code || h.latestCourse.name, hint: `open ${h.latestCourse.name}`, go: () => go(`course:${h.latestCourse!.id}`) }
     : { label: latest ? 'Continue' : 'Start writing', hint: latest ? `continue “${latest.title}”` : 'start a note', go: () => go('notes') };
   return (
@@ -77,7 +80,7 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
           <Obj label="Desk" hint={desk.hint} onGo={desk.go}>
             <path d="M470 322l14-70h150l14 70z" fill="#22304a" /><path d="M490 262h138l-10 52H480z" fill="var(--study-soft)" />
             <path d="M500 276h70M500 288h96M500 300h50" stroke="#22304a" strokeWidth="5" strokeLinecap="round" opacity=".45" />
-            {session && <circle cx="640" cy="262" r="7" fill="var(--study)" />}
+            {(session || rec.active) && <circle cx="640" cy="262" r="7" fill={rec.active ? 'var(--brick)' : 'var(--study)'} />}
             <text x="560" y="242" className="obj-label">{desk.label}</text>
           </Obj>
 

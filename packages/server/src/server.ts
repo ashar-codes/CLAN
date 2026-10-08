@@ -13,6 +13,7 @@ import {
   UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, type ServerMessage, type ResourceView,
 } from '@classroom/protocol';
 import { ChatRelay, type ChatStore } from './chat.ts';
+import { WhiteboardRelay, type WhiteboardStore } from './whiteboard.ts';
 import { Shares } from './shares.ts';
 import { Pairing } from './pairing.ts';
 import { PeerRegistry } from './peers.ts';
@@ -37,6 +38,8 @@ export type ServerOptions = {
   hostName?: string;
   /** Chat store (desktop host: @clan/core's Chat on the device database). Omitted → chat unavailable. */
   chat?: ChatStore;
+  /** Whiteboard store (desktop host: @clan/core's Whiteboard). Omitted → no whiteboard. */
+  whiteboard?: WhiteboardStore;
   /** Local SFU for screen sharing (desktop host: bundled livekit-server). Omitted → screen sharing unavailable. */
   media?: { binary: string; workDir: string; presenterGraceMs?: number };
   /** Direct network credentials: released, sealed, only inside a completed OPAQUE exchange. */
@@ -80,6 +83,7 @@ export type RunningServer = {
   presentations: Presentations;
   media: MediaService | null;
   chat: ChatRelay | null;
+  whiteboard: WhiteboardRelay | null;
   shares: Shares;
   /** Host, in-process: add a file for the whole CLAN ('clan') or for one CLANmate (their chat handle). */
   shareFile(path: string, to: string, name?: string): Promise<ResourceView>;
@@ -96,6 +100,8 @@ const AUTH_TIMEOUT_MS = 5000;
 const SEED_MIN_CHUNKS = 8;
 const SEEDERS = 4;
 const MAX_WS_MESSAGE = 64 * 1024;
+/** Splits items into batches whose JSON stays under `max` bytes. */
+const sizedChunks = <T>(items: T[], max: number) => { const out: T[][] = []; let cur: T[] = [], n = 0; for (const it of items) { const b = JSON.stringify(it).length; if (cur.length && n + b > max) { out.push(cur); cur = []; n = 0; } cur.push(it); n += b; } if (cur.length) out.push(cur); return out; };
 
 export async function startClassroomServer(opts: ServerOptions): Promise<RunningServer> {
   const db = opts.db ?? openDb(opts.dbPath ?? ':memory:');
@@ -123,6 +129,9 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const assignments = new Assignments(db, classroom, storage, limits, signer);
   const chat = opts.chat ? new ChatRelay({ store: opts.chat, classroom, resources, teacherPublicKey, hostName: opts.hostName ?? null }) : null;
   resources.who = (p) => { try { return chat?.handleOf(p) ?? null; } catch { return null; } };
+  const authorOf = (p: Principal) => { try { return chat?.handleOf(p) ?? (p.role === 'teacher' ? 'host' : p.memberId); } catch { return p.role === 'teacher' ? 'host' : p.memberId; } };
+  const whiteboard = opts.whiteboard ? new WhiteboardRelay({ store: opts.whiteboard, classroom, resources, presentations, author: authorOf,
+    name: (p) => (p.role === 'teacher' ? opts.hostName ?? 'Host' : classroom.member(p.memberId)?.fullName ?? 'Someone') }) : null;
   resources.nameOf = (h) => chat?.nameOfHandle(h) ?? 'Someone';
   const shares = new Shares(db, classroom, storage, limits, resources);
   if (chat) {
@@ -480,14 +489,17 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   // Presentation control state to everyone; pending requests only to those who may decide on them.
   const presentationMsg = (p: Principal): ServerMessage => ({ t: 'presentation', state: presentations.view(), policy: presentations.policy, mine: presentations.mine(p),
     requests: classroom.can(p, 'MANAGE_PRESENTERS') ? [...presentations.requests.keys()].map((memberId) => ({ memberId, name: classroom.member(memberId)?.fullName ?? 'Someone' })) : [] });
-  presentations.on('state', () => { for (const [ws, p] of sockets) if (p.role === 'teacher' || classroom.status(p.memberId) === 'approved') send(ws, presentationMsg(p)); });
+  presentations.on('state', () => { for (const [ws, p] of sockets) if (p.role === 'teacher' || classroom.status(p.memberId) === 'approved') send(ws, presentationMsg(p)); wallToAll(); });
+  /** Whiteboard: everyone who may see the board, each with their own view (can they edit / manage?). */
+  const toBoard = (m: (p: Principal) => ServerMessage | null) => { if (whiteboard) for (const [ws, p] of sockets) if (whiteboard.canView(p)) { const x = m(p); if (x) send(ws, x); } };
+  function wallToAll() { toBoard((p) => ({ t: 'wb.wall', mode: whiteboard!.wallMode(), by: whiteboard!.wallBy, board: whiteboard!.view(p) })); }
   media?.on('failed', () => { void presentations.stop('media_failed'); });
   classroom.on('member', (memberId: string, status: string) => {
     for (const [ws, p] of sockets) {
       if (p.role !== 'student' || p.memberId !== memberId) continue;
       send(ws, { t: 'member.status', status: status as never });
       if (status !== 'approved') ws.close(WS_CLOSE.removed, status);
-      else send(ws, presentationMsg(p)); // what they may do changed (e.g. Present appears once approved)
+      else { send(ws, presentationMsg(p)); if (whiteboard?.canView(p)) send(ws, { t: 'wb.wall', mode: whiteboard.wallMode(), by: whiteboard.wallBy, board: whiteboard.view(p) }); } // what they may do changed (e.g. Present appears once approved)
     }
   });
 
@@ -522,6 +534,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
           schedule();
           if (memberId) { classroom.connected(memberId, true); presentations.presence(memberId, true); }
           send(ws, presentationMsg(principal));
+          if (whiteboard?.canView(principal)) send(ws, { t: 'wb.wall', mode: whiteboard.wallMode(), by: whiteboard.wallBy, board: whiteboard.view(principal) });
           return;
         }
 
@@ -558,7 +571,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
             case 'present.approve': return presentations.approve(msg.memberId);
             case 'present.decline': return presentations.decline(msg.memberId);
             case 'present.policy': return presentations.setPolicy(msg.policy);
-            case 'present.start': return void presentations.start(principal, msg).catch(fail);
+            case 'present.start': { whiteboard?.beforePresent(principal, !!msg.takeover); return void presentations.start(principal, msg).catch(fail); }
             case 'present.source': return presentations.source(principal, msg);
             case 'present.stop': return void presentations.stopBy(principal, msg.presentationId).catch(fail);
             case 'peer.probeResult': {
@@ -588,6 +601,27 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
               const r = needChat().cursor(principal, msg.threadId, msg);
               return toReaders(r.thread, () => ({ t: 'chat.cursors', threadId: r.thread.id, cursors: r.cursors }));
             }
+            case 'wb.sync': {
+              if (!whiteboard) return send(ws, { t: 'error', code: 'wb_unavailable', message: 'No whiteboard here.' });
+              const r = whiteboard.sync(principal, msg.since);
+              // large boards go out in pieces (each well under the clients' message limit): state first, then op batches
+              const parts = sizedChunks(r.ops, 256 * 1024);
+              send(ws, { t: 'wb.state', board: r.board, ops: parts[0] ?? [], snapshot: r.snapshot });
+              for (const p of parts.slice(1)) send(ws, { t: 'wb.op', ops: p });
+              return;
+            }
+            case 'wb.ops': {
+              if (!whiteboard) return send(ws, { t: 'wb.nack', ids: msg.ops.map((o) => o.id), code: 'wb_unavailable', message: 'No whiteboard here.' });
+              try {
+                const logged = whiteboard.ops(principal, msg.ops);
+                send(ws, { t: 'wb.ack', ids: msg.ops.map((o) => o.id), headSeq: logged.at(-1)?.seq ?? whiteboard.view(principal).headSeq });
+                if (logged.length) toBoard(() => ({ t: 'wb.op', ops: logged }));
+              } catch (e) { send(ws, { t: 'wb.nack', ids: msg.ops.map((o) => o.id), code: (e as ApiError).code ?? 'invalid', message: e instanceof ApiError ? e.message : 'Invalid whiteboard change' }); }
+              return;
+            }
+            case 'wb.cursor': { const c = whiteboard?.cursor(principal); if (c) for (const [w, p] of sockets) if (w !== ws && whiteboard!.canView(p)) send(w, { t: 'wb.cursor', who: c.who, name: c.name, x: msg.x, y: msg.y, page: msg.page }); return; }
+            case 'wb.wall': { if (!whiteboard) return; return void whiteboard.setWall(principal, msg.mode, !!msg.takeover).then(wallToAll, fail); }
+            case 'wb.memberEdit': { whiteboard?.setMemberEdit(principal, msg.on); return wallToAll(); }
             case 'chat.typing': {
               const r = needChat().typing(principal, msg.threadId);
               if (r) toReaders(r.thread, (p) => (chat!.handleOf(p) === r.handle ? null : { t: 'chat.typing', threadId: r.thread.id, handle: r.handle, name: r.name, until: r.until }));
@@ -632,6 +666,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     presentations,
     media,
     chat,
+    whiteboard,
     shares,
     async shareFile(path: string, to: string, name?: string) {
       const audience = chat ? chat.audience({ role: 'teacher' }, to) : to === 'clan' ? null : (() => { throw new ApiError(503, 'chat_unavailable', 'Sending to one person is not available here.'); })();

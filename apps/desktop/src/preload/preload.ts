@@ -51,6 +51,14 @@ const api: DesktopApi = {
     confirmPaperTopic: inv('ai:confirmPaperTopic'), proposeScope: inv('ai:proposeScope'), examGaps: inv('ai:examGaps'), openFile: inv('ai:openFile'),
     conversations: inv('ai:conversations'), deleteHistory: inv('ai:deleteHistory'), usage: inv('ai:usage'), rebuild: inv('ai:rebuild'),
   } as DesktopApi['ai'],
+  board: {
+    list: inv('board:list'), create: inv('board:create'), read: inv('board:read'), edit: inv('board:edit'), rename: inv('board:rename'), remove: inv('board:remove'), export: inv('board:export'),
+  } as DesktopApi['board'],
+  rec: {
+    check: inv('rec:check'), start: inv('rec:start'), chunk: inv('rec:chunk'), stop: inv('rec:stop'), active: inv('rec:active'), mark: inv('rec:mark'), screenshot: inv('rec:screenshot'),
+    editEvent: inv('rec:editEvent'), removeEvent: inv('rec:removeEvent'), toNote: inv('rec:toNote'), list: inv('rec:list'), get: inv('rec:get'), link: inv('rec:link'), rename: inv('rec:rename'), remove: inv('rec:remove'), share: inv('rec:share'),
+    onProblem: (cb) => listen('rec:problem', cb),
+  } as DesktopApi['rec'],
   capabilities: () => ipcRenderer.invoke('caps'),
   getProfile: () => ipcRenderer.invoke('profile:get'),
   saveProfile: (p) => ipcRenderer.invoke('profile:save', p),

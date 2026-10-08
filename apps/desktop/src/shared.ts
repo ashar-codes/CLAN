@@ -4,11 +4,11 @@ import type { ChatMessageView, ChatThreadView, ClassroomInfo, ClientMessage, Joi
 import type { KeystoreStatus } from './main/keystore.ts';
 import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice,
   Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem,
-  AISettings, AIRequest, RunResult, Preview, AIScope, Include, Action, ProposalView, SourceKind } from '@clan/core';
-import type { Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState, countdown, readiness, Citation, ProposalKind } from '@classroom/protocol';
+  AISettings, AIRequest, RunResult, Preview, AIScope, Include, Action, ProposalView, SourceKind, Board, BoardOwner, Tape, TapeEvent, TapeEventKind } from '@clan/core';
+import type { Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState, countdown, readiness, Citation, ProposalKind, WbLogged, WbOp } from '@classroom/protocol';
 export type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice,
   Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem, Grade, Recurrence, ResourceKind, TaskStatus, ExamStatus, TopicState,
-  AISettings, AIRequest, RunResult, Preview, AIScope, Include, Action, ProposalView, SourceKind, Citation, ProposalKind };
+  AISettings, AIRequest, RunResult, Preview, AIScope, Include, Action, ProposalView, SourceKind, Citation, ProposalKind, Board, BoardOwner, Tape, TapeEvent, TapeEventKind };
 
 export type Capabilities = {
   platform: string;
@@ -67,7 +67,7 @@ export type CourseView = { id: string; name: string; code: string; term: string;
   topics: { id: string; title: string; state: TopicState }[]; recent: number; files: number; openTasks: number;
   nextExam: { id: string; name: string; at: number; soon: boolean } | null; dueCards: number };
 export type CourseDetail = { course: Course; clanName: string | null; topics: Topic[]; lectures: Lecture[]; links: CourseLink[]; tasks: Task[]; exams: Exam[];
-  decks: Deck[]; sessions: StudySession[]; assignments: AssignmentItem[]; reminders: Reminder[] };
+  decks: Deck[]; sessions: StudySession[]; assignments: AssignmentItem[]; reminders: Reminder[]; tapes: Tape[] };
 export type Countdown = ReturnType<typeof countdown>;
 export type ExamCenter = { exam: Exam; course: Course; countdown: Countdown; topics: Topic[]; readiness: ReturnType<typeof readiness>; covered: Topic[]; remaining: Topic[];
   pastPapers: CourseLink[]; resources: CourseLink[]; notes: CourseLink[]; saved: CourseLink[]; decks: Deck[]; dueCards: number; tasks: Task[]; sessions: StudySession[]; reminders: Reminder[] };
@@ -235,6 +235,40 @@ export type AIApi = {
   rebuild(): Promise<{ sources: number; chunks: number; chars: number }>;
 };
 
+/** Boards that belong to this person (Personal / Course / Study Session). CLAN boards go over the session's WSS. */
+export type BoardApi = {
+  list(owner: { kind: 'personal' | 'course' | 'session'; id: string }): Promise<Board[]>;
+  create(owner: { kind: 'personal' | 'course' | 'session'; id: string }, title: string): Promise<Board>;
+  read(id: string, since: number): Promise<{ ops: WbLogged[]; snapshot: boolean; head: number; title: string }>;
+  edit(id: string, ops: WbOp[]): Promise<WbLogged[]>;
+  rename(id: string, title: string): Promise<void>;
+  remove(id: string): Promise<void>;
+  /** Derived output; returns where it was saved (null = cancelled). */
+  export(fmt: 'png' | 'pdf', pngDataUrl: string, title: string): Promise<string | null>;
+};
+export type RecProblem = { tapeId: string; kind: 'write_failed' | 'disk_low' | 'disk_critical'; message: string; freeBytes?: number };
+/** Study Tapes (window.classroom.rec). Media is streamed to disk in chunks; nothing big crosses IPC at once. */
+export type TapeApi = {
+  check(): Promise<{ freeBytes: number; low: number; critical: number; mic: string; systemAudio: boolean }>;
+  start(o: { title: string; source: 'screen' | 'window' | 'test'; mic: boolean; systemAudio: boolean; othersConsent: boolean; mime: string; courseId?: string | null; lectureId?: string | null; topicId?: string | null; studySessionId?: string | null }): Promise<Tape>;
+  chunk(tapeId: string, data: Uint8Array): Promise<string | null>;
+  stop(tapeId: string, o: { durationMs: number; reason: string }): Promise<Tape | null>;
+  active(): Promise<Tape | null>;
+  mark(tapeId: string, o: { kind: 'important' | 'note' | 'bookmark' | 'marker'; atMs: number; text?: string }): Promise<TapeEvent>;
+  screenshot(tapeId: string, atMs: number, png: Uint8Array): Promise<TapeEvent>;
+  editEvent(id: string, text: string): Promise<void>;
+  removeEvent(id: string): Promise<void>;
+  toNote(eventId: string): Promise<Note>;
+  list(o?: { courseId?: string; lectureId?: string }): Promise<Tape[]>;
+  get(id: string): Promise<{ tape: Tape; events: TapeEvent[] } | null>;
+  link(id: string, o: { courseId: string | null; topicId?: string | null; lectureId?: string | null }): Promise<Tape>;
+  rename(id: string, title: string): Promise<void>;
+  remove(id: string): Promise<void>;
+  /** Explicit: puts a reference to the recording file into a CLAN you belong to. */
+  share(id: string, clanId: string): Promise<FileView>;
+  onProblem(cb: (p: RecProblem) => void): () => void;
+};
+
 /** API exposed by the preload as window.classroom. */
 export type DesktopApi = {
   clan: ClanApi;
@@ -243,6 +277,8 @@ export type DesktopApi = {
   capture: CaptureApi;
   study: StudyApi;
   ai: AIApi;
+  board: BoardApi;
+  rec: TapeApi;
   capabilities(): Promise<Capabilities>;
   getProfile(): Promise<OwnProfile>;
   saveProfile(p: Pick<StudentProfile, 'fullName' | 'rollNo' | 'deviceName'>): Promise<OwnProfile>;

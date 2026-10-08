@@ -5,9 +5,12 @@ import { useState, type DragEvent } from 'react';
 import { api } from '../App.tsx';
 import { errText, useLoad } from './useLoad.ts';
 import { fromLocal } from './study/common.tsx';
+import { useRecorder } from './tape/recorder.tsx';
 
 export function QuickCapture({ onDone }: { onDone(msg: string, go?: 'notes' | 'saved'): void }) {
   const [open, setOpen] = useState(false);
+  const rec = useRecorder();
+  const [tapeNote, setTapeNote] = useState<string | null>(null);
   const [mode, setMode] = useState<'link' | 'text' | 'task' | 'reminder' | null>(null);
   const [into, setInto] = useState('');
   const [due, setDue] = useState('');
@@ -35,6 +38,14 @@ export function QuickCapture({ onDone }: { onDone(msg: string, go?: 'notes' | 's
     <div className={`qc ${open ? 'open' : ''}`} onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={drop}>
       {open && !mode && (
         <div className="qc-menu" role="menu" aria-label="Quick Capture">
+          {rec.active && <div className="qc-rec" role="group" aria-label="Study Tape">
+            <span className="eyebrow">Recording · {rec.active.tape.title}</span>
+            <button role="menuitem" className="qc-item" onClick={() => void run(() => rec.mark('bookmark', 'Bookmark'), 'Bookmark added to the tape')}><span className="qc-icon">🔖</span>Bookmark</button>
+            <button role="menuitem" className="qc-item" onClick={() => setTapeNote('')}><span className="qc-icon">📝</span>Tape note</button>
+            <button role="menuitem" className="qc-item" onClick={() => void run(() => rec.screenshot(), 'Screenshot added to the tape')}><span className="qc-icon">📸</span>Screenshot</button>
+            {tapeNote !== null && <form className="row" onSubmit={(e) => { e.preventDefault(); void run(() => rec.mark('note', tapeNote), 'Note added to the tape'); setTapeNote(null); }}>
+              <input autoFocus value={tapeNote} onChange={(e) => setTapeNote(e.target.value)} aria-label="Tape note" maxLength={4000} /><button className="small primary">Add</button></form>}
+          </div>}
           {intoPicker}
           <button role="menuitem" className="qc-item" style={{ ['--i' as string]: 0 }} onClick={() => run(() => api.capture.add({ kind: 'note', title: 'Untitled' }, target), `New note in ${where}`, 'notes')}><span className="qc-icon">✎</span>Note</button>
           <button role="menuitem" className="qc-item" style={{ ['--i' as string]: 1 }} onClick={() => setMode('task')}><span className="qc-icon">☐</span>Task</button>

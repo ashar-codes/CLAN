@@ -45,6 +45,9 @@ export class SearchIndex {
     if (d) this.write(module, d);
   }
 
+  /** Drops every document of `module` whose id starts with `prefix` (e.g. all timeline entries of one tape). */
+  forget(module: string, prefix: string) { this.db.prepare("DELETE FROM search_docs WHERE module = ? AND substr(entity_id, 1, ?) = ?").run(module, prefix.length, prefix); }
+
   rebuild() {
     this.db.prepare('DELETE FROM search_docs').run();
     for (const [m, p] of this.providers) for (const d of p.all()) this.write(m, d);

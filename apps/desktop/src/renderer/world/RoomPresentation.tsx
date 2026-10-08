@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { ClanCapability, ClientMessage } from '@classroom/protocol';
 import { PresenterBar, SourcePicker, type Presentation, type PresentationMsg } from './Presentation.tsx';
 
-export function RoomPresentation({ pres, msg, send, can, isHost, ask = 0 }: { pres: Presentation; msg: PresentationMsg | null; send(m: ClientMessage): void; can: ClanCapability[]; isHost: boolean; ask?: number }) {
+export function RoomPresentation({ pres, msg, send, can, isHost, ask = 0, boardOnWall = false }: { pres: Presentation; msg: PresentationMsg | null; send(m: ClientMessage): void; can: ClanCapability[]; isHost: boolean; ask?: number; boardOnWall?: boolean }) {
   const [picker, setPicker] = useState<null | 'start' | 'switch' | 'takeover'>(null);
   useEffect(() => { if (ask) setPicker('start'); }, [ask]); // “Present” from the CLANmate wheel
   const live = pres.live;
@@ -23,7 +23,7 @@ export function RoomPresentation({ pres, msg, send, can, isHost, ask = 0 }: { pr
       {pres.notice && <p className="muted small-text" role="status">{pres.notice}</p>}
       {!pres.presenting && (
         <div className="row">
-          {mayPresent && <button className="primary small" onClick={() => setPicker('start')}>Present</button>}
+          {mayPresent && <button className="primary small" onClick={() => (boardOnWall ? confirm('Switch the wall from the Whiteboard to your screen?') && setPicker('takeover') : setPicker('start'))}>Present</button>}
           {!isHost && !mayPresent && can.includes('REQUEST_TO_PRESENT') && (mine === 'requested'
             ? <span className="muted small-text">Waiting for the host to let you present…</span>
             : <button className="small" onClick={() => send({ t: 'present.request' })}>Request to present</button>)}

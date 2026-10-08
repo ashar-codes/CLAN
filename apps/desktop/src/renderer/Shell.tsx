@@ -56,6 +56,7 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
     else if (o.module === 'chat') setTab('clans');
     else if (o.module === 'saved') setTab('saved');
     else if (o.module === 'diary') { setMeSection('diary'); setTab('me'); }
+    else if (o.module === 'recordings') { setStudyTarget({ tab: 'tapes', tapeId: s('tapeId') }); setTab('study'); }
   };
   useEffect(() => { ai.nav.current = openSource; return () => { ai.nav.current = null; }; });
   const study: StudyCtx = {

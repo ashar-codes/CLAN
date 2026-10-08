@@ -25,6 +25,13 @@ export class Files {
     return this.attach(p, object.id, NAME.parse(name), scope);
   }
 
+  /** Like add, but moves an app-produced file into the store instead of copying it (recordings, captures). */
+  async ingest(p: Principal, path: string, name: string, scope: Scope, mime?: string): Promise<FileView> {
+    this.assertWrite(p, scope);
+    const { object } = await this.store.ingest(path, mime);
+    return this.attach(p, object.id, NAME.parse(name), scope);
+  }
+
   /** Shares content the caller can already read into another scope: a new reference, never a copy. */
   share(p: Principal, refId: string, to: Scope): FileView {
     const ref = this.store.getRef(refId);

@@ -54,6 +54,7 @@ export function registerStudy(c: ClanApp) {
       decks: c.flashcards.decks(me, { courseId: course.id }), sessions: c.study.recent(me, { courseId: course.id, limit: 10 }),
       assignments: course.clanId ? c.assignments.list(me, { clanId: course.clanId }) : [],
       reminders: c.reminders.forTarget(me, 'courses', course.id),
+      tapes: c.recordings.list(me, { courseId: course.id, limit: 50 }),
     };
   });
   handle('study:addTopic', (courseId, title) => c.courses.addTopic(me, Id.parse(courseId), z.string().parse(title)));

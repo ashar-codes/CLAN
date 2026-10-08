@@ -4,8 +4,8 @@
 import type { ProposalKind } from '@classroom/protocol';
 import type { Principal } from '../../core/permissions.ts';
 
-export type SourceKind = 'notes' | 'resources' | 'saved' | 'classroom' | 'chat' | 'study' | 'diary';
-export const SOURCE_KINDS: SourceKind[] = ['notes', 'resources', 'saved', 'classroom', 'chat', 'study', 'diary'];
+export type SourceKind = 'notes' | 'resources' | 'saved' | 'classroom' | 'chat' | 'study' | 'recordings' | 'diary';
+export const SOURCE_KINDS: SourceKind[] = ['notes', 'resources', 'saved', 'classroom', 'chat', 'study', 'recordings', 'diary'];
 export type Action = 'ask' | 'askDocument' | 'explain' | 'summarize' | 'simplify' | 'questions' | 'chatSummary'
   | 'flashcards' | 'quiz' | 'compare' | 'prepareLecture' | 'pastPaper' | 'examPlan';
 export type AgentDefinition = {
@@ -25,11 +25,11 @@ export const AGENTS: AgentDefinition[] = [
     proposals: ['APPEND_NOTE', 'CREATE_TASKS'], provider: null, model: null, cannot: ['read your Diary or chats', ...NO] },
   { id: 'quiz-master', name: 'Quiz Master', owner: 'system', reads: ['notes', 'resources', 'saved', 'classroom', 'study'], actions: ['quiz', 'flashcards'],
     proposals: ['CREATE_FLASHCARDS', 'UPDATE_TOPIC_CONFIDENCE'], provider: null, model: null, cannot: ['read your Diary or chats', 'change your topic marks by itself', ...NO] },
-  { id: 'lecture-prep', name: 'Lecture Prep', owner: 'system', reads: ['notes', 'resources', 'saved', 'classroom', 'study'], actions: ['prepareLecture'],
+  { id: 'lecture-prep', name: 'Lecture Prep', owner: 'system', reads: ['notes', 'resources', 'saved', 'classroom', 'study', 'recordings'], actions: ['prepareLecture'],
     proposals: ['APPEND_NOTE', 'CREATE_FLASHCARDS', 'CREATE_TASKS'], provider: null, model: null, cannot: ['read your Diary or chats', 'invent a recording or transcript', ...NO] },
   { id: 'paper-analyst', name: 'Past-paper Analyst', owner: 'system', reads: ['resources', 'classroom', 'study'], actions: ['pastPaper'],
     proposals: ['ADD_EXAM_SCOPE'], provider: null, model: null, cannot: ['read scans without text', 'read your notes, Diary or chats', ...NO] },
-  { id: 'exam-coach', name: 'Exam Coach', owner: 'system', reads: ['notes', 'resources', 'saved', 'classroom', 'study'], actions: ['examPlan', 'ask', 'explain', 'quiz', 'flashcards'],
+  { id: 'exam-coach', name: 'Exam Coach', owner: 'system', reads: ['notes', 'resources', 'saved', 'classroom', 'study', 'recordings'], actions: ['examPlan', 'ask', 'explain', 'quiz', 'flashcards'],
     proposals: ['CREATE_STUDY_PLAN', 'CREATE_FLASHCARDS', 'UPDATE_TOPIC_CONFIDENCE'], provider: null, model: null,
     cannot: ['read your Diary', 'read unrelated courses', 'read your chats', 'change topic marks, tasks, reminders or exam dates by itself', ...NO] },
 ];
@@ -41,7 +41,7 @@ export const agentFor = (action: Action, preferred?: string) => {
 
 const MODULE_SCOPES: Record<SourceKind, string[]> = {
   notes: ['notes:read'], resources: ['files:read'], saved: ['saved:read'], classroom: ['files:read', 'notes:read'], chat: ['chat:read'],
-  study: ['courses:read', 'tasks:read', 'exams:read', 'flashcards:read', 'reminders:read', 'study:read'], diary: ['diary:read'],
+  study: ['courses:read', 'tasks:read', 'exams:read', 'flashcards:read', 'reminders:read', 'study:read'], recordings: ['recordings:read'], diary: ['diary:read'],
 };
 /** The agent principal for one request: the agent's reads ∩ what the student included (Diary also needs the grant, checked by the broker). */
 export function principalFor(agent: AgentDefinition, userId: string, include: Record<SourceKind, boolean>): Principal & { kind: 'agent' } {

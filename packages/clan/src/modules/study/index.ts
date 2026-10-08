@@ -30,6 +30,7 @@ export class Study {
   constructor(db: Db, bus: EventBus, courses: Courses, now = () => Date.now()) { this.db = db; this.bus = bus; this.courses = courses; this.now = now; }
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can study.'); return p.userId; }
   get(p: Principal, id: string) { const r = this.db.prepare(`SELECT ${COLS} FROM study_sessions WHERE id = ? AND owner_id = ?`).get(id, userOf(p)) as StudySession | undefined; return r ? fix(r) : null; }
+  ownerOf(sessionId: string) { return (this.db.prepare('SELECT owner_id o FROM study_sessions WHERE id = ?').get(sessionId) as { o: string } | undefined)?.o ?? null; }
   active(p: Principal) { const r = this.db.prepare(`SELECT ${COLS} FROM study_sessions WHERE owner_id = ? AND status = 'active' LIMIT 1`).get(userOf(p)) as StudySession | undefined; return r ? fix(r) : null; }
 
   private target(p: Principal, o: { courseId?: string | null; topicId?: string | null }) {

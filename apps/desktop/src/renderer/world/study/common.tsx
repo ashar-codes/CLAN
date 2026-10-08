@@ -3,9 +3,10 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { TOPIC_STATE_LABEL, TOPIC_STATES } from '@classroom/protocol';
 import type { AgendaItem, StudySession, TopicState } from '../../../shared.ts';
 import { api } from '../../App.tsx';
+import { useRecorder } from '../tape/recorder.tsx';
 
-export type StudyTab = 'campus' | 'board' | 'tasks' | 'exams' | 'cards' | 'notes' | 'history';
-export type StudyTarget = { tab: StudyTab; courseId?: string; examId?: string; deckId?: string; noteId?: string };
+export type StudyTab = 'campus' | 'board' | 'tasks' | 'exams' | 'cards' | 'notes' | 'tapes' | 'boards' | 'history';
+export type StudyTarget = { tab: StudyTab; courseId?: string; examId?: string; deckId?: string; noteId?: string; tapeId?: string; tapeAt?: number; boardId?: string };
 export type StudyCtx = {
   target: StudyTarget; go(t: StudyTarget): void;
   session: StudySession | null;
@@ -41,6 +42,8 @@ export function openItem(i: AgendaItem, go: StudyCtx['go']) {
 /** The running session: timer, goal, shortcuts, end with an optional reflection. Nothing else is recorded. */
 export function SessionBar({ onNote }: { onNote(): void }) {
   const { session, end, go } = useStudy();
+  const rec = useRecorder();
+  const [stopTape, setStopTape] = useState(true);
   const [now, setNow] = useState(Date.now());
   const [ending, setEnding] = useState(false);
   const [reflection, setReflection] = useState('');
@@ -59,10 +62,12 @@ export function SessionBar({ onNote }: { onNote(): void }) {
         {session.courseId && <button className="small" onClick={() => go({ tab: 'campus', courseId: session.courseId! })}>Course</button>}
         <button className="small" onClick={() => go({ tab: 'cards', ...(session.courseId ? { courseId: session.courseId } : {}) })}>Flashcards</button>
         <button className="small" onClick={() => go({ tab: 'tasks', ...(session.courseId ? { courseId: session.courseId } : {}) })}>Tasks</button>
+        {!rec.active && <button className="small" onClick={() => rec.open({ title: session.goal || 'Study session', courseId: session.courseId, topicId: session.topicId, studySessionId: session.id })}>Record</button>}
         {!ending ? <button className="small primary" onClick={() => setEnding(true)}>End session</button> : null}
       </div>
       {ending && (
-        <form className="row" onSubmit={async (e) => { e.preventDefault(); await end(reflection); setEnding(false); setReflection(''); }}>
+        <form className="row wrap" onSubmit={async (e) => { e.preventDefault(); if (rec.active && stopTape) await rec.stop(); await end(reflection); setEnding(false); setReflection(''); }}>
+          {rec.active && <label className="check small-text"><input type="checkbox" checked={stopTape} onChange={(e) => setStopTape(e.target.checked)} /> End recording and save the Study Tape</label>}
           <input value={reflection} onChange={(e) => setReflection(e.target.value)} placeholder="How did it go? (optional, only for you)" aria-label="Reflection" maxLength={5000} />
           <button className="primary small">Save and end</button>
         </form>

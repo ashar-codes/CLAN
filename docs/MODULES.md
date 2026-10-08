@@ -28,7 +28,9 @@
 | capture | product | `capture_items` (pointers to canonical notes/links/files) | `Capture` | CaptureItemCreated |
 | notifications | product (consumer) | `notify_notices`, `notify_prefs`, `notify_sent` | `Notifications` (core contract) | — (consumes MessageCreated, ReminderDue, StudySession*; `tick()` checks tasks/exams/sessions/cards due) |
 | ai | product (reads via module APIs; writes only via accepted proposals) | `ai_settings`, `ai_sources`, `ai_chunks`, `ai_fts` (FTS5), `ai_vectors`, `ai_conversations`, `ai_turns`, `ai_proposals`, `ai_quizzes`, `ai_quiz_attempts`, `ai_paper_questions`, `ai_usage` | `AI` (run, preview, search, proposals, quiz, past papers, exam gaps) | — |
-| recordings, whiteboard, profile | contracts only | — | `modules/contracts.ts` | — |
+| whiteboard | product | `wb_boards`, `wb_ops`, `wb_snapshots` | `Whiteboard` (+ host relay `server/whiteboard.ts`) | BoardChanged |
+| recordings | product | `rec_tapes`, `rec_events` | `Recordings` (Study Tapes) | TapeChanged |
+| profile | contracts only | — | `modules/contracts.ts` | — |
 | classroom (legacy) | `@classroom/server` | `sessions`, `members`, `resources`, `assignments`, `uploads`, `submissions`, … | server API (hosts every CLAN type) | its own `events` log |
 
 **Session capabilities** (who may do what in a live CLAN session) are in `@classroom/protocol` `capabilitiesFor(type, host|member)`

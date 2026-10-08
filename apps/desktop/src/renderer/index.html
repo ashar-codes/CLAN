@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <!-- Classroom servers have dynamic LAN addresses/ports, so connect-src allows any wss:/https: host; Chromium then
          accepts only the PAKE-pinned certificate (main-process verify proc). No plaintext, no remote scripts. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: wss:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: clan-media:; media-src 'self' blob: clan-media:; font-src 'self' data:; connect-src 'self' https: wss:" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CLAN</title>
   </head>

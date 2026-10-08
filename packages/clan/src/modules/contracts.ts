@@ -8,15 +8,11 @@ import type { Principal, Scope } from '../core/permissions.ts';
 
 // Courses, Tasks, Exams, Flashcards, Reminders and Study Sessions are real modules now (see docs/STUDY.md).
 
-// Recordings (audio/video live in the Resource Store; this holds metadata + a ref)
-export type Recording = { id: string; scope: Scope; title: string; refId: string; durationMs: number; recordedAt: number };
-export interface RecordingsModule { list(p: Principal, scope: Scope): Recording[] }
+// Recordings (Study Tapes) and the Whiteboard are real modules now (modules/recordings, modules/whiteboard).
 
-// Whiteboard (live in a CLAN room; same wall surface as screen sharing). Screen sharing itself: modules/screenshare.
+// Screen sharing itself: modules/screenshare.
 export type ScreenShareSession = { id: string; clanId: string; presenterId: string; startedAt: number; endedAt: number | null };
-export type WhiteboardStroke = { id: string; boardId: string; authorId: string; points: [number, number][]; color: string; width: number };
 export interface ScreenShareModule { active(p: Principal, clanId: string): ScreenShareSession | null }
-export interface WhiteboardModule { strokes(p: Principal, boardId: string, since: number): WhiteboardStroke[] }
 
 // AI (assistants never read data directly; they go through core/context.ts ContextBroker with scoped agent principals)
 export type AgentDefinition = { id: string; name: string; scopes: string[] };

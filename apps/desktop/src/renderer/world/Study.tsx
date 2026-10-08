@@ -14,6 +14,8 @@ import { Tasks } from './study/Tasks.tsx';
 import { Exams } from './study/Exams.tsx';
 import { Cards } from './study/Cards.tsx';
 import { History } from './study/History.tsx';
+import { Tapes } from './tape/Tapes.tsx';
+import { Boards } from './board/Boards.tsx';
 
 declare global { interface Window { __clanPerf?: { sceneMs?: number } } }
 const sceneStart = { t: 0 };
@@ -29,7 +31,7 @@ class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-const TABS: [StudyTab, string][] = [['campus', 'Campus'], ['board', 'Semester Board'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['cards', 'Flashcards'], ['notes', 'Notes'], ['history', 'History']];
+const TABS: [StudyTab, string][] = [['campus', 'Campus'], ['board', 'Semester Board'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['cards', 'Flashcards'], ['notes', 'Notes'], ['tapes', 'Study Tapes'], ['boards', 'Boards'], ['history', 'History']];
 
 export function Study({ experience }: { experience: Experience }) {
   const { target, go } = useStudy();
@@ -48,6 +50,8 @@ export function Study({ experience }: { experience: Experience }) {
       {tab === 'exams' && <Exams examId={target.examId} />}
       {tab === 'cards' && <Cards courseId={target.courseId} deckId={target.deckId} />}
       {tab === 'notes' && <Notes />}
+      {tab === 'tapes' && <Tapes tapeId={target.tapeId} at={target.tapeAt} />}
+      {tab === 'boards' && <Boards boardId={target.boardId} owner={{ kind: 'personal', id: 'me' }} />}
       {tab === 'history' && <History />}
     </div>
   );
@@ -144,7 +148,7 @@ function CourseList({ courses, onOpen }: { courses: CourseView[]; onOpen(id: str
 }
 
 function Notes() {
-  const { target } = useStudy();
+  const { target, go } = useStudy();
   const ai = useAI();
   const [notes, reload] = useLoad(api.clan.notes);
   const [clans] = useLoad(api.clan.list);
@@ -175,7 +179,7 @@ function Notes() {
       <aside className="stack">
         <form onSubmit={async (e) => { e.preventDefault(); setHits(q.trim() ? await api.clan.search(q) : null); }}><input type="search" placeholder="Search notes and saved" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" /></form>
         {hits && hits.length > 0 && <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: `About “${q}”`, action: 'ask', scope: { kind: 'search', hits: hits.map((h) => ({ module: h.module, entityId: h.entityId })) }, question: q, ask: true })}>Ask CLAN about these results</button>}
-        {hits && <div className="card">{hits.length ? hits.map((h) => <div key={h.module + h.entityId} className="line"><span>{h.title}<br /><small className="muted">{h.snippet}</small></span><span className="muted">{h.module}</span></div>) : <p className="muted">No results.</p>}</div>}
+        {hits && <div className="card">{hits.length ? hits.map((h) => h.module === 'recordings' ? <button key={h.module + h.entityId} className="line link-row" onClick={() => { const [tapeId, at] = h.entityId.split(':'); go({ tab: 'tapes', tapeId, tapeAt: at ? Number(at) : undefined }); }}><span>{h.title}<br /><small className="muted">{h.snippet}</small></span><span className="muted">Study Tape</span></button> : <div key={h.module + h.entityId} className="line"><span>{h.title}<br /><small className="muted">{h.snippet}</small></span><span className="muted">{h.module}</span></div>) : <p className="muted">No results.</p>}</div>}
         <button className="primary" onClick={create}>New note</button>
         {notes?.map((n) => <button key={n.id} className={`line link-row ${sel?.id === n.id ? 'on' : ''}`} onClick={() => setSel(n)}>{n.title}<span className="muted">{n.sharedWith.length ? 'shared' : 'private'}</span></button>)}
       </aside>

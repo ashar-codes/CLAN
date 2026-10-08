@@ -6,6 +6,8 @@ import type { Capabilities, DirectAvailability, DirectStatus, PastClass, Started
 import { api } from './App.tsx';
 import { HostRoom } from './world/LiveRoom.tsx';
 import { RoomSurface, usePresentation, type PresentationMsg } from './world/Presentation.tsx';
+import { useBoard } from './world/board/useBoard.ts';
+import { BoardControls, WallBoard } from './world/board/RoomBoard.tsx';
 import { RoomPresentation } from './world/RoomPresentation.tsx';
 import { useExperience } from './world/experience.ts';
 import { useChat } from './world/chat/useChat.ts';
@@ -139,6 +141,9 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const chat = useChat({ role: 'host', conn: { url: started.url, token: started.teacherToken, sessionId: sid ?? '00000000-0000-4000-8000-000000000000' }, clanId, send: (m) => conn.current?.send(m) });
   const chatRef = useRef(chat);
   chatRef.current = chat;
+  const board = useBoard({ kind: 'live', send: (m) => conn.current?.send(m) }, chat.me ?? 'host');
+  const boardRef = useRef(board);
+  boardRef.current = board;
   const [dm, setDm] = useState<{ handle: string; n: number } | null>(null);
   const toast = (m: string) => { setShared(m); setTimeout(() => setShared(''), 3000); };
   useEffect(() => api.notify.on((n) => { if (n.threadId !== chatRef.current.active || !document.hasFocus()) toast(`${n.title}: ${n.body}`); }), []);
@@ -146,7 +151,8 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   useEffect(() => {
     const c = new ClassroomConnection(started.url, started.teacherToken, {
       onMessage: (m) => {
-        if (m.t === 'hello') { setSid(m.classroom.sessionId); setClanId(m.classroom.clanId ?? m.classroom.sessionId); }
+        if (m.t === 'hello') { setSid(m.classroom.sessionId); setClanId(m.classroom.clanId ?? m.classroom.sessionId); boardRef.current.connected(); }
+        if (m.t.startsWith('wb.')) return boardRef.current.onServer(m as never);
         chatRef.current.onServer(m);
         if (m.t === 'hello') setCan(m.capabilities);
         if (m.t === 'hello' || m.t === 'class.state') setInfo(m.classroom);
@@ -156,7 +162,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         else if (m.t === 'assignments') setAssignments(m.assignments as TeacherAssignmentView[]);
         else if (m.t === 'stats') setStats(m.stats);
         else if (m.t === 'presentation') setPresMsg(m);
-        else if (m.t === 'error') { if (['busy', 'forbidden', 'media_unavailable', 'not_presenting'].includes(m.code) && presRef.current) void presRef.current.refused(m.message); else setNotice(m.message); }
+        else if (m.t === 'error') { if (['presenting', 'whiteboard', 'not_shared'].includes(m.code)) boardRef.current.onServer(m); if (['busy', 'forbidden', 'media_unavailable', 'not_presenting', 'whiteboard'].includes(m.code) && presRef.current) void presRef.current.refused(m.message); else if (!['presenting', 'not_shared'].includes(m.code)) setNotice(m.message); }
       },
       onQuality: setQuality,
       onClosed: () => onEnded(),
@@ -174,6 +180,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const pres = usePresentation({ baseUrl: started.url, bearer: started.teacherToken, sessionId: info?.sessionId ?? '00000000-0000-4000-8000-000000000000', msg: presMsg, send: (m) => conn.current?.send(m), me: 'host' });
   presRef.current = pres;
   const end = async () => { if (confirm(`End this ${L.session} for everyone?`)) { await api.stopClassroom(); onEnded(); } };
+  const boardNode = board.view?.wall === 'WHITEBOARD' && !pres.live ? <WallBoard board={board} resources={resources as never} title={`${info?.title ?? 'CLAN'} board`} /> : undefined;
 
   if (!info) return <main className="center"><p className="muted">Starting…</p></main>;
   return (
@@ -188,10 +195,12 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
       </header>
       {notice && <p className="error" onClick={() => setNotice('')}>{notice}</p>}
       {shared && <div className="toast" role="status">{shared}</div>}
-      <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost ask={ask} />
+      <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost ask={ask} boardOnWall={board.view?.wall === 'WHITEBOARD'} />
+      <BoardControls board={board} pres={pres} send={send} clanType={info.clanType} me={null} />
       {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}
+      {experience === 'minimal' && boardNode}
       <div className="room-with-chat">
-        {experience !== 'minimal' && <HostRoom pres={pres} onPresent={() => setAsk((n) => n + 1)} onStopPresenter={() => pres.live && send({ t: 'present.stop', presentationId: pres.live.id })} code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={toast}
+        {experience !== 'minimal' && <HostRoom board={boardNode} pres={pres} onPresent={() => setAsk((n) => n + 1)} onStopPresenter={() => pres.live && send({ t: 'present.stop', presentationId: pres.live.id })} code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={toast}
           people={personSender(chat, (handle) => setDm({ handle, n: Date.now() }), true)}
           onRemove={(id) => send({ t: 'member.remove', memberId: id })} onBlock={(id) => confirm('Block this device from this ' + L.session + '?') && send({ t: 'member.block', memberId: id })} />}
         <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>

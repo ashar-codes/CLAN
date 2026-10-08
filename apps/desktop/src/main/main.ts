@@ -20,6 +20,8 @@ import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
 import { registerStudy } from './study.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
+import { registerBoards } from './board.ts';
+import { micArmed, registerMediaScheme, registerTapes } from './tape.ts';
 import { DesktopDirect } from './direct.ts';
 import { mediaBinary, mediaWorkDir, registerScreen } from './screen.ts';
 import { ScreenShareEvents } from '@clan/core';
@@ -211,7 +213,7 @@ function registerIpc() {
     const hostName = loadProfile().fullName || (named && named !== 'Me' ? named : undefined);
     try {
       server = await startClassroomServer({ title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: a.connectivity === 'direct' ? 'direct' : 'lan', identity: await trust.teacherIdentity(),
-        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat,
+        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat, whiteboard: clan.whiteboard,
         direct: directNet ? { ssid: directNet.ssid, passphrase: directNet.passphrase, auth: 'WPA2', host: directNet.hostAddress, expiresAt: expiresAt ?? Date.now() + 12 * 3600_000 } : undefined });
       if (directNet) await direct.publish(server);
       chatHooks.hosted(server);
@@ -239,7 +241,7 @@ function registerIpc() {
     await server?.close(); server = null; clearTimeout(expiryTimer);
     await direct.stop(); // AP down, its credentials gone, firewall rules removed
     clan.syncClassrooms();
-    if (ended?.type === 'TEMPORARY' && ended.id) clan.clans.archive(ended.id); // ending a Temporary CLAN ends the CLAN; downloaded files stay
+    if (ended?.type === 'TEMPORARY' && ended.id) { clan.clans.archive(ended.id); clan.whiteboard.purgeOwner('clan', ended.id); } // ending a Temporary CLAN ends the CLAN (and its board); downloaded files stay
   });
 
   ipcMain.handle('teacher:addFiles', async (e) => {
@@ -333,6 +335,7 @@ function createWindow() {
   else win.loadFile(join(here, '../renderer/index.html'));
 }
 
+registerMediaScheme(); // privileged scheme must be declared before ready
 app.whenReady().then(() => {
   keystore = new Keystore(); // initialise OS key storage under the legacy storage identity…
   app.setName(PRODUCT_NAME); // …then present as CLAN
@@ -340,7 +343,8 @@ app.whenReady().then(() => {
   trust.installVerifyProc(session.defaultSession);
   // Nothing needs camera/mic/notifications yet; grant capabilities explicitly as features land.
   // Only screen capture (display-capture) may be requested, and only after the user picked a source in CLAN. No mic/camera.
-  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'display-capture'));
+  // Microphone only right after the student started a Study Tape with “Microphone” ticked (audio only, never camera).
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb, details) => cb(perm === 'display-capture' || (perm === 'media' && micArmed() && !!(details as { mediaTypes?: string[] }).mediaTypes?.length && (details as { mediaTypes: string[] }).mediaTypes.every((t) => t === 'audio'))));
   process.on('uncaughtException', (e) => logError('main', e));
   direct = new DesktopDirect();
   void direct.recover(); // a crash may have left a Direct network or firewall rules behind
@@ -352,6 +356,8 @@ app.whenReady().then(() => {
   chatHooks = registerChat({ clan, server: () => server, trust, files: studentFiles });
   registerStudy(clan);
   registerAI(clan, aiCreds);
+  registerBoards(clan);
+  registerTapes(clan);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

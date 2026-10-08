@@ -71,6 +71,8 @@ export class Courses {
     if (!r) throw new Error('Course not found.');
     return toCourse(r);
   }
+  /** Owner of a course (for modules that attach their own data to it, e.g. a Course board). */
+  ownerOf(courseId: string) { return (this.db.prepare('SELECT owner_id o FROM courses_courses WHERE id = ? AND archived_at IS NULL').get(courseId) as { o: string } | undefined)?.o ?? null; }
   list(p: Principal): Course[] {
     return (this.db.prepare('SELECT * FROM courses_courses WHERE owner_id = ? AND archived_at IS NULL ORDER BY name LIMIT 200').all(userOf(p)) as CRow[]).map(toCourse);
   }

@@ -6,6 +6,8 @@ import { StudentAssignments, StudentFiles as FilesCard } from './Files.tsx';
 import { api } from './App.tsx';
 import { MemberRoom } from './world/LiveRoom.tsx';
 import { RoomSurface, usePresentation, type PresentationMsg } from './world/Presentation.tsx';
+import { useBoard } from './world/board/useBoard.ts';
+import { BoardControls, WallBoard } from './world/board/RoomBoard.tsx';
 import { RoomPresentation } from './world/RoomPresentation.tsx';
 import { useExperience } from './world/experience.ts';
 import { useChat } from './world/chat/useChat.ts';
@@ -130,6 +132,9 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const chat = useChat({ role: 'member', conn: { url: session.url, token: session.token, sessionId: session.classroom.sessionId }, clanId: info.clanId ?? info.sessionId, send: (m) => connRef.current?.send(m) });
   const chatRef = useRef(chat);
   chatRef.current = chat;
+  const board = useBoard({ kind: 'live', send: (m) => connRef.current?.send(m) }, chat.me ?? session.memberId);
+  const boardRef = useRef(board);
+  boardRef.current = board;
   const [dm, setDm] = useState<{ handle: string; n: number } | null>(null);
   const [toastMsg, setToast] = useState('');
   const toast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3000); };
@@ -140,11 +145,14 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
     // Renderer WSS: Chromium accepts only the PAKE-pinned certificate (main-process verify proc).
     const c = new ClassroomConnection(session.url, session.token, {
       onMessage: (m) => {
+        if (m.t.startsWith('wb.')) return boardRef.current.onServer(m as never);
         chatRef.current.onServer(m);
+        if (m.t === 'hello') boardRef.current.connected();
         if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
         if (m.t === 'members') setPeople(m.members);
         if (m.t === 'presentation') setPresMsg(m);
-        if (m.t === 'error' && ['busy', 'forbidden', 'media_unavailable', 'not_presenting'].includes(m.code)) void presRef.current?.refused(m.message);
+        if (m.t === 'error' && ['presenting', 'whiteboard', 'not_shared'].includes(m.code)) boardRef.current.onServer(m);
+        if (m.t === 'error' && ['busy', 'forbidden', 'media_unavailable', 'not_presenting', 'whiteboard'].includes(m.code)) void presRef.current?.refused(m.message);
         if (m.t === 'peer.probe') void api.peerProbe(m.targets).then((r) => connRef.current?.send({ t: 'peer.probeResult', probeId: m.probeId, ...r })).catch(() => {});
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: [] }); } // register the peer server as soon as we're in
@@ -178,6 +186,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const L = clanLabels(info.clanType);
   const pres = usePresentation({ baseUrl: session.url, bearer: session.token, sessionId: info.sessionId, msg: presMsg, send: (m) => connRef.current?.send(m), me: session.memberId });
   presRef.current = pres;
+  const boardNode = board.view?.wall === 'WHITEBOARD' && !pres.live ? <WallBoard board={board} resources={resources} title={`${info.title} board`} /> : undefined;
 
   const over = info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
     : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
@@ -210,11 +219,13 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.hostName && <p className="muted small-text" data-testid="host-name">Hosted by {info.hostName}</p>}{info.description && <p className="muted small-text">{info.description}</p>}</div>
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>
       </header>
-      <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost={false} />
+      <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost={false} boardOnWall={board.view?.wall === 'WHITEBOARD'} />
+      <BoardControls board={board} pres={pres} send={send} clanType={info.clanType} me={null} />
       {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}
+      {experience === 'minimal' && boardNode}
       {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
       <div className="room-with-chat">
-        {experience !== 'minimal' && <MemberRoom pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : chat.host ? [{ name: info.hostName ?? L.host, host: true, connected: true, handle: chat.host }] : null} resources={resources}
+        {experience !== 'minimal' && <MemberRoom board={boardNode} pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : chat.host ? [{ name: info.hostName ?? L.host, host: true, connected: true, handle: chat.host }] : null} resources={resources}
           actions={{ ...personSender(chat, (handle) => setDm({ handle, n: Date.now() }), can.includes('SEND_FILES')), me: chat.me }} onToast={toast}
           onTableDrop={can.includes('SEND_FILES') ? async (files) => { const r = await api.chat.sendDropped(chat.conn, files, 'clan'); return r.length ? `Shared ${r.length === 1 ? r[0]!.name : `${r.length} files`} with everyone in the ${L.session}` : 'Nothing was shared.'; } : undefined} />}
         <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>

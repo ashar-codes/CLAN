@@ -67,6 +67,20 @@ export class ResourceStore {
     return { object: this.insert({ sha256, size, mime: mime.slice(0, 120), location: dest, origin: 'store' }), deduped: false };
   }
 
+  /**
+   * Moves a file the app itself produced (e.g. a finished recording) into the store: hashed once, renamed (atomic on the
+   * same filesystem, so multi-hour media is never copied a second time). Same bytes already stored → the source is removed.
+   */
+  async ingest(srcPath: string, mime = 'application/octet-stream'): Promise<{ object: ObjectRow; deduped: boolean }> {
+    const { sha256, size } = await sha256File(srcPath);
+    const hit = this.bySha(sha256);
+    if (hit) { await rm(srcPath, { force: true }); return { object: hit, deduped: true }; }
+    const dest = join(this.dir, sha256.slice(0, 2), sha256);
+    await mkdir(join(this.dir, sha256.slice(0, 2)), { recursive: true });
+    try { await rename(srcPath, dest); } catch { await copyFile(srcPath, dest); await rm(srcPath, { force: true }); } // other volume
+    return { object: this.insert({ sha256, size, mime: mime.slice(0, 120), location: dest, origin: 'store' }), deduped: false };
+  }
+
   /** Registers an existing file in place (legacy classroom storage). The caller vouches for sha256/size; verify() rechecks. */
   adopt(o: { sha256: string; size: number; mime: string; location: string }): ObjectRow {
     return this.bySha(o.sha256) ?? this.insert({ ...o, origin: 'adopted' });
