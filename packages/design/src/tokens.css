@@ -125,5 +125,7 @@
   box-shadow: 0 16px 0 var(--wood-dark), var(--shadow-2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 14px 20px;
   transform: perspective(700px) rotateX(28deg); transition: box-shadow var(--t-base), outline-color var(--t-base); outline: 3px dashed transparent; outline-offset: 6px; }
 .c-room-table.over { outline-color: var(--transfer); }
+.c-room-person.drop { position: relative; outline: 3px dashed var(--brick); outline-offset: 4px; border-radius: 18px; }
+.c-room-only { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--brick); color: #fff; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .c-room-item { background: var(--surface); color: var(--ink); border-radius: 4px; padding: 10px 8px; font: 700 10px var(--font-body); text-transform: uppercase; box-shadow: 0 2px 0 rgba(0,0,0,.18); transform: rotate(var(--r)); }
 .c-room-empty, .c-room-more { color: #fff8ec; font: 600 13px var(--font-body); text-shadow: 0 1px 0 rgba(0,0,0,.25); }

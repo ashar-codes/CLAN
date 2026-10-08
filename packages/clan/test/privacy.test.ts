@@ -158,7 +158,12 @@ describe('Share-to-CLAN', () => {
     expect(url).toMatchObject({ status: 'ok', module: 'saved' });
     expect(app.saved.inClan(bob, algo.id)).toHaveLength(1);
     expect(await app.share.share(me, { kind: 'text', text: 'idea' }, { kind: 'inbox' })).toMatchObject({ status: 'ok', module: 'notes' });
-    expect(await app.share.share(me, { kind: 'text', text: 'x' }, { kind: 'course', courseId: 'c' })).toMatchObject({ status: 'unsupported' });
+    // A course is its CLASSROOM CLAN; a non-course CLAN is refused as a course; "person" happens only inside a live room.
+    const os = app.clans.create({ type: 'CLASSROOM', name: 'OS', createdBy: app.me });
+    expect(await app.share.share(me, { kind: 'text', text: 'x' }, { kind: 'course', courseId: os.id })).toMatchObject({ status: 'ok', module: 'notes' });
+    expect(app.notes.inClan(me, os.id)).toHaveLength(1);
+    await expect(app.share.share(me, { kind: 'text', text: 'x' }, { kind: 'course', courseId: algo.id })).rejects.toThrow(/not a course/);
+    expect(await app.share.share(me, { kind: 'text', text: 'x' }, { kind: 'person', userId: bob.userId })).toMatchObject({ status: 'unsupported' });
     await expect(app.share.share(bob, { kind: 'url', url: 'https://e.com' }, { kind: 'clan', clanId: 'not-mine' })).rejects.toThrow();
   });
 });

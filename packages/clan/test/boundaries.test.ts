@@ -8,7 +8,7 @@ const root = join(import.meta.dirname, '../../..');
 const src = join(import.meta.dirname, '../src');
 const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));
 const imports = (f: string) => [...readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*'([^']+)'/g)].map((m) => m[1]!);
-const PREFIX: Record<string, string[]> = { clans: ['clans_'], files: ['resources_'], notes: ['notes_'], saved: ['saved_'], diary: ['diary_'], reminders: ['reminders_'], share: [] };
+const PREFIX: Record<string, string[]> = { clans: ['clans_'], files: ['resources_'], notes: ['notes_'], saved: ['saved_'], diary: ['diary_'], reminders: ['reminders_'], share: [], chat: ['chat_'], capture: ['capture_'], notifications: ['notify_'] };
 /** Read-only classroom readers (see their headers). */
 const LEGACY_READERS: Record<string, string[]> = { 'modules/clans/classroom-import.ts': ['sessions', 'members'], 'modules/files/classroom-adopt.ts': ['resources'] };
 
@@ -35,7 +35,7 @@ describe('module boundaries', () => {
     for (const f of walk(join(src, 'modules'))) {
       const rel = relative(src, f), mod = rel.split('/')[1]!;
       const text = readFileSync(f, 'utf8');
-      const tables = [...text.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE|TABLE|EXISTS \(SELECT 1 FROM)\s+([a-z_]+)/g)].map((m) => m[1]!).filter((t) => !['json_each', 'excluded'].includes(t));
+      const tables = [...text.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE|TABLE|EXISTS \(SELECT 1 FROM)\s+([a-z_]+)/g)].map((m) => m[1]!).filter((t) => !['json_each', 'excluded', 'pragma_table_info'].includes(t));
       const allowed = [...(PREFIX[mod] ?? []), ...(LEGACY_READERS[rel] ?? [])];
       for (const t of tables) expect(allowed.some((a) => t === a || t.startsWith(a)), `${rel} uses table ${t}`).toBe(true);
       if (LEGACY_READERS[rel]) expect(text, rel).not.toMatch(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+(sessions|members|resources)\b/);

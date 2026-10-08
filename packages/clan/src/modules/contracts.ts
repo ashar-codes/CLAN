@@ -4,10 +4,7 @@ import { z } from 'zod';
 import { defineEvent } from '../core/events.ts';
 import type { Principal, Scope } from '../core/permissions.ts';
 
-// Chat
-export type ChatThread = { id: string; scope: Scope; title: string | null; createdAt: number };
-export type Message = { id: string; threadId: string; authorId: string; body: string; refs: { module: string; id: string }[]; sentAt: number };
-export interface ChatModule { threads(p: Principal, clanId: string): ChatThread[]; post(p: Principal, threadId: string, body: string): Message }
+// Chat is a real module now: modules/chat (and the wire types in @classroom/protocol chat.ts).
 
 // Tasks
 export type Task = { id: string; ownerId: string; scope: Scope; title: string; dueAt: number | null; doneAt: number | null; ref?: { module: string; id: string } };

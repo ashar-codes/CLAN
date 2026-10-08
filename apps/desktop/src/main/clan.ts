@@ -22,7 +22,7 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
     return {
       me: { id: c.me, name: c.identity.displayName(c.me) ?? 'Me' },
       library: { notes: c.notes.mine(me, 500).length, saved: c.saved.items(me).length, courses: c.clans.list(c.me).filter((x) => x.type === 'CLASSROOM').length, files: c.files.list(me, { kind: 'personal', ownerId: c.me }).length },
-      inboxCount: c.saved.items(me, c.saved.inbox(me)).length,
+      inboxCount: c.capture.inbox(me).length, // Personal Space › Inbox: everything captured and not yet filed
       diaryToday: !!c.diary.day(me, new Date().toLocaleDateString('en-CA')),
       clans: c.clans.list(c.me).map((x) => ({ id: x.id, name: x.name, type: x.type, members: c.clans.members(x.id).filter((m) => m.status === 'active').length })),
       continueNotes: c.notes.mine(me, 3).map((n) => ({ id: n.id, title: n.title, updatedAt: n.updatedAt })),

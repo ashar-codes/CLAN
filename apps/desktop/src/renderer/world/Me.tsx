@@ -29,6 +29,7 @@ export function Me({ experience, section }: { experience: Experience; section: '
           ))}
           <label className="radio"><input type="radio" name="exp" checked={auto} onChange={() => { setExperience('auto'); setAuto(true); }} /><span><b>Automatic</b> <small className="muted">now {experience}</small></span></label>
         </fieldset>
+        <Notices />
         <span className="eyebrow">Privacy</span>
         <label className="check"><input type="checkbox" checked={!!privacy?.aiDiary} onChange={async (e) => { await api.clan.setAiDiary(e.target.checked); reloadPrivacy(); }} /> Let AI read my Diary</label>
         <p className="muted small-text">Off by default. Notes and links are private until you share them into a CLAN. Your Diary is never shared and never searchable.</p>
@@ -52,5 +53,21 @@ function Diary({ focus }: { focus: boolean }) {
       <div className="row"><button className="primary" onClick={async () => { await api.clan.writeDiary({ day: today(), ...entry }); setSaved(true); reloadRecent(); }}>Save entry</button>{saved && <span className="muted">Saved</span>}</div>
       <div className="diary-past">{recent?.filter((e) => e.day !== today()).map((e) => <article key={e.id}><span className="eyebrow">{e.day}{e.mood ? ` · ${e.mood}` : ''}</span><p>{e.body}</p></article>)}</div>
     </section>
+  );
+}
+
+/** Which conversations may notify you, and whether notices may show message text (off: only who and where). */
+function Notices() {
+  const [p, reload] = useLoad(api.notify.prefs);
+  if (!p) return null;
+  const set = async (k: keyof typeof p, v: boolean) => { await api.notify.setPrefs({ [k]: v }); reload(); };
+  return (
+    <fieldset className="experience"><legend className="eyebrow">Notifications</legend>
+      <label className="check"><input type="checkbox" checked={p.direct} onChange={(e) => void set('direct', e.target.checked)} /> Direct messages</label>
+      <label className="check"><input type="checkbox" checked={p.files} onChange={(e) => void set('files', e.target.checked)} /> Files sent to me</label>
+      <label className="check"><input type="checkbox" checked={p.groups} onChange={(e) => void set('groups', e.target.checked)} /> CLAN group conversations</label>
+      <label className="check"><input type="checkbox" checked={p.previews} onChange={(e) => void set('previews', e.target.checked)} /> Show message text in notifications</label>
+      <small className="muted">Focus mode holds every alert. Nothing notifies you about a conversation you have open.</small>
+    </fieldset>
   );
 }

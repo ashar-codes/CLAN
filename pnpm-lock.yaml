@@ -218,6 +218,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@classroom/client':
+        specifier: workspace:*
+        version: link:../client
       '@classroom/server':
         specifier: workspace:*
         version: link:../server

@@ -3,6 +3,7 @@ import { useState, type DragEvent } from 'react';
 import type { Collection, SavedItem } from '../../shared.ts';
 import { api } from '../App.tsx';
 import { useLoad, errText } from './useLoad.ts';
+import { Inbox } from './Inbox.tsx';
 import type { Experience } from './experience.ts';
 
 /** Kind from the link itself (no fetching). */
@@ -45,6 +46,7 @@ export function Saved({ experience }: { experience: Experience }) {
         <div><span className="eyebrow">Saved</span><h1 className="title world">Your shelves</h1><p className="muted">Links and notes about them — CLAN never downloads the video, post or page itself.</p></div>
         <div className="seg small" role="tablist" aria-label="Layout"><button role="tab" aria-selected={!flat} onClick={() => setFlat(false)}>Board</button><button role="tab" aria-selected={flat} onClick={() => setFlat(true)}>List</button></div>
       </header>
+      <Inbox onChanged={() => reload()} />
       <form className="capture-bar" onSubmit={async (e) => { e.preventDefault(); setErr(''); try { await api.clan.save({ url }); setUrl(''); reload(); } catch (x) { setErr(errText(x)); } }}>
         <input type="url" placeholder="Paste a link (saved as a link only — nothing is downloaded)" value={url} onChange={(e) => setUrl(e.target.value)} className="grow" aria-label="Link" />
         <button className="primary" disabled={!url}>Save to Inbox</button>

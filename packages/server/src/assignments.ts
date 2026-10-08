@@ -1,17 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { createWriteStream } from 'node:fs';
 import { mkdir, rename, rm, truncate } from 'node:fs/promises';
 import type { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import { Transform } from 'node:stream';
 import {
   AssignmentInput, canonicalBytes, extensionOf, keyFingerprint, safeFileName, type ReceiptPayload,
   type AssignmentView, type Receipt, type StudentAssignmentView, type SubmissionState, type TeacherAssignmentView, type UploadInit, type UploadStatus,
 } from '@classroom/protocol';
 import type { Classroom } from './classroom.ts';
 import type { Db } from './db.ts';
-import { ApiError, hashFile, sizeOf, type Limits, type Storage } from './storage.ts';
+import { ApiError, appendBody, hashFile, sizeOf, type Limits, type Storage } from './storage.ts';
 
 type ARow = { id: string; title: string; instructions: string; due_at: number | null; allowed_ext: string; max_bytes: number; mode: 'individual' | 'group'; created_at: number; closed_at: number | null };
 type URow = { id: string; assignment_id: string; member_id: string; idempotency_key: string; file_name: string; size: number; sha256: string; state: UploadStatus['state']; error: string | null; submission_id: string | null; updated_at: number };
@@ -137,28 +134,13 @@ export class Assignments extends EventEmitter {
 
     this.writing.set(uploadId, memberId);
     this.emit('changed');
-    let received = 0;
-    const room = u.size - have;
     try {
-      try {
-        await pipeline(
-          body,
-          new Transform({
-            transform(chunk: Buffer, _e, cb) {
-              onChunk?.();
-              received += chunk.length;
-              if (received > room) return cb(new ApiError(413, 'too_large', 'More bytes than declared.'));
-              cb(null, chunk);
-            },
-          }),
-          createWriteStream(part, { flags: 'a' }),
-        );
-      } catch (e) {
-        if (!(e instanceof ApiError)) return await this.status(memberId, uploadId); // disconnect: keep partial for resume
-        await this.fail(u.id, e.message); // overrun: declared size was a lie
+      let received: number | null;
+      try { received = await appendBody(part, u.size - have, body, onChunk); } catch (e) {
+        await this.fail(u.id, (e as Error).message); // overrun: declared size was a lie
         throw e;
       }
-      if (have + received < u.size) return await this.status(memberId, uploadId);
+      if (received === null || have + received < u.size) return await this.status(memberId, uploadId); // disconnect: keep partial for resume
       // Still holding the `writing` lock, so a concurrent PUT can't finalize twice.
       return await this.finalize(u);
     } finally {

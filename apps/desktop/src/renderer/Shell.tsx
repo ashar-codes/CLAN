@@ -30,6 +30,8 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
   useEffect(() => api.discover((l) => setNearby(l)), []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2400); return () => clearTimeout(t); }, [toast]);
   useEffect(() => { if (tab === 'space') reloadHome(); }, [tab, reloadHome]);
+  useEffect(() => { void api.notify.context({ focus }); }, [focus]);
+  useEffect(() => api.notify.on((n) => { if (document.hasFocus()) setToast(`${n.title}: ${n.body}`); }), []);
 
   const go = (t: SpaceTarget) => {
     if (t === 'guide') return setGuide(true);

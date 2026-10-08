@@ -14,4 +14,10 @@
 * **Sharing** a file into a CLAN creates a new ref to the same object (`Files.share`).
 * **Removal** deletes the ref; objects with no refs are reported by `orphans()` (adopted files are never deleted by CLAN).
 * **Integrity**: `verify(objectId)` re-hashes the stored bytes. Classroom manifests and SHA checks are untouched.
+* **Chat attachments** reference resources by id (+ name, size, MIME, SHA-256 for display/verification); no bytes in chat tables.
+* **Audience** (host session files, `resources.audience`): NULL = the CLAN table; a list of chat handles = sent to those people
+  only (listing, manifest and download all check it; never pushed, never on the table, never adopted as a CLAN file). Members
+  share through `/api/shares` (resumable, idempotent) and the result is an ordinary resource with that audience.
+* **Host-side dedupe**: identical bytes imported again (e.g. the same file to the table and to one person) are hard-linked to the
+  existing stored file — one copy on disk, separate resources and scopes.
 * Not yet: automatic GC of orphaned `store` objects, quotas.

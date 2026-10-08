@@ -10,8 +10,10 @@ import { generateKeyPairSync, sign as edSign, createPublicKey, randomUUID, type 
 import * as opaque from '@serenity-kit/opaque';
 import {
   b64u, BleRequest, ClientMessage, DIRECT_PACKAGE_TTL_MS, MESSAGE_CAPABILITY, type BleResponse, type DirectPackage, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
-  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, type ServerMessage,
+  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, type ServerMessage, type ResourceView,
 } from '@classroom/protocol';
+import { ChatRelay, type ChatStore } from './chat.ts';
+import { Shares } from './shares.ts';
 import { Pairing } from './pairing.ts';
 import { PeerRegistry } from './peers.ts';
 import { z } from 'zod';
@@ -33,6 +35,8 @@ export type ServerOptions = {
   clan?: ClanSession;
   /** Host's canonical display name; members see it only after pairing (never in discovery). */
   hostName?: string;
+  /** Chat store (desktop host: @clan/core's Chat on the device database). Omitted → chat unavailable. */
+  chat?: ChatStore;
   /** Local SFU for screen sharing (desktop host: bundled livekit-server). Omitted → screen sharing unavailable. */
   media?: { binary: string; workDir: string; presenterGraceMs?: number };
   /** Direct network credentials: released, sealed, only inside a completed OPAQUE exchange. */
@@ -75,6 +79,10 @@ export type RunningServer = {
   resources: Resources;
   presentations: Presentations;
   media: MediaService | null;
+  chat: ChatRelay | null;
+  shares: Shares;
+  /** Host, in-process: add a file for the whole CLAN ('clan') or for one CLANmate (their chat handle). */
+  shareFile(path: string, to: string, name?: string): Promise<ResourceView>;
   assignments: Assignments;
   storage: Storage;
   port: number;
@@ -113,6 +121,18 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const media = opts.media ? new MediaService({ binary: opts.media.binary, host: opts.host, workDir: opts.media.workDir }) : null;
   const presentations = new Presentations(db, classroom, media, { hostName: opts.hostName, graceMs: opts.media?.presenterGraceMs });
   const assignments = new Assignments(db, classroom, storage, limits, signer);
+  const chat = opts.chat ? new ChatRelay({ store: opts.chat, classroom, resources, teacherPublicKey, hostName: opts.hostName ?? null }) : null;
+  resources.who = (p) => { try { return chat?.handleOf(p) ?? null; } catch { return null; } };
+  resources.nameOf = (h) => chat?.nameOfHandle(h) ?? 'Someone';
+  const shares = new Shares(db, classroom, storage, limits, resources);
+  if (chat) {
+    shares.audience = (memberId, to) => chat.audience({ role: 'student', memberId }, to);
+    shares.senderHandle = (memberId) => chat.handleOf({ role: 'student', memberId });
+  } else shares.audience = (memberId, to) => {
+    if (!classroom.can({ role: 'student', memberId }, 'SEND_FILES')) throw new ApiError(403, 'forbidden', 'You cannot share files in this CLAN.');
+    if (to !== 'clan') throw new ApiError(503, 'chat_unavailable', 'Sending to one person is not available here.');
+    return null;
+  };
   await resources.sweepRemoved();
   await assignments.sweep();
   const downloadRate = new RateLimit(limits.downloadRequestsPerMinute, 60_000);
@@ -137,9 +157,10 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       reply.header('x-content-type-options', 'nosniff');
     });
     a.setErrorHandler((err: Error, _req, reply) => {
-      if (err instanceof ApiError || err instanceof JoinError) {
-        if (err.status === 429) reply.header('retry-after', Math.max(1, Math.ceil(((err as JoinError).retryAfterMs ?? 1000) / 1000)));
-        return reply.code(err.status).send({ code: err.code, message: err.message, ...((err as ApiError).extra ?? {}) });
+      if (err instanceof ApiError || err instanceof JoinError || err.name === 'ChatError') {
+        const e = err as ApiError;
+        if (e.status === 429) reply.header('retry-after', Math.max(1, Math.ceil(((err as JoinError).retryAfterMs ?? 1000) / 1000)));
+        return reply.code(e.status).send({ code: e.code, message: e.message, ...(e.extra ?? {}) });
       }
       const status = (err as { statusCode?: number }).statusCode;
       if (status && status < 500) return reply.code(status).send({ code: 'invalid', message: 'Invalid request.' });
@@ -215,7 +236,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
 
   app.get('/api/resources', async (req) => {
     const p = auth(req);
-    return { resources: p.role === 'teacher' ? resources.listForTeacher() : resources.listForStudent() };
+    return { resources: p.role === 'teacher' ? resources.listForTeacher() : resources.listForStudent(p) };
   });
 
   app.get('/api/resources/:id/content', async (req, reply) => {
@@ -323,6 +344,34 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     });
   });
 
+  // ---- chat (history; live delivery is on the WSS) and member file shares ----
+  const needChat = () => { if (!chat) throw new ApiError(503, 'chat_unavailable', 'Chat is not available on this host.'); return chat; };
+  const seqParam = z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional();
+  app.get('/api/chat/threads', async (req) => needChat().threads(auth(req)));
+  app.get('/api/chat/threads/:id/messages', async (req) => {
+    const q = parse(z.object({ before: seqParam, after: seqParam, limit: z.coerce.number().int().min(1).max(200).optional() }), req.query);
+    return needChat().page(auth(req), uuidParam(req), q);
+  });
+  app.post('/api/chat/direct', async (req) => needChat().openDirect(auth(req), parse(z.object({ to: ChatHandle }), req.body).to));
+  app.post('/api/shares', async (req, reply) => {
+    const memberId = studentOnly(auth(req));
+    const st = await shares.init(memberId, parse(ShareUploadInit, req.body));
+    return reply.code(st.state === 'complete' ? 200 : 201).send(st);
+  });
+  app.get('/api/shares/:id', async (req) => shares.status(studentOnly(auth(req)), uuidParam(req)));
+  app.put('/api/shares/:id', async (req) => {
+    const body = req.body as Readable;
+    try {
+      const memberId = studentOnly(auth(req));
+      const id = uuidParam(req);
+      if (req.headers['content-type'] !== UPLOAD_CONTENT_TYPE) throw new ApiError(415, 'bad_content_type', `Use ${UPLOAD_CONTENT_TYPE}.`);
+      const off = String(req.headers['upload-offset'] ?? '');
+      if (!/^\d{1,15}$/.test(off)) throw new ApiError(400, 'bad_offset', 'Upload-Offset header required.');
+      const dog = watchdog(() => req.raw.destroy());
+      try { return await shares.append(memberId, id, Number(off), body, dog.touch); } finally { dog.stop(); }
+    } catch (e) { body?.resume?.(); throw e; }
+  });
+
   app.get('/api/assignments', async (req) => {
     const p = auth(req);
     return { assignments: p.role === 'teacher' ? assignments.listForTeacher() : assignments.listForStudent(p.memberId) };
@@ -368,13 +417,17 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const toAll = (m: ServerMessage) => { for (const ws of sockets.keys()) send(ws, m); };
 
   /** Names-only roster for members whose CLAN grants VIEW_MEMBERS (never device keys or ids). */
-  const memberRoster = (): ServerMessage => ({ t: 'members', members: [{ name: classroom.hostName ?? 'Host', host: true, connected: true },
-    ...classroom.roster().filter((m) => m.status === 'approved').map((m) => ({ name: m.fullName, host: false, connected: m.connected }))] });
-  const toMembers = () => {
-    let msg: ServerMessage | undefined;
-    for (const [ws, p] of sockets) if (p.role === 'student' && classroom.status(p.memberId) === 'approved' && classroom.can(p, 'VIEW_MEMBERS')) send(ws, (msg ??= memberRoster()));
+  const handles = () => chat?.handles() ?? new Map<string, string>();
+  const memberRoster = (p: Principal): ServerMessage => {
+    const h = handles();
+    return { t: 'members', me: chat?.handleOf(p) ?? '', members: [{ name: classroom.hostName ?? 'Host', host: true, connected: true, handle: chat?.hostHandle ?? '' },
+      ...classroom.roster().filter((m) => m.status === 'approved').map((m) => ({ name: m.fullName, host: false, connected: m.connected, handle: h.get(m.id) ?? '' }))] };
   };
-  classroom.on('roster', () => { toTeachers(() => ({ t: 'roster', members: classroom.roster() })); toMembers(); schedule(); });
+  const hostRoster = (): ServerMessage => { const h = handles(); return { t: 'roster', members: classroom.roster().map((m) => (chat ? { ...m, handle: h.get(m.id) } : m)) }; };
+  const toMembers = () => {
+    for (const [ws, p] of sockets) if (p.role === 'student' && classroom.status(p.memberId) === 'approved' && classroom.can(p, 'VIEW_MEMBERS')) send(ws, memberRoster(p));
+  };
+  classroom.on('roster', () => { toTeachers(hostRoster); toMembers(); schedule(); });
 
   // Coalesce bursts (40 students reporting progress) into at most one list broadcast per 150 ms.
   let pending: ReturnType<typeof setTimeout> | null = null;
@@ -382,13 +435,13 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const flush = () => {
     pending = null;
     if (shuttingDown) return;
-    let teacherRes: ServerMessage | undefined, teacherAsg: ServerMessage | undefined, studentRes: ServerMessage | undefined;
+    let teacherRes: ServerMessage | undefined, teacherAsg: ServerMessage | undefined;
     for (const [ws, p] of sockets) {
       if (p.role === 'teacher') {
         send(ws, (teacherRes ??= { t: 'resources', resources: resources.listForTeacher() }));
         send(ws, (teacherAsg ??= { t: 'assignments', assignments: assignments.listForTeacher() }));
       } else if (classroom.status(p.memberId) === 'approved') {
-        send(ws, (studentRes ??= { t: 'resources', resources: resources.listForStudent() }));
+        send(ws, { t: 'resources', resources: resources.listForStudent(p) }); // per member: files sent to them personally
         send(ws, { t: 'assignments', assignments: assignments.listForStudent(p.memberId) });
       }
     }
@@ -411,6 +464,12 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     const fp = peers.revoke(memberId);
     if (fp) for (const [ws, p] of sockets) if (p.role === 'student') send(ws, { t: 'peer.revoked', fingerprints: [fp] });
   });
+  /** Chat delivery: every socket whose principal may read the conversation gets it, with its own view of the thread. */
+  type ChatThread = NonNullable<ReturnType<ChatStore['thread']>>;
+  const toReaders = (t: ChatThread, m: (p: Principal) => ServerMessage | null) => {
+    for (const [ws, p] of sockets) if (chat?.canRead(p, t)) { const x = m(p); if (x) send(ws, x); }
+  };
+  const deliver = (message: import('@classroom/protocol').ChatMessageView, t: ChatThread) => toReaders(t, (p) => ({ t: 'chat.message', message, thread: chat!.view(t, p) }));
   const statsTimer = setInterval(() => toTeachers(() => ({ t: 'stats', stats: resources.stats(assignments.activeUploads, peers.summary()) })), 1000);
   classroom.on('timeline', () => toTeachers(() => ({ t: 'timeline', events: classroom.timeline() })));
   classroom.on('state', () => {
@@ -455,9 +514,9 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
           sockets.set(ws, principal);
           const memberId = principal.role === 'student' ? principal.memberId : null;
           send(ws, { t: 'hello', role: principal.role, memberId, status: memberId ? classroom.status(memberId) : null, classroom: classroom.info(), serverTime: Date.now(), capabilities: [...classroom.capabilities(principal)] });
-          if (principal.role === 'student' && classroom.status(principal.memberId) === 'approved' && classroom.can(principal, 'VIEW_MEMBERS')) send(ws, memberRoster());
+          if (principal.role === 'student' && classroom.status(principal.memberId) === 'approved' && classroom.can(principal, 'VIEW_MEMBERS')) send(ws, memberRoster(principal));
           if (principal.role === 'teacher') {
-            send(ws, { t: 'roster', members: classroom.roster() });
+            send(ws, hostRoster());
             send(ws, { t: 'timeline', events: classroom.timeline() });
           }
           schedule();
@@ -476,7 +535,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
         if ((TEACHER_ONLY.has(msg.t) && principal.role !== 'teacher') || (needs && !classroom.can(principal, needs))) return send(ws, { t: 'error', code: 'forbidden', message: 'Not allowed in this CLAN' });
         if (STUDENT_ONLY.has(msg.t) && (principal.role !== 'student' || classroom.status(principal.memberId) !== 'approved')) return send(ws, { t: 'error', code: 'forbidden', message: 'Students only' });
         const fail = (e: unknown) => {
-          if (e instanceof JoinError || e instanceof ApiError) return send(ws, { t: 'error', code: e.code, message: e.message });
+          if (e instanceof JoinError || e instanceof ApiError || (e as Error).name === 'ChatError') return send(ws, { t: 'error', code: (e as ApiError).code, message: (e as Error).message });
           if (e instanceof Error && e.name === 'ZodError') return send(ws, { t: 'error', code: 'invalid', message: 'Invalid request' });
           throw e;
         };
@@ -508,6 +567,32 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
               return classroom.setP2p(msg.reachable > 0);
             }
             case 'transfer.state': return resources.report((principal as { memberId: string }).memberId, msg.resourceId, msg.state, msg.bytes);
+            case 'chat.send': {
+              if (!chat) return send(ws, { t: 'chat.nack', id: msg.id, code: 'chat_unavailable', message: 'Chat is not available on this host.' });
+              let r: ReturnType<ChatRelay['send']>;
+              try { r = chat.send(principal, msg); } catch (e) {
+                const x = e as { code?: string; message?: string };
+                return send(ws, { t: 'chat.nack', id: msg.id, code: x.code ?? 'invalid', message: e instanceof ApiError || (e as Error).name === 'ChatError' ? String(x.message) : 'Invalid message' });
+              }
+              send(ws, { t: 'chat.ack', id: msg.id, threadId: r.message.threadId, seq: r.message.seq, createdAt: r.message.createdAt });
+              if (r.created) deliver(r.message, r.thread);
+              else send(ws, { t: 'chat.message', message: r.message, thread: chat.view(r.thread, principal) }); // a retry: the sender may have missed it
+              return;
+            }
+            case 'chat.edit': case 'chat.remove': case 'chat.react': {
+              const c = needChat();
+              const r = msg.t === 'chat.edit' ? c.edit(principal, msg.id, msg.body) : msg.t === 'chat.remove' ? c.remove(principal, msg.id) : c.react(principal, msg.id, msg.reaction, msg.on);
+              return deliver(r.message, r.thread);
+            }
+            case 'chat.cursor': {
+              const r = needChat().cursor(principal, msg.threadId, msg);
+              return toReaders(r.thread, () => ({ t: 'chat.cursors', threadId: r.thread.id, cursors: r.cursors }));
+            }
+            case 'chat.typing': {
+              const r = needChat().typing(principal, msg.threadId);
+              if (r) toReaders(r.thread, (p) => (chat!.handleOf(p) === r.handle ? null : { t: 'chat.typing', threadId: r.thread.id, handle: r.handle, name: r.name, until: r.until }));
+              return;
+            }
           }
         } catch (e) {
           fail(e);
@@ -546,6 +631,12 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     peers,
     presentations,
     media,
+    chat,
+    shares,
+    async shareFile(path: string, to: string, name?: string) {
+      const audience = chat ? chat.audience({ role: 'teacher' }, to) : to === 'clan' ? null : (() => { throw new ApiError(503, 'chat_unavailable', 'Sending to one person is not available here.'); })();
+      return resources.importFile(path, name, { audience, sharedBy: chat?.hostHandle ?? null });
+    },
     port,
     url: `https://${hostPart}:${httpsPort}`,
     bootstrapUrl: `http://${hostPart}:${port}`,

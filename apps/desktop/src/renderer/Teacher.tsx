@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ClassroomConnection, formatBytes, recommendDistribution, type Quality } from '@classroom/client';
 import { clanLabels, shortFingerprint, type ClanCapability, type ClanType, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats } from '@classroom/protocol';
 import { TeacherAssignments, TeacherFiles } from './Files.tsx';
@@ -8,6 +8,10 @@ import { HostRoom } from './world/LiveRoom.tsx';
 import { RoomSurface, usePresentation, type PresentationMsg } from './world/Presentation.tsx';
 import { RoomPresentation } from './world/RoomPresentation.tsx';
 import { useExperience } from './world/experience.ts';
+import { useChat } from './world/chat/useChat.ts';
+import { personSender } from './world/chat/send.ts';
+
+const ChatPanel = lazy(() => import('./world/chat/ChatPanel.tsx'));
 
 const POLICY_ORDER: JoinPolicy[] = ['approval', 'known', 'open'];
 const TYPES: ClanType[] = ['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'];
@@ -130,10 +134,20 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const presRef = useRef<ReturnType<typeof usePresentation> | null>(null);
   const experience = useExperience();
   const conn = useRef<ClassroomConnection | null>(null);
+  const [sid, setSid] = useState<string | null>(null);
+  const [clanId, setClanId] = useState<string | null>(null);
+  const chat = useChat({ role: 'host', conn: { url: started.url, token: started.teacherToken, sessionId: sid ?? '00000000-0000-4000-8000-000000000000' }, clanId, send: (m) => conn.current?.send(m) });
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
+  const [dm, setDm] = useState<{ handle: string; n: number } | null>(null);
+  const toast = (m: string) => { setShared(m); setTimeout(() => setShared(''), 3000); };
+  useEffect(() => api.notify.on((n) => { if (n.threadId !== chatRef.current.active || !document.hasFocus()) toast(`${n.title}: ${n.body}`); }), []);
 
   useEffect(() => {
     const c = new ClassroomConnection(started.url, started.teacherToken, {
       onMessage: (m) => {
+        if (m.t === 'hello') { setSid(m.classroom.sessionId); setClanId(m.classroom.clanId ?? m.classroom.sessionId); }
+        chatRef.current.onServer(m);
         if (m.t === 'hello') setCan(m.capabilities);
         if (m.t === 'hello' || m.t === 'class.state') setInfo(m.classroom);
         else if (m.t === 'roster') setMembers(m.members);
@@ -176,8 +190,15 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
       {shared && <div className="toast" role="status">{shared}</div>}
       <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost ask={ask} />
       {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}
-      {experience !== 'minimal' && <HostRoom pres={pres} onPresent={() => setAsk((n) => n + 1)} onStopPresenter={() => pres.live && send({ t: 'present.stop', presentationId: pres.live.id })} code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={(m) => { setShared(m); setTimeout(() => setShared(''), 3000); }}
-        onRemove={(id) => send({ t: 'member.remove', memberId: id })} onBlock={(id) => confirm('Block this device from this ' + L.session + '?') && send({ t: 'member.block', memberId: id })} />}
+      <div className="room-with-chat">
+        {experience !== 'minimal' && <HostRoom pres={pres} onPresent={() => setAsk((n) => n + 1)} onStopPresenter={() => pres.live && send({ t: 'present.stop', presentationId: pres.live.id })} code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={toast}
+          people={personSender(chat, (handle) => setDm({ handle, n: Date.now() }), true)}
+          onRemove={(id) => send({ t: 'member.remove', memberId: id })} onBlock={(id) => confirm('Block this device from this ' + L.session + '?') && send({ t: 'member.block', memberId: id })} />}
+        <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>
+          <ChatPanel chat={chat} role="host" clanName={info.title} canSendFiles conn={null} request={dm}
+            people={roster.filter((m) => m.handle).map((m) => ({ handle: m.handle!, name: m.fullName, host: false, connected: m.connected }))} />
+        </Suspense>
+      </div>
 
       <section className="grid">
         <TeacherFiles resources={resources} stats={stats} send={send} />

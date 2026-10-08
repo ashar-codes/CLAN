@@ -74,10 +74,18 @@ them in `expo-secure-store`. Session tokens are held in memory only.
 | Reminder | `reminders_reminders` | target = (module, id) reference |
 | Diary entry | `diary_entries` | owner only |
 | AIContextReference | not stored | returned by the ContextBroker |
-| Course, Exam, Task, Recording, ChatThread, Message | — | contracts only (`modules/contracts.ts`) |
+| Thread | `chat_threads` | per **CLAN** (not session): one group thread, direct threads by sorted handle pair; host-authoritative, cached on members |
+| Message | `chat_messages` | client-generated UUID (idempotent), host-assigned `seq` (UNIQUE per thread, the pagination index), author handle + name snapshot, `reply_to` id, attachment = resource id + metadata or link; removal keeps the row (`removed_at/by`) |
+| Reaction / ReadCursor | `chat_reactions` (PK message, person, reaction) / `chat_cursors` (delivered, read per person) | MessageRecipient = the direct pair + cursors |
+| Outbox | `chat_outbox` | sender device: unacknowledged sends, re-sent with the same id |
+| Capture item | `capture_items` | Inbox pointer to a note / saved link / file ref; `filed_at`, `filed_to` |
+| Notice | `notify_notices`, `notify_prefs` | this device's notices (participants only) and preferences |
+| Person-scoped file | `resources.audience` (+ `shared_by`, server migration 7) | NULL = the CLAN table; JSON chat handles = only them. `share_uploads` = members' resumable shares |
+| Course, Exam, Task, Recording | — | contracts only (`modules/contracts.ts`) |
 | Search index | `search_docs` | projection; `SearchIndex.rebuild()` recreates it from module providers |
 | Event log | `core_events`, `core_consumed` | append-only; consumer progress |
 
 **No duplicated business data**: classroom facts stay in classroom tables (file names are read from `resources`, never
 copied); a CLASSROOM CLAN's `name` starts as the course title and is the CLAN's own name thereafter (session titles remain
-the historical title of each meeting). Events carry ids, never note/diary text.
+the historical title of each meeting). Events carry ids, never note/diary/message text. Saved links gained `meta`
+(`pending` → filled in later when online; saving never waits).

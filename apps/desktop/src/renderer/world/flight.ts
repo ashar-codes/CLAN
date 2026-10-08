@@ -1,6 +1,7 @@
 // The file packet: a small labelled card that arcs from one element to another. Pure presentation; instant when the
 // user prefers reduced motion or chose Minimal.
-export function flyPacket(from: Element | DOMRect, to: Element | DOMRect, label: string, opts: { tone?: 'send' | 'receive' } = {}): Promise<void> {
+// Tones: 'send' (to the table: everyone), 'person' (to one CLANmate only — labelled with their name), 'receive'.
+export function flyPacket(from: Element | DOMRect, to: Element | DOMRect, label: string, opts: { tone?: 'send' | 'receive' | 'person' } = {}): Promise<void> {
   const a = from instanceof Element ? from.getBoundingClientRect() : from;
   const b = to instanceof Element ? to.getBoundingClientRect() : to;
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.experience === 'minimal';

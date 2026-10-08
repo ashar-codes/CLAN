@@ -3,6 +3,8 @@ import { ActivityIndicator, KeyboardAvoidingView, Linking, PermissionsAndroid, P
 import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
 import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type DirectPackage, type ClassroomInfo, type ClientMessage, type MemberStatus, type PresentationView, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
+import { ChatSection, useMobileChat } from './Chat';
+import { InboxCard } from './Inbox';
 import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
 import { opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
@@ -127,6 +129,7 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
         </View>
       )}
       <Button c={c} primary label={busy ? 'Joining…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
+      <InboxCard c={c} />
       <Text style={{ color: c.muted, marginTop: 24 }}>
         {found.length ? `Nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for CLANs on this Wi-Fi… Make sure you are on the same network as the host. Internet is not needed.'}
       </Text>
@@ -158,10 +161,17 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
   const [pushed, setPushed] = useState<string | null>(null);
   const [presenting, setPresenting] = useState<PresentationView | null>(null);
+  const [people, setPeople] = useState<{ name: string; handle: string; host: boolean }[]>([]);
   const ref = useRef<ClassroomConnection | null>(null);
+  const chatConn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title, transport: joined.transport as PinnedNativeTransport, teacherPublicKey: joined.binding.teacherPublicKey }), [joined]);
+  const chat = useMobileChat(chatConn, joined.classroom.clanId ?? joined.classroom.sessionId, useCallback((m: ClientMessage) => ref.current?.send(m), []));
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
   useEffect(() => {
     const conn = new ClassroomConnection(joined.url, joined.token, {
       onMessage: (m) => {
+        chatRef.current.onServer(m);
+        if (m.t === 'members') setPeople(m.members);
         if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); }
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') setStatus(m.status);
@@ -213,6 +223,8 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
               <Text style={{ color: c.text }}>{`${presenting.presenterName} is presenting their ${presenting.source}${presenting.state === 'reconnecting' ? ' (reconnecting…)' : ''}. Viewing on phones is coming soon — use a computer to watch.`}</Text>
             </View>
           )}
+          <ChatSection c={c} chat={chat} conn={conn} people={people} />
+          <InboxCard c={c} onSend={(it) => { const g = chat.threads.find((t) => t.kind === 'group'); if (g) chat.post(g.id, it.kind === 'text' ? it.text : '', it.kind === 'url' ? { attachment: { kind: 'link', url: it.url, ...(it.title ? { title: it.title } : {}) } } : {}); }} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
         </>

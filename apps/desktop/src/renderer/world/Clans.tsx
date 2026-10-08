@@ -41,7 +41,7 @@ export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { expe
 }
 
 const TABS = ['Overview', 'Files', 'Members', 'Notes', 'Saved', 'Chat', 'Tasks'] as const;
-const FUTURE = new Set(['Chat', 'Tasks']);
+const FUTURE = new Set(['Tasks']);
 
 function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experience: Experience; onBack(): void; onRehost(r: Rehost): void }) {
   const [d] = useLoad<ClanDetail>(useCallback(() => api.clan.detail(id), [id]));
@@ -66,8 +66,24 @@ function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experi
         {tab === 'Files' && (d.files.length ? d.files.map((f) => <div key={f.refId} className="line">{f.name}<span className="muted c-num">{(f.size / 1e6).toFixed(1)} MB</span></div>) : <p className="muted">No files yet.</p>)}
         {tab === 'Members' && d.members.map((m) => <div key={m.userId} className="line">{m.name}<span className="muted">{m.role === 'owner' ? 'host' : m.role}</span></div>)}
         {tab === 'Notes' && (d.notes.length ? d.notes.map((n) => <div key={n.id} className="line">{n.title}<span className="muted">{n.mine ? 'yours' : ''}</span></div>) : <p className="muted">Share a note from Study.</p>)}
+        {tab === 'Chat' && <OfflineChat clanId={d.clan.id} />}
         {tab === 'Saved' && (d.saved.length ? d.saved.map((s) => <a key={s.id} className="line" href={s.url} target="_blank" rel="noreferrer noopener">{s.title}<span className="muted">{s.source}</span></a>) : <p className="muted">Share a link from Saved.</p>)}
       </section>
+    </div>
+  );
+}
+
+/** The CLAN's conversations as this device last saw them (read-only while the CLAN isn't live). */
+function OfflineChat({ clanId }: { clanId: string }) {
+  const [threads] = useLoad(useCallback(() => api.chat.local(clanId), [clanId]));
+  const [open, setOpen] = useState<string | null>(null);
+  const [msgs] = useLoad(useCallback(() => (open ? api.chat.localPage(open) : Promise.resolve([])), [open]));
+  if (!threads?.length) return <p className="muted">No conversation on this device yet. Chat happens in the live room.</p>;
+  return (
+    <div className="stack">
+      <div className="row wrap">{threads.map((t) => <button key={t.id} className={open === t.id ? 'small on' : 'small'} onClick={() => setOpen(t.id)}>{t.kind === 'group' ? 'Everyone' : t.with?.name}{t.unread ? ` · ${t.unread}` : ''}</button>)}</div>
+      {open && <div className="chat-log offline" role="log" aria-label="Earlier messages">{msgs?.map((m) => <p key={m.id} className="line"><b>{m.authorName}</b> {m.removed ? <i className="muted">removed</i> : m.body || (m.attachment?.kind === 'file' ? `▤ ${m.attachment.name}` : m.attachment?.kind === 'link' ? `↗ ${m.attachment.title}` : '')}<span className="muted small-text">{new Date(m.createdAt).toLocaleString()}</span></p>)}</div>}
+      <p className="muted small-text">Read-only here. When the host opens the room again, the conversation continues where it left off.</p>
     </div>
   );
 }

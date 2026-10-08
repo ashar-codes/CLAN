@@ -13,3 +13,5 @@ export * from './direct.ts';
 export { vpnInterfaces } from './netinfo.ts';
 export { MediaService, MEDIA_TOKEN_TTL_S } from './media.ts';
 export { Presentations, PRESENTER_GRACE_MS, type PresentationEvent } from './presentation.ts';
+export { ChatRelay, chatHandle, type ChatStore } from './chat.ts';
+export { Shares } from './shares.ts';

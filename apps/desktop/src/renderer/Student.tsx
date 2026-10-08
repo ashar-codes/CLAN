@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClassroomConnection, type Candidate, type Quality } from '@classroom/client';
 import { clanLabels, shortFingerprint, type ClanCapability, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import type { Joined, OwnProfile } from '../shared.ts';
@@ -8,6 +8,10 @@ import { MemberRoom } from './world/LiveRoom.tsx';
 import { RoomSurface, usePresentation, type PresentationMsg } from './world/Presentation.tsx';
 import { RoomPresentation } from './world/RoomPresentation.tsx';
 import { useExperience } from './world/experience.ts';
+import { useChat } from './world/chat/useChat.ts';
+import { personSender } from './world/chat/send.ts';
+
+const ChatPanel = lazy(() => import('./world/chat/ChatPanel.tsx'));
 
 type Names = { fullName: string; rollNo: string; deviceName: string };
 const QUALITY_LABEL: Record<Quality, string> = { excellent: 'Excellent', good: 'Good', poor: 'Poor', disconnected: 'Reconnecting…' };
@@ -119,16 +123,24 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const experience = useExperience();
   const [presMsg, setPresMsg] = useState<PresentationMsg | null>(null);
   const presRef = useRef<ReturnType<typeof usePresentation> | null>(null);
-  const [people, setPeople] = useState<{ name: string; host: boolean; connected: boolean }[]>([]);
+  const [people, setPeople] = useState<{ name: string; host: boolean; connected: boolean; handle: string }[]>([]);
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
   const revoked = useRef<string[]>([]);
   const connRef = useRef<ClassroomConnection | null>(null);
+  const chat = useChat({ role: 'member', conn: { url: session.url, token: session.token, sessionId: session.classroom.sessionId }, clanId: info.clanId ?? info.sessionId, send: (m) => connRef.current?.send(m) });
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
+  const [dm, setDm] = useState<{ handle: string; n: number } | null>(null);
+  const [toastMsg, setToast] = useState('');
+  const toast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+  useEffect(() => api.notify.on((n) => { if (n.threadId !== chatRef.current.active || !document.hasFocus()) toast(`${n.title}: ${n.body}`); }), []);
 
   useEffect(() => {
     let retried = false;
     // Renderer WSS: Chromium accepts only the PAKE-pinned certificate (main-process verify proc).
     const c = new ClassroomConnection(session.url, session.token, {
       onMessage: (m) => {
+        chatRef.current.onServer(m);
         if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
         if (m.t === 'members') setPeople(m.members);
         if (m.t === 'presentation') setPresMsg(m);
@@ -200,7 +212,16 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       </header>
       <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost={false} />
       {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}
-      {experience !== 'minimal' && <MemberRoom pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : null} resources={resources} />}
+      {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
+      <div className="room-with-chat">
+        {experience !== 'minimal' && <MemberRoom pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : chat.host ? [{ name: info.hostName ?? L.host, host: true, connected: true, handle: chat.host }] : null} resources={resources}
+          actions={{ ...personSender(chat, (handle) => setDm({ handle, n: Date.now() }), can.includes('SEND_FILES')), me: chat.me }} onToast={toast}
+          onTableDrop={can.includes('SEND_FILES') ? async (files) => { const r = await api.chat.sendDropped(chat.conn, files, 'clan'); return r.length ? `Shared ${r.length === 1 ? r[0]!.name : `${r.length} files`} with everyone in the ${L.session}` : 'Nothing was shared.'; } : undefined} />}
+        <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>
+          <ChatPanel chat={chat} role="member" clanName={info.title} canSendFiles={can.includes('SEND_FILES')} conn={conn} request={dm}
+            people={can.includes('VIEW_MEMBERS') ? people.map((p) => ({ handle: p.handle, name: p.name, host: p.host, connected: p.connected })) : []} />
+        </Suspense>
+      </div>
       <section className="grid">
         <FilesCard conn={conn} resources={resources} pushed={pushed} send={send} host={L.host.toLowerCase()} />
         {can.includes('SUBMIT_ASSIGNMENT') && <StudentAssignments conn={conn} assignments={assignments} />}
@@ -210,7 +231,6 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
             {people.map((p, i) => <div key={i} className="person"><span><span className={`dot ${p.connected ? 'excellent' : 'disconnected'}`} /> {p.host ? `${p.name} (${L.host.toLowerCase()})` : p.name}</span></div>)}
           </div>
         )}
-        {info.clanType !== 'CLASSROOM' && <div className="card"><h3>Chat</h3><p className="muted">Coming in the next update. Your membership here is already set up for it.</p></div>}
       </section>
     </div>
   );

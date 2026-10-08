@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { rename, rm, stat } from 'node:fs/promises';
+import { link, rename, rm, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
@@ -14,16 +14,21 @@ import { ApiError, mimeFor, type Limits, type Storage } from './storage.ts';
 type Row = {
   id: string; original_name: string; safe_name: string; mime: string; size: number; sha256: string | null;
   added_at: number; status: 'importing' | 'ready' | 'failed' | 'removed'; available: number; pushed: number;
+  /** NULL: the whole CLAN (the table). Otherwise a JSON array of chat handles — only they may see or fetch it. */
+  audience: string | null; shared_by: string | null; session_id: string; manifest: string | null;
 };
+const audienceOf = (r: Pick<Row, 'audience'>): string[] | null => (r.audience ? JSON.parse(r.audience) as string[] : null);
 
-const view = (r: Row): ResourceView => ({
+const view = (r: Row, names?: (handle: string) => string): ResourceView => ({
   id: r.id, name: r.safe_name, size: r.size, sha256: r.sha256, mime: r.mime, addedAt: r.added_at,
   status: r.status as ResourceView['status'], available: !!r.available, pushed: !!r.pushed,
+  ...(r.audience ? { direct: { from: r.shared_by && names ? names(r.shared_by) : 'Someone' } } : {}),
 });
 
 /**
  * Classroom files. Bytes live in managed storage under `resources/<uuid>`; the original name is metadata only.
- * Emits 'changed' (list/transfer state changed), 'push' (resourceId), 'progress' (resourceId, bytes, size).
+ * Emits 'changed' (list/transfer state changed), 'push' (resourceId), 'progress' (resourceId, bytes, size),
+ * 'direct' (resourceId, audience handles, sender handle) for files sent to specific CLANmates.
  */
 export class Resources extends EventEmitter {
   private db: Db; private classroom: Classroom; private storage: Storage; private limits: Limits;
@@ -33,14 +38,20 @@ export class Resources extends EventEmitter {
   private failed = 0;
   private window: { t: number; bytes: number }[] = [];
   private signer: ReceiptSigner;
+  /** Chat handle of a principal and display name of a handle (set by the server when chat is enabled). */
+  who: (p: Principal) => string | null = () => null;
+  nameOf: (handle: string) => string = () => 'Someone';
 
   constructor(db: Db, classroom: Classroom, storage: Storage, limits: Limits, signer: ReceiptSigner) {
     super();
     this.db = db; this.classroom = classroom; this.storage = storage; this.limits = limits; this.signer = signer;
   }
 
-  /** Teacher-only, in-process: copy a local file into managed storage while hashing it. */
-  async importFile(src: string, displayName = basename(src)): Promise<ResourceView> {
+  /**
+   * In-process (host files, or a member's finished share upload): copy into managed storage while hashing it.
+   * `audience` limits it to those chat handles (sent to one CLANmate); identical bytes already stored are linked, not copied twice.
+   */
+  async importFile(src: string, displayName = basename(src), o: { audience?: string[] | null; sharedBy?: string | null; owner?: string } = {}): Promise<ResourceView> {
     const st = await stat(src);
     if (!st.isFile()) throw new ApiError(400, 'not_a_file', 'Only regular files can be added.');
     const count = (this.db.prepare("SELECT count(*) n FROM resources WHERE session_id = ? AND status != 'removed'").get(this.classroom.id) as { n: number }).n;
@@ -50,8 +61,9 @@ export class Resources extends EventEmitter {
     const id = randomUUID();
     const original = displayName.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'file';
     const safe = safeFileName(original);
-    this.db.prepare("INSERT INTO resources (id, session_id, original_name, safe_name, mime, size, added_at, status) VALUES (?,?,?,?,?,?,?, 'importing')")
-      .run(id, this.classroom.id, original, safe, mimeFor(extensionOf(safe)), st.size, Date.now());
+    const audience = o.audience?.length ? JSON.stringify([...new Set(o.audience)].sort()) : null;
+    this.db.prepare("INSERT INTO resources (id, session_id, original_name, safe_name, mime, size, added_at, status, owner, audience, shared_by) VALUES (?,?,?,?,?,?,?, 'importing', ?, ?, ?)")
+      .run(id, this.classroom.id, original, safe, mimeFor(extensionOf(safe)), st.size, Date.now(), o.owner ?? 'teacher', audience, o.sharedBy ?? null);
     this.emit('changed');
 
     const part = this.storage.tmp(id);
@@ -94,6 +106,7 @@ export class Resources extends EventEmitter {
     }
     if (inChunk > 0 || chunks.length === 0) chunks.push(chunkHash.digest('hex')); // last partial chunk (or empty file)
     const sha256 = hash.digest('hex');
+    await this.dedupe(id, sha256);
     const row = this.row(id)!;
     const payload: ManifestPayload = {
       type: 'classroom-lan/resource-manifest', v: 1, resourceId: id, sessionId: this.classroom.id, courseTitle: this.classroom.title,
@@ -104,12 +117,49 @@ export class Resources extends EventEmitter {
     this.db.prepare("UPDATE resources SET status = 'ready', sha256 = ?, size = ?, chunk_size = ?, manifest = ? WHERE id = ?").run(sha256, done, chunkSize, JSON.stringify(manifest), id);
     this.emit('progress', id, done, done);
     this.classroom.log('resource.added', null, { resourceId: id, name: safe, size: done });
+    if (audience) this.emit('direct', id, JSON.parse(audience) as string[], o.sharedBy ?? null); // sent to specific people only
     this.emit('changed');
-    return view(this.row(id)!);
+    return view(this.row(id)!, this.nameOf);
+  }
+
+  /** Same bytes already stored (any session on this host): keep one copy on disk via a hard link. Best effort. */
+  private async dedupe(id: string, sha256: string) {
+    const twins = this.db.prepare("SELECT id FROM resources WHERE sha256 = ? AND status = 'ready' AND id <> ? ORDER BY added_at LIMIT 5").all(sha256, id) as { id: string }[];
+    for (const t of twins) {
+      const tmp = `${this.storage.resource(id)}.${randomUUID()}.link`;
+      try {
+        await link(this.storage.resource(t.id), tmp);
+        await rename(tmp, this.storage.resource(id));
+        return;
+      } catch { await rm(tmp, { force: true }).catch(() => {}); }
+    }
   }
 
   private row(id: string) {
     return this.db.prepare('SELECT * FROM resources WHERE id = ? AND session_id = ?').get(id, this.classroom.id) as Row | undefined;
+  }
+  /** A resource of this CLAN: this session's, or an earlier session of the same CLAN (chat history outlives sessions). */
+  private clanRow(id: string) {
+    return this.db.prepare(`SELECT r.* FROM resources r JOIN sessions s ON s.id = r.session_id
+      WHERE r.id = ? AND (r.session_id = ? OR (s.clan_id IS NOT NULL AND s.clan_id = ?))`).get(id, this.classroom.id, this.classroom.clan.id) as Row | undefined;
+  }
+  /**
+   * The one access rule for members. Table files: this session's available ones (plus earlier sessions' of the same
+   * CLAN). Files sent to specific CLANmates: only those people. The host can reach everything it stores.
+   */
+  private may(p: Principal, r: Row | undefined): r is Row {
+    if (!r || r.status !== 'ready') return false;
+    if (p.role === 'teacher') return true;
+    const aud = audienceOf(r);
+    if (aud) { const me = this.who(p); return !!me && aud.includes(me); }
+    return !!r.available;
+  }
+
+  /** Metadata for a chat attachment (the caller checks the conversation; this checks the file). */
+  forChat(p: Principal, id: string) {
+    const r = this.clanRow(id);
+    if (!this.may(p, r)) throw new ApiError(404, 'not_found', 'No such file in this CLAN.');
+    return { id: r.id, name: r.safe_name, size: r.size, mime: r.mime, sha256: r.sha256!, audience: audienceOf(r) };
   }
 
   private mustRow(id: string) {
@@ -118,13 +168,15 @@ export class Resources extends EventEmitter {
     return r;
   }
 
-  /** Students only see ready + available files. */
-  listForStudent(): ResourceView[] {
-    return (this.db.prepare("SELECT * FROM resources WHERE session_id = ? AND status = 'ready' AND available = 1 ORDER BY added_at").all(this.classroom.id) as Row[]).map(view);
+  /** Members see ready + available table files, plus files sent to them (or by them) personally. */
+  listForStudent(p?: Principal): ResourceView[] {
+    const rows = this.db.prepare("SELECT * FROM resources WHERE session_id = ? AND status = 'ready' AND available = 1 ORDER BY added_at").all(this.classroom.id) as Row[];
+    return rows.filter((r) => !r.audience || (p && this.may(p, r))).map((r) => view(r, this.nameOf));
   }
 
+  /** The host's Files card is the CLAN table: files sent to individual CLANmates are not listed there. */
   listForTeacher(): TeacherResourceView[] {
-    const rows = this.db.prepare("SELECT * FROM resources WHERE session_id = ? AND status IN ('importing','ready','failed') ORDER BY added_at").all(this.classroom.id) as Row[];
+    const rows = this.db.prepare("SELECT * FROM resources WHERE session_id = ? AND status IN ('importing','ready','failed') AND audience IS NULL ORDER BY added_at").all(this.classroom.id) as Row[];
     const members = this.classroom.roster().filter((m) => m.status === 'approved');
     const tr = this.db.prepare(`SELECT t.resource_id, t.member_id, t.state, t.bytes, t.updated_at FROM transfers t JOIN resources r ON r.id = t.resource_id WHERE r.session_id = ?`)
       .all(this.classroom.id) as { resource_id: string; member_id: string; state: TransferState; bytes: number; updated_at: number }[];
@@ -152,6 +204,7 @@ export class Resources extends EventEmitter {
   push(id: string) {
     const r = this.mustRow(id);
     if (r.status !== 'ready') throw new ApiError(409, 'not_ready', 'The file is still being added.');
+    if (r.audience) throw new ApiError(409, 'direct', 'This file was sent to one person; it is not on the table.');
     const now = Date.now();
     this.db.exec('BEGIN');
     try {
@@ -174,26 +227,26 @@ export class Resources extends EventEmitter {
     this.emit('changed');
     // Path comes from the validated UUID, never from metadata. On Windows an open download may hold the file;
     // the startup sweep retries.
-    await rm(this.storage.resource(r.id), { force: true }).catch(() => {});
+    await rm(this.storage.resource(r.id), { force: true }).catch(() => {}); // a hard-linked twin keeps its own name
   }
 
   /** The teacher-signed manifest of a visible resource (same visibility rules as the bytes). */
   manifest(p: Principal, id: string): SignedManifest {
-    const r = this.db.prepare('SELECT manifest, status, available FROM resources WHERE id = ? AND session_id = ?').get(id, this.classroom.id) as { manifest: string | null; status: string; available: number } | undefined;
-    if (!r || r.status !== 'ready' || !r.manifest || (p.role === 'student' && !r.available)) throw new ApiError(404, 'not_found', 'No such file in this class.');
+    const r = this.row(id);
+    if (!this.may(p, r) || !r.manifest) throw new ApiError(404, 'not_found', 'No such file in this class.');
     return JSON.parse(r.manifest);
   }
 
   /** Authorize + locate a download. Same 404 for missing, other-class and hidden: no enumeration oracle. */
   openForDownload(p: Principal, id: string) {
-    const r = this.row(id);
-    if (!r || r.status !== 'ready' || (p.role === 'student' && !r.available)) throw new ApiError(404, 'not_found', 'No such file in this class.');
+    const r = this.clanRow(id);
+    if (!this.may(p, r)) throw new ApiError(404, 'not_found', 'No such file in this class.');
     return { path: this.storage.resource(r.id), size: r.size, sha256: r.sha256!, name: r.safe_name };
   }
 
   report(memberId: string, resourceId: string, state: TransferState, bytes: number) {
     const r = this.row(resourceId);
-    if (!r || r.status !== 'ready' || !r.available) return;
+    if (!this.may({ role: 'student', memberId }, r)) return;
     this.db.prepare(`INSERT INTO transfers (resource_id, member_id, state, bytes, updated_at) VALUES (?,?,?,?,?)
       ON CONFLICT (resource_id, member_id) DO UPDATE SET state = excluded.state, bytes = excluded.bytes, updated_at = excluded.updated_at`)
       .run(resourceId, memberId, state, Math.min(bytes, r.size), Date.now());

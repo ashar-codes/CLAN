@@ -17,6 +17,7 @@ import { browse, dlog } from '@classroom/server/discovery';
 import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroom } from '../shared.ts';
 import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
+import { registerChat } from './chat.ts';
 import { DesktopDirect } from './direct.ts';
 import { mediaBinary, mediaWorkDir, registerScreen } from './screen.ts';
 import { ScreenShareEvents } from '@clan/core';
@@ -73,7 +74,7 @@ function loadProfile(): OwnProfile {
 }
 
 const ConnArgs = z.object({ url: z.string().regex(/^https:\/\/[\w.:[\]-]+$/), token: z.string().min(16).max(128), sessionId: z.uuid(), classTitle: z.string().max(200) });
-const ResourceArgs = z.object({ id: z.uuid(), name: z.string().max(300), size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/), mime: z.string().max(200), addedAt: z.number(), status: z.literal('ready'), available: z.boolean(), pushed: z.boolean() });
+const ResourceArgs = z.object({ id: z.uuid(), name: z.string().max(300), size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/), mime: z.string().max(200), addedAt: z.number(), status: z.literal('ready'), available: z.boolean(), pushed: z.boolean(), direct: z.object({ from: z.string().max(80) }).optional() });
 const StartArgs = z.object({ title: z.string().trim().min(1).max(80), policy: JoinPolicy, host: z.ipv4().optional(), type: ClanType.default('CLASSROOM'),
   description: z.string().max(500).default(''), hours: z.number().min(0.25).max(72).optional(),
   /** Host again: a new session under this existing CLAN (same id, members, trust). */
@@ -208,9 +209,10 @@ function registerIpc() {
     const hostName = loadProfile().fullName || (named && named !== 'Me' ? named : undefined);
     try {
       server = await startClassroomServer({ title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: a.connectivity === 'direct' ? 'direct' : 'lan', identity: await trust.teacherIdentity(),
-        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, media: { binary: mediaBinary(), workDir: mediaWorkDir() },
+        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat,
         direct: directNet ? { ssid: directNet.ssid, passphrase: directNet.passphrase, auth: 'WPA2', host: directNet.hostAddress, expiresAt: expiresAt ?? Date.now() + 12 * 3600_000 } : undefined });
       if (directNet) await direct.publish(server);
+      chatHooks.hosted(server);
       // Presentation control events onto the CLAN event bus (IDs/status only; never media).
       const sid = server.classroom.id;
       server.presentations.on('event', (ev: import('@classroom/server').PresentationEvent) => {
@@ -285,11 +287,11 @@ function registerIpc() {
     await shell.openPath(dir); // a folder: opens the file manager, executes nothing
   });
 
-  const files = new StudentFiles(() => BrowserWindow.getAllWindows()[0], trust);
+  const files = (studentFiles = new StudentFiles(() => BrowserWindow.getAllWindows()[0], trust));
   const conn = (c: unknown): Conn => ConnArgs.parse(c);
   const res = (r: unknown): ResourceView => ResourceArgs.parse(r) as ResourceView;
   ipcMain.handle('student:fileStatus', (_e, c, list: unknown) => files.status(conn(c), z.array(ResourceArgs).max(1000).parse(list) as ResourceView[]));
-  ipcMain.handle('student:download', (_e, c, r) => files.download(conn(c), res(r)));
+  ipcMain.handle('student:download', (_e, c, r, hostOnly) => files.download(conn(c), res(r), hostOnly === true));
   ipcMain.handle('student:pause', (_e, id) => files.pause(z.uuid().parse(id)));
   ipcMain.handle('student:show', (_e, sid, id) => files.show({ sessionId: z.uuid().parse(sid) }, z.uuid().parse(id)));
   ipcMain.handle('student:open', (_e, sid, id) => files.open({ sessionId: z.uuid().parse(sid) }, z.uuid().parse(id)));
@@ -313,13 +315,16 @@ function registerIpc() {
 }
 
 let discovered: Candidate[] = [];
+let studentFiles: StudentFiles;
+let chatHooks: ReturnType<typeof registerChat>;
 
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200, height: 800, minWidth: 720, minHeight: 540, title: PRODUCT_NAME,
     webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Links (Saved, chat) open in the system browser; the app window itself never navigates or opens pages.
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (url !== win.webContents.getURL()) e.preventDefault(); });
   const dev = process.env.CLASSROOM_DEV_URL;
   if (dev) win.loadURL(dev);
@@ -341,6 +346,7 @@ app.whenReady().then(() => {
   registerIpc();
   registerScreen();
   clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName);
+  chatHooks = registerChat({ clan, server: () => server, trust, files: studentFiles });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

@@ -4,14 +4,14 @@ import { app, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { partPaths, uploadSubmission } from '@classroom/client/node';
+import { partPaths, uploadShare, uploadSubmission } from '@classroom/client/node';
 import { completedFileReader, PeerAgent } from '@classroom/client/peer';
 import { api, type PeerInfo } from '@classroom/client';
 import { candidateInterfaces } from '@classroom/server';
 import { safeFileName, verifyReceipt, type Receipt, type ResourceView, type SignedManifest } from '@classroom/protocol';
 import type { Conn, FileState, StoredReceipt } from '../shared.ts';
 import type { Trust } from './trust.ts';
-type Job = { conn: Conn; resource: ResourceView; ctl?: AbortController; state: FileState };
+type Job = { conn: Conn; resource: ResourceView; ctl?: AbortController; state: FileState; hostOnly?: boolean };
 
 // "Open" hands a file to the OS default viewer. Allowed only for formats without macros/active content in their
 // normal form. Legacy (.doc/.xls/.ppt) and macro-enabled Office formats (.docm/.xlsm/.pptm/.dotm/.xlam/.ppam…),
@@ -133,10 +133,11 @@ export class StudentFiles {
     } catch { this.offeredCompleted.delete(key); }
   }
 
-  download(c: Conn, r: ResourceView) {
+  /** `hostOnly`: files sent to one person (and chat attachments) come straight from the host — peers never hold them. */
+  download(c: Conn, r: ResourceView, hostOnly = false) {
     const cur = this.jobs.get(r.id);
     if (cur && ['queued', 'downloading', 'verifying'].includes(cur.state.state)) return;
-    const job: Job = { conn: c, resource: r, state: { resourceId: r.id, state: 'queued', bytes: cur?.state.bytes ?? 0, size: r.size } };
+    const job: Job = { conn: c, resource: r, hostOnly: hostOnly || !!r.direct, state: { resourceId: r.id, state: 'queued', bytes: cur?.state.bytes ?? 0, size: r.size } };
     this.jobs.set(r.id, job);
     this.emit(job.state);
     this.pump();
@@ -168,7 +169,7 @@ export class StudentFiles {
       const peers = new Set<string>();
       let teacher = false;
       const out = await agent.acquire(job.resource, {
-        peerAssist: this.peerAssist.get(job.conn.sessionId) ?? false, signal: ctl.signal,
+        peerAssist: !job.hostOnly && (this.peerAssist.get(job.conn.sessionId) ?? false), signal: ctl.signal,
         cachedManifest: cached.manifest, cachedSources: cached.sources,
         onSources: (src) => { this.cache.set(key, { ...this.cache.get(key), sources: src }); },
         onProgress: (p) => {
@@ -202,6 +203,26 @@ export class StudentFiles {
     if (!canOpen(p)) throw new Error('This type of file is not opened directly (it can contain macros or run code). Use Show in folder.');
     const err = await shell.openPath(p);
     if (err) throw new Error(err);
+  }
+
+  /** Member sharing files (dropped/picked paths, resolved in main): the whole CLAN ('clan') or one CLANmate (handle). */
+  async share(c: Conn, paths: string[], to: string): Promise<ResourceView[]> {
+    const route = this.route(c);
+    const out: ResourceView[] = [];
+    for (const path of paths) {
+      const st = await stat(path);
+      if (!st.isFile()) throw new Error('Only files can be sent.');
+      // Same file to the same place: same key, so a retry (or a crash-restart) can never create a second copy.
+      const pending = await json<Record<string, string>>(this.pendingPath(), {});
+      const k = `share:${c.sessionId}:${to}:${path}:${st.size}:${st.mtimeMs}`;
+      pending[k] ??= randomUUID();
+      await writeFile(this.pendingPath(), JSON.stringify(pending));
+      out.push(await uploadShare({ transport: route.transport, url: route.url, token: c.token, path, to, idempotencyKey: pending[k]!,
+        onProgress: (sent, size) => this.win()?.webContents.send('chat:upload', { sent, size, name: path.split(/[\\/]/).pop() }) }));
+      delete pending[k];
+      await writeFile(this.pendingPath(), JSON.stringify(pending));
+    }
+    return out;
   }
 
   // ---- submissions ----

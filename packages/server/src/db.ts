@@ -184,6 +184,29 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX presentations_session ON presentations(session_id);
   `,
+  // 7: chat & capture — files can be sent to specific CLANmates (audience = their chat handles; NULL = the whole CLAN),
+  // and members can share files through the same resumable upload protocol as submissions.
+  `
+  ALTER TABLE resources ADD COLUMN audience TEXT;
+  ALTER TABLE resources ADD COLUMN shared_by TEXT;
+  CREATE INDEX resources_sha ON resources(sha256);
+  CREATE TABLE share_uploads (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    member_id TEXT NOT NULL REFERENCES members(id),
+    idempotency_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    target TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('uploading','complete','failed')),
+    error TEXT,
+    resource_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (member_id, idempotency_key)
+  );
+  `,
 ];
 
 export type Db = DatabaseSync;

@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Transform, type Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { mkdir, readdir, rm, stat, statfs } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { safeFileName } from '@classroom/protocol';
@@ -105,6 +107,28 @@ export class Storage {
       const id = f.replace(/\.part$/, '');
       if (!keep(id)) await rm(join(this.root, 'tmp', f), { force: true });
     }
+  }
+}
+
+/**
+ * The resumable upload step shared by submissions and shares: append a request body to `part`, refusing more than `room`
+ * bytes. Returns the bytes received, or null when the client went away (the partial stays for resume).
+ */
+export async function appendBody(part: string, room: number, body: Readable, onChunk?: () => void): Promise<number | null> {
+  let received = 0;
+  try {
+    await pipeline(body, new Transform({
+      transform(chunk: Buffer, _e, cb) {
+        onChunk?.();
+        received += chunk.length;
+        if (received > room) return cb(new ApiError(413, 'too_large', 'More bytes than declared.'));
+        cb(null, chunk);
+      },
+    }), createWriteStream(part, { flags: 'a' }));
+    return received;
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    return null;
   }
 }
 

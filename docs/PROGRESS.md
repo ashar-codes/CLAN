@@ -60,6 +60,15 @@
 Milestone 3 (Windows Direct Mode) — or first, if phones matter for the pilot: a mobile OPAQUE binding compatible with
 `@serenity-kit/opaque` 1.x plus the pinned native transport (see ANDROID_NETWORKING.md / APPLE_PERMISSIONS.md).
 
+## Chat & Capture delivered (tag `clan-chat-capture`)
+* Real `chat` module: CLAN group + direct conversations, replies, reactions, edit/remove (kept as "removed"), unread, truthful
+  SENT/DELIVERED/READ, typing (ephemeral), durable Outbox with idempotent replay; history per CLAN survives re-hosting.
+* Send to one CLANmate (wheel › Send, drop on a person) vs the table, same resource system with an audience; members share via
+  the resumable upload protocol; person files downloaded from the host only; host-side byte dedupe.
+* Capture Inbox (note/link/text/file), link enrichment later, `clan://capture` intake (strict parser), notifications consumer
+  (participants only, focus, previews off by default), offline chat history; mobile chat + phone Inbox (typecheck only).
+* Tests 227 → 240; E2E +3 (chat Study Group / Classroom / intake). See CHAT.md.
+
 ## Screen Sharing delivered (tag `clan-screen-sharing`)
 * Local LiveKit SFU (bundled, lazy, crash/stale/port/end handled) behind `MediaTransport`; signaling through pinned TLS.
 * Presenting with PRESENT / REQUEST_TO_PRESENT / MANAGE_PRESENTERS, Classroom approval, one presenter + takeover, desktop

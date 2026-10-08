@@ -1,9 +1,9 @@
 import type { DiscoveredClassroom } from '@classroom/server/discovery';
 import type { Iface } from '@classroom/server';
-import type { ClassroomInfo, JoinPolicy, MemberStatus, Receipt, ResourceView, StudentProfile, TransferState } from '@classroom/protocol';
+import type { ChatMessageView, ChatThreadView, ClassroomInfo, ClientMessage, JoinPolicy, MemberStatus, Receipt, ResourceView, StudentProfile, TransferState } from '@classroom/protocol';
 import type { KeystoreStatus } from './main/keystore.ts';
-import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem } from '@clan/core';
-export type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem };
+import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice } from '@clan/core';
+export type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice };
 
 export type Capabilities = {
   platform: string;
@@ -87,9 +87,48 @@ export type ClanApi = {
   setAiDiary(on: boolean): Promise<void>;
 };
 
+/** The pinned session a chat call goes through (main resolves the real route; `url` must match it). */
+export type ChatConn = { url: string; token: string; sessionId: string };
+export type ReceivedFile = ChatMessageView & { clanId: string; clanName: string };
+export type ChatApi = {
+  http<T>(c: ChatConn, req: { method: 'GET' | 'POST'; path: string; body?: { to: string } }): Promise<T>;
+  outboxAdd(clanId: string, payload: Extract<ClientMessage, { t: 'chat.send' }>): Promise<void>;
+  outbox(clanId: string): Promise<Extract<ClientMessage, { t: 'chat.send' }>[]>;
+  outboxSent(id: string): Promise<void>;
+  ingest(thread: ChatThreadView, me: string, messages: ChatMessageView[]): Promise<string[]>;
+  setMe(clanId: string, handle: string): Promise<void>;
+  local(clanId: string): Promise<ChatThreadView[]>;
+  localPage(threadId: string, before?: number): Promise<ChatMessageView[]>;
+  received(): Promise<ReceivedFile[]>;
+  /** Files dropped in the window (real File objects, resolved to paths in the preload) or picked in a dialog. */
+  sendDropped(c: ChatConn, files: File[], to: string): Promise<ResourceView[]>;
+  sendPicked(c: ChatConn, to: string): Promise<ResourceView[]>;
+  hostSave(resourceId: string): Promise<{ name: string }>;
+  onUpload(cb: (p: { sent: number; size: number; name: string }) => void): () => void;
+};
+export type NotifyApi = {
+  context(c: { viewing?: string | null; focus?: boolean }): Promise<void>;
+  list(): Promise<DeliveredNotice[]>;
+  readThread(threadId: string): Promise<void>;
+  prefs(): Promise<NoticePrefs>;
+  setPrefs(p: Partial<NoticePrefs>): Promise<NoticePrefs>;
+  on(cb: (n: DeliveredNotice) => void): () => void;
+};
+export type CaptureApi = {
+  add(i: { kind: 'note'; title?: string; body?: string } | { kind: 'link'; url: string; title?: string; note?: string; tags?: string[]; collectionId?: string } | { kind: 'text'; text: string }): Promise<InboxItem>;
+  dropped(files: File[]): Promise<number>;
+  pick(): Promise<number>;
+  inbox(): Promise<InboxItem[]>;
+  file(id: string, to: { kind: 'collection'; collectionId: string } | { kind: 'clan' | 'course'; clanId: string } | { kind: 'done' }): Promise<void>;
+  onAdded(cb: () => void): () => void;
+};
+
 /** API exposed by the preload as window.classroom. */
 export type DesktopApi = {
   clan: ClanApi;
+  chat: ChatApi;
+  notify: NotifyApi;
+  capture: CaptureApi;
   capabilities(): Promise<Capabilities>;
   getProfile(): Promise<OwnProfile>;
   saveProfile(p: Pick<StudentProfile, 'fullName' | 'rollNo' | 'deviceName'>): Promise<OwnProfile>;
@@ -124,7 +163,8 @@ export type DesktopApi = {
 
   // student
   fileStatus(c: Conn, resources: ResourceView[]): Promise<FileState[]>;
-  download(c: Conn, r: ResourceView): Promise<void>;
+  /** `hostOnly`: chat attachments and files sent to you come from the host directly (never from peers). */
+  download(c: Conn, r: ResourceView, hostOnly?: boolean): Promise<void>;
   pause(resourceId: string): Promise<void>;
   showFile(sessionId: string, resourceId: string): Promise<void>;
   openFile(sessionId: string, resourceId: string): Promise<void>;

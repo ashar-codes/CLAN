@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import type { ClanCapability, ClanType } from './clan.ts';
 import type { SealedDirect } from './direct.ts';
+import { ChatClientMessage, type ChatServerMessage } from './chat.ts';
 
 export const PRODUCT_NAME = 'CLAN';
 /**
@@ -124,6 +125,8 @@ export type Member = {
   connected: boolean;
   joinedAt: number;
   lastSeen: number;
+  /** CLAN-scoped chat handle (direct messages, send-to-one). */
+  handle?: string;
 };
 
 export type TimelineEvent = { id: number; ts: number; type: string; actor: string | null; data: Record<string, unknown> };
@@ -143,6 +146,8 @@ export type TransferState = z.infer<typeof TransferState>;
 export type ResourceView = {
   id: string; name: string; size: number; sha256: string | null; mime: string; addedAt: number;
   status: 'importing' | 'ready' | 'failed'; available: boolean; pushed: boolean;
+  /** Set when the file was sent to specific CLANmates only (never on the shared table). */
+  direct?: { from: string };
 };
 export type StudentTransfer = { memberId: string; fullName: string; state: TransferState; bytes: number; updatedAt: number | null };
 export type TeacherResourceView = ResourceView & { counts: Record<TransferState, number>; students: StudentTransfer[] };
@@ -197,6 +202,17 @@ export const UploadInit = z.object({
 });
 export type UploadInit = z.infer<typeof UploadInit>;
 export type UploadStatus = { uploadId: string; offset: number; size: number; state: 'uploading' | 'complete' | 'failed'; receipt: Receipt | null; error: string | null };
+/** A member sharing a file: same resumable upload protocol as submissions; the host turns it into a CLAN resource for
+ * everyone (`to: 'clan'`) or for one CLANmate only (their chat handle). */
+export const ShareUploadInit = z.object({
+  fileName: z.string().min(1).max(255),
+  size: z.number().int().positive(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  idempotencyKey: z.uuid(),
+  to: z.union([z.literal('clan'), z.string().regex(/^[A-Za-z0-9_-]{22}$/)]),
+});
+export type ShareUploadInit = z.infer<typeof ShareUploadInit>;
+export type ShareUploadStatus = Omit<UploadStatus, 'receipt'> & { resource: ResourceView | null };
 export const UPLOAD_CONTENT_TYPE = 'application/offset+octet-stream';
 
 /**
@@ -252,6 +268,8 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('present.source'), source: z.enum(['screen', 'window']), audio: z.boolean() }),
   z.object({ t: z.literal('present.stop'), presentationId: id.optional() }),
   z.object({ t: z.literal('peer.probeResult'), probeId: id, tried: z.number().int().min(0).max(8), reachable: z.number().int().min(0).max(8) }),
+  // chat (capability-checked server-side: SEND_MESSAGE; attachments SEND_FILES/SHARE_RESOURCE)
+  ...ChatClientMessage,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export const TEACHER_ONLY: ReadonlySet<ClientMessage['t']> = new Set([
@@ -264,8 +282,8 @@ export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.
 export type ServerMessage =
   /** `role` keeps its legacy wire values: 'teacher' = host, 'student' = member. */
   | { t: 'hello'; role: 'teacher' | 'student'; memberId: string | null; status: MemberStatus | null; classroom: ClassroomInfo; serverTime: number; capabilities: ClanCapability[] }
-  /** Member-visible roster (names only) for CLANs that grant VIEW_MEMBERS. */
-  | { t: 'members'; members: { name: string; host: boolean; connected: boolean }[] }
+  /** Member-visible roster for CLANs that grant VIEW_MEMBERS: names + CLAN-scoped chat handles (never device keys or ids). */
+  | { t: 'members'; members: { name: string; host: boolean; connected: boolean; handle: string }[]; me: string }
   | { t: 'pong'; n: number; serverTime: number }
   | { t: 'class.state'; classroom: ClassroomInfo }
   | { t: 'roster'; members: Member[] }
@@ -283,7 +301,8 @@ export type ServerMessage =
   | { t: 'presentation'; state: PresentationView | null; policy: 'open' | 'request'; requests: { memberId: string; name: string }[]; mine: 'none' | 'requested' | 'approved' }
   | { t: 'assignments'; assignments: StudentAssignmentView[] | TeacherAssignmentView[] }
   | { t: 'stats'; stats: TransferStats }
-  | { t: 'error'; code: string; message: string };
+  | { t: 'error'; code: string; message: string }
+  | ChatServerMessage;
 
 export const WS_CLOSE = { authFailed: 4001, removed: 4003, ended: 4004, badMessage: 4400 } as const;
 
@@ -292,3 +311,5 @@ export * from './peer.ts';
 export * from './network.ts';
 export * from './clan.ts';
 export * from './direct.ts';
+export * from './chat.ts';
+export * from './intake.ts';

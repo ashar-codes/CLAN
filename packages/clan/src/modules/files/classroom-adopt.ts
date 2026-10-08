@@ -11,7 +11,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export function adoptClassroomResources(db: Db, store: ResourceStore, clans: Clans, storageRoot: string) {
   if (!tableExists(db, 'resources')) return 0;
   let n = 0;
-  const rows = db.prepare(`SELECT id, session_id, mime, size, sha256 FROM resources WHERE status = 'ready' AND sha256 IS NOT NULL
+  // Files sent to one CLANmate (audience set) belong to that conversation, never to the CLAN's shared files.
+  const direct = (db.prepare("SELECT 1 FROM pragma_table_info('resources') WHERE name = 'audience'").get() ? 'AND audience IS NULL' : '');
+  const rows = db.prepare(`SELECT id, session_id, mime, size, sha256 FROM resources WHERE status = 'ready' AND sha256 IS NOT NULL ${direct}
     AND NOT EXISTS (SELECT 1 FROM resources_refs r WHERE r.module = 'files' AND r.entity = 'classroom-resource' AND r.entity_id = resources.id)`).all() as Res[];
   for (const r of rows) {
     const clanId = clans.clanOfSession(r.session_id);

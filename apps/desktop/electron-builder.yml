@@ -4,6 +4,9 @@ directories: { output: release }
 # Main/preload/renderer are fully bundled by Vite; no node_modules needed at runtime.
 files: [dist/**, package.json]
 npmRebuild: false
+# clan://capture?url=…|text=… (validated by parseIntake; links and text only, into the Inbox)
+protocols:
+  - { name: CLAN, schemes: [clan] }
 asar: true
 mac:
   category: public.app-category.education

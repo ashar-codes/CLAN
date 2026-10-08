@@ -7,13 +7,21 @@ import { BEACON_LABEL, CLANBeacon, type BeaconState } from './beacon.tsx';
 export type RoomPerson = { id: string; name: string; spec: CLANmateSpec; beacon: BeaconState; host?: boolean; you?: boolean };
 export type RoomItem = { id: string; name: string; kind: string };
 
-export function RoomStage({ wall, people, items, onPerson, onDropFiles, dropLabel, selected }: {
+export function RoomStage({ wall, people, items, onPerson, onDropFiles, onDropOnPerson, dropLabel, selected }: {
   wall: ReactNode; people: RoomPerson[]; items: RoomItem[];
   onPerson?(p: RoomPerson, el: HTMLElement): void;
   /** When set, files dropped on the table are shared with the CLAN. */
   onDropFiles?(files: File[]): void; dropLabel?: string; selected?: string | null;
+  /** When set, files dropped on a CLANmate go to that person only (never the table). */
+  onDropOnPerson?(p: RoomPerson, files: File[]): void;
 }) {
   const [over, setOver] = useState(false);
+  const [overPerson, setOverPerson] = useState<string | null>(null);
+  const personDrop = (p: RoomPerson) => (onDropOnPerson && !p.you ? {
+    onDragOver: (e: DragEvent) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setOverPerson(p.id); } },
+    onDragLeave: () => setOverPerson(null),
+    onDrop: (e: DragEvent) => { e.preventDefault(); setOverPerson(null); const f = [...e.dataTransfer.files]; if (f.length) onDropOnPerson(p, f); },
+  } : {});
   const drop = onDropFiles && {
     onDragOver: (e: DragEvent) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setOver(true); } },
     onDragLeave: () => setOver(false),
@@ -24,8 +32,9 @@ export function RoomStage({ wall, people, items, onPerson, onDropFiles, dropLabe
   const row = (ps: RoomPerson[]) => (
     <div className="c-room-row">
       {ps.map((p) => (
-        <button key={p.id} type="button" className={`c-room-person ${selected === p.id ? 'on' : ''}`} aria-label={`${p.name}${p.host ? ' (host)' : ''}${p.you ? ' (you)' : ''} — ${BEACON_LABEL[p.beacon]}`}
-          data-person={p.id} onClick={(e) => onPerson?.(p, e.currentTarget)} disabled={!onPerson}>
+        <button key={p.id} type="button" className={`c-room-person ${selected === p.id ? 'on' : ''} ${overPerson === p.id ? 'drop' : ''}`} aria-label={`${p.name}${p.host ? ' (host)' : ''}${p.you ? ' (you)' : ''} — ${BEACON_LABEL[p.beacon]}`}
+          data-person={p.id} onClick={(e) => onPerson?.(p, e.currentTarget)} disabled={!onPerson} {...personDrop(p)}>
+          {overPerson === p.id && <span className="c-room-only" aria-hidden>Only {p.name.split(' ')[0]}</span>}
           <CLANmate spec={p.spec} size={84} />
           <span className="c-room-name"><CLANBeacon state={p.beacon} size={14} /> {p.you ? 'You' : p.name.split(' ')[0]}{p.host ? ' · host' : ''}</span>
         </button>

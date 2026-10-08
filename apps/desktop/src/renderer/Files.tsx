@@ -177,7 +177,7 @@ export function StudentFiles({ conn, resources, pushed, send, host = 'teacher' }
             <div className="file-main">
               <span className="tag">{ext(r.name)}</span>
               <div className="grow">
-                <b>{r.name}</b> <span className="muted">{formatBytes(r.size)}</span><br />
+                <b>{r.name}</b> <span className="muted">{formatBytes(r.size)}</span>{r.direct && <span className="trust" title="Sent to you personally — not on the table"> from {r.direct.from} · only you</span>}<br />
                 <small className={s.state === 'failed' ? 'error' : 'muted'} data-testid="file-state">
                   {STATE_LABEL[s.state]}{(s.state === 'downloading' || s.state === 'paused') && ` · ${pct}%`}{s.resumedFrom ? ' · resumed' : ''}{s.error ? ` — ${s.error}` : ''}
                   {details && s.via ? <span data-testid="file-via"> · via {s.via.replace(/teacher/g, host)}</span> : null}

@@ -20,8 +20,33 @@ export const schema: ModuleSchema = {
     CREATE INDEX saved_items_owner ON saved_items(owner_id, collection_id);
     CREATE TABLE saved_shares (item_id TEXT NOT NULL REFERENCES saved_items(id), clan_id TEXT NOT NULL, shared_by TEXT NOT NULL, shared_at INTEGER NOT NULL,
       PRIMARY KEY (item_id, clan_id));
-  `],
+  `,
+  // 2: link metadata is filled in later when the network allows ('pending'); saving never waits for it.
+  `ALTER TABLE saved_items ADD COLUMN meta TEXT NOT NULL DEFAULT 'none' CHECK (meta IN ('none','pending','done','failed'));`],
 };
+
+/**
+ * Title (and og:image URL) of a page, if it can be fetched quickly. Reads at most 256 KB of text/html; anything else —
+ * video, images, downloads — is never read. Pure apart from the injected fetch, so it is testable offline.
+ */
+export async function fetchLinkMeta(url: string, f: typeof fetch = fetch, timeoutMs = 5000): Promise<{ title?: string; previewUrl?: string } | null> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await f(url, { signal: ctl.signal, redirect: 'follow', headers: { accept: 'text/html' } });
+    if (!res.ok || !/^text\/html\b/i.test(res.headers.get('content-type') ?? '') || !['http:', 'https:'].includes(new URL(res.url || url).protocol)) { await res.body?.cancel(); return null; }
+    const reader = res.body!.getReader();
+    let html = '', n = 0;
+    while (n < 256 * 1024) { const { value, done } = await reader.read(); if (done) break; n += value.length; html += new TextDecoder().decode(value, { stream: true }); if (/<\/head>/i.test(html)) break; }
+    await reader.cancel().catch(() => {});
+    const attr = (prop: string) => new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]*content=["']([^"']{1,500})["']`, 'i').exec(html)?.[1];
+    const decode = (s: string) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+    const title = attr('og:title') ?? /<title[^>]*>([^<]{1,500})<\/title>/i.exec(html)?.[1];
+    const img = attr('og:image');
+    const previewUrl = img && /^https?:\/\//.test(img) ? img : undefined;
+    return { ...(title ? { title: decode(title).slice(0, 300) } : {}), ...(previewUrl ? { previewUrl } : {}) };
+  } catch { return null; } finally { clearTimeout(t); }
+}
 
 export const SavedItemAdded = defineEvent('SavedItemAdded', 1, z.object({ itemId: z.string(), ownerId: z.string(), collectionId: z.string() }));
 export const SavedItemChanged = defineEvent('SavedItemChanged', 1, z.object({ itemId: z.string() }));
@@ -57,11 +82,20 @@ export class Saved {
     this.ownCollection(u, col);
     const id = randomUUID(), t = this.now();
     tx(this.db, () => {
-      this.db.prepare('INSERT INTO saved_items (id, owner_id, collection_id, url, title, source, preview_url, note, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(id, u, col, url, z.string().trim().max(300).parse(o.title ?? '') || host, host, o.previewUrl ? Url.parse(o.previewUrl) : null, z.string().max(5000).parse(o.note ?? ''), JSON.stringify(Tags.parse(o.tags ?? [])), t, t);
+      const title = z.string().trim().max(300).parse(o.title ?? '');
+      this.db.prepare('INSERT INTO saved_items (id, owner_id, collection_id, url, title, source, preview_url, note, tags, created_at, updated_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, u, col, url, title || host, host, o.previewUrl ? Url.parse(o.previewUrl) : null, z.string().max(5000).parse(o.note ?? ''), JSON.stringify(Tags.parse(o.tags ?? [])), t, t, title ? 'none' : 'pending');
       this.bus.publish(SavedItemAdded, 'saved', { itemId: id, ownerId: u, collectionId: col });
     });
     return this.get(p, id)!;
+  }
+  /** Links still waiting for a title (saved offline). Retried later; never blocks saving. */
+  pendingMeta(limit = 20) { return this.db.prepare("SELECT id, url FROM saved_items WHERE meta = 'pending' ORDER BY created_at DESC LIMIT ?").all(limit) as { id: string; url: string }[]; }
+  applyMeta(itemId: string, m: { title?: string; previewUrl?: string } | null) {
+    if (!m) return void this.db.prepare("UPDATE saved_items SET meta = 'failed' WHERE id = ? AND meta = 'pending'").run(itemId);
+    const r = this.db.prepare(`UPDATE saved_items SET title = coalesce(?, title), preview_url = coalesce(preview_url, ?), meta = 'done', updated_at = ? WHERE id = ? AND meta = 'pending'`)
+      .run(m.title ?? null, m.previewUrl ?? null, this.now(), itemId);
+    if (r.changes) this.bus.publish(SavedItemChanged, 'saved', { itemId });
   }
   move(p: Principal, itemId: string, collectionId: string) {
     const u = this.writer(p);

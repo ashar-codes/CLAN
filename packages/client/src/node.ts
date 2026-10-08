@@ -8,9 +8,9 @@ import { mkdir, readFile, rename, rm, stat, writeFile, access } from 'node:fs/pr
 import { basename, extname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { safeFileName, UPLOAD_CONTENT_TYPE, type Receipt, type ResourceView, type TransferState, type UploadStatus } from '@classroom/protocol';
+import { safeFileName, UPLOAD_CONTENT_TYPE, type Receipt, type ResourceView, type ShareUploadStatus, type TransferState, type UploadStatus } from '@classroom/protocol';
 import { b64u, type TlsBinding } from '@classroom/protocol';
-import { assertSecureUrl, initUpload, resourceContentPath, sleep, TransferError, uploadStatus, type DeviceSigner, type Transport, type WebSocketLike } from './index.ts';
+import { api, assertSecureUrl, resourceContentPath, sleep, TransferError, type DeviceSigner, type Transport, type WebSocketLike } from './index.ts';
 
 // ---- Pinned TLS transport (Node / Electron main) ----
 
@@ -155,36 +155,58 @@ export async function downloadResource(o: {
  * Resumable, idempotent submission upload. Reuse `idempotencyKey` for retries of the same intended submission
  * (including after an app restart) — the server then returns the same receipt instead of a duplicate.
  */
-export async function uploadSubmission(o: {
-  transport: Transport; url: string; token: string; assignmentId: string; path: string; fileName?: string; idempotencyKey: string;
-  signal?: AbortSignal; onProgress?: (sent: number, size: number) => void; maxRetries?: number;
-}): Promise<Receipt> {
+/**
+ * The one resumable upload loop (tus-like): init → PUT at Upload-Offset → server verifies size + SHA-256. A network drop
+ * resumes from what the server kept; the idempotency key makes every retry land on the same upload.
+ */
+async function resumableUpload<S extends { uploadId: string; offset: number; state: string; error: string | null }>(o: {
+  transport: Transport; url: string; token: string; path: string; base: '/api/uploads' | '/api/shares'; init: Record<string, unknown>;
+  done(st: S): boolean; signal?: AbortSignal; onProgress?: (sent: number, size: number) => void; maxRetries?: number;
+}): Promise<S> {
   assertSecureUrl(o.url);
   const t = o.transport;
   const size = (await stat(o.path)).size;
   const sha256 = await sha256File(o.path);
-  let st: UploadStatus = await initUpload(t, o.url, o.token, { assignmentId: o.assignmentId, fileName: o.fileName ?? basename(o.path), size, sha256, idempotencyKey: o.idempotencyKey });
+  const statusOf = (id: string) => api<S>(t, o.url, o.token, `${o.base}/${encodeURIComponent(id)}`);
+  let st = await api<S>(t, o.url, o.token, o.base, { method: 'POST', body: JSON.stringify({ ...o.init, size, sha256 }) });
   for (let attempt = 0; ; attempt++) {
-    if (st.receipt) return st.receipt;
+    if (o.done(st)) return st;
     if (st.state === 'failed') throw new TransferError('failed', st.error ?? 'Upload failed.');
     o.onProgress?.(st.offset, size);
     let sent = st.offset;
     try {
       const body = createReadStream(o.path, { start: st.offset }).pipe(new Transform({ transform(c, _e, cb) { sent += c.length; o.onProgress?.(sent, size); cb(null, c); } }));
-      const res = await t.fetch(`${o.url}/api/uploads/${st.uploadId}`, {
+      const res = await t.fetch(`${o.url}${o.base}/${st.uploadId}`, {
         method: 'PUT', body: Readable.toWeb(body) as never, duplex: 'half', signal: o.signal,
         headers: { authorization: `Bearer ${o.token}`, 'content-type': UPLOAD_CONTENT_TYPE, 'upload-offset': String(st.offset) },
       } as RequestInit);
       const b = await res.json().catch(() => ({}));
       if (res.ok) { st = b; continue; }
       if (res.status === 409 && b.code === 'offset_mismatch') { st = { ...st, offset: b.offset }; continue; }
-      if ((res.status === 429 || res.status === 409) && attempt < (o.maxRetries ?? 30)) { await sleep(1000, o.signal); st = await uploadStatus(t, o.url, o.token, st.uploadId); continue; }
+      if ((res.status === 429 || res.status === 409) && attempt < (o.maxRetries ?? 30)) { await sleep(1000, o.signal); st = await statusOf(st.uploadId); continue; }
       throw new TransferError(b.code ?? 'http_' + res.status, b.message ?? `Upload failed (${res.status})`, res.status);
     } catch (e) {
       if (e instanceof TransferError || o.signal?.aborted || attempt >= (o.maxRetries ?? 30)) throw e;
       // Network drop: ask the server how much it kept and continue from there.
       await sleep(Math.min(5000, 300 * 2 ** Math.min(attempt, 4)), o.signal);
-      st = await uploadStatus(t, o.url, o.token, st.uploadId).catch(() => st);
+      st = await statusOf(st.uploadId).catch(() => st);
     }
   }
+}
+
+export async function uploadSubmission(o: {
+  transport: Transport; url: string; token: string; assignmentId: string; path: string; fileName?: string; idempotencyKey: string;
+  signal?: AbortSignal; onProgress?: (sent: number, size: number) => void; maxRetries?: number;
+}): Promise<Receipt> {
+  const st = await resumableUpload<UploadStatus>({ ...o, base: '/api/uploads', init: { assignmentId: o.assignmentId, fileName: o.fileName ?? basename(o.path), idempotencyKey: o.idempotencyKey }, done: (s) => !!s.receipt });
+  return st.receipt!;
+}
+
+/** A member shares a file with the whole CLAN ('clan') or one CLANmate (chat handle). Returns the new resource. */
+export async function uploadShare(o: {
+  transport: Transport; url: string; token: string; path: string; fileName?: string; to: string; idempotencyKey: string;
+  signal?: AbortSignal; onProgress?: (sent: number, size: number) => void; maxRetries?: number;
+}): Promise<ResourceView> {
+  const st = await resumableUpload<ShareUploadStatus>({ ...o, base: '/api/shares', init: { fileName: o.fileName ?? basename(o.path), idempotencyKey: o.idempotencyKey, to: o.to }, done: (s) => !!s.resource });
+  return st.resource!;
 }
