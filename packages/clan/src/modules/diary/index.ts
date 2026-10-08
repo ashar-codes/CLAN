@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Db, ModuleSchema } from '../../core/db.ts';
 import type { Principal } from '../../core/permissions.ts';
 import type { ContextProvider } from '../../core/context.ts';
+import type { SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'diary', prefix: 'diary',
@@ -21,6 +22,31 @@ const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export class Diary {
   private db: Db; private now: () => number;
   constructor(db: Db, now = () => Date.now()) { this.db = db; this.now = now; }
+
+  /** Personal sync (only when turned on): one entry per day, so the day is the sync id; concurrent edits are preserved.
+   *  "Keep both" puts the other device's text under this device's text in the same entry. */
+  syncProviders(): SyncProvider[] {
+    type R = { id: string; day: string; mood: string | null; body: string; created_at: number; updated_at: number };
+    const wire = (r: R) => ({ body: r.body, created_at: r.created_at, day: r.day, mood: r.mood, updated_at: r.updated_at });
+    const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    const In = z.object({ body: z.string().max(200_000), created_at: z.number().int(), mood: z.string().max(40).nullable(), updated_at: z.number().int() });
+    return [{
+      kind: 'diary', policy: 'preserve', sensitive: true,
+      all: (owner) => new Map((this.db.prepare('SELECT * FROM diary_entries WHERE owner_id = ?').all(owner) as R[]).map((r) => [r.day, wire(r)])),
+      one: (owner, day) => { const r = this.db.prepare('SELECT * FROM diary_entries WHERE owner_id = ? AND day = ?').get(owner, day) as R | undefined; return r ? wire(r) : null; },
+      apply: (owner, day, payload) => {
+        Day.parse(day);
+        if (payload === null) { this.db.prepare('DELETE FROM diary_entries WHERE owner_id = ? AND day = ?').run(owner, day); return; }
+        const e = In.parse(payload);
+        this.db.prepare(`INSERT INTO diary_entries (id, owner_id, day, mood, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (owner_id, day) DO UPDATE SET mood = excluded.mood, body = excluded.body, updated_at = excluded.updated_at`).run(randomUUID(), owner, day, e.mood, e.body, e.created_at, e.updated_at);
+      },
+      keepBoth: (owner, day, remote) => {
+        const e = In.parse(remote);
+        this.db.prepare('UPDATE diary_entries SET body = body || ?, updated_at = ? WHERE owner_id = ? AND day = ?').run(`\n\n— From your other device —\n${e.body}`, this.now(), owner, day);
+      },
+    }];
+  }
 
   /** One entry per day; writing again replaces that day's text. */
   write(p: Principal, o: { day: string; body: string; mood?: Entry['mood'] }): Entry {

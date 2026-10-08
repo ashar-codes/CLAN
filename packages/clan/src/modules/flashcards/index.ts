@@ -8,6 +8,7 @@ import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Principal, type Scope } from '../../core/permissions.ts';
 import type { SearchProvider } from '../../core/search.ts';
 import type { Courses } from '../courses/index.ts';
+import { rowProvider, SyncDefer, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'flashcards', prefix: 'flashcards',
@@ -36,6 +37,36 @@ const toCard = (r: CRaw): Card => ({ id: r.id, deckId: r.deck_id, front: r.front
 export class Flashcards {
   private db: Db; private bus: EventBus; private courses: Courses; private now: () => number;
   constructor(db: Db, bus: EventBus, courses: Courses, now = () => Date.now()) { this.db = db; this.bus = bus; this.courses = courses; this.now = now; }
+
+  /** Personal sync: decks with their cards (content only), and reviews as an append-only log. A card's schedule is
+   *  never copied — it is recomputed from all its reviews, so reviews made on two devices both count. */
+  syncProviders(): SyncProvider[] {
+    type Rv = { id: string; card_id: string; at: number; grade: Grade; interval_before: number; interval_after: number; ease_after: number; due_after: number };
+    const ownCard = (owner: string, cardId: string) => this.db.prepare('SELECT c.created_at FROM flashcards_cards c JOIN flashcards_decks d ON d.id = c.deck_id WHERE c.id = ? AND d.owner_id = ?').get(cardId, owner) as { created_at: number } | undefined;
+    const recompute = (cardId: string, createdAt: number) => {
+      let s = { ...NEW_CARD, dueAt: createdAt };
+      for (const r of this.db.prepare('SELECT grade, at FROM flashcards_reviews WHERE card_id = ? ORDER BY at, id').all(cardId) as { grade: Grade; at: number }[]) s = sm2(s, r.grade, r.at);
+      this.db.prepare('UPDATE flashcards_cards SET due_at = ?, interval_days = ?, ease = ?, reps = ?, lapses = ? WHERE id = ?').run(s.dueAt, s.interval, s.ease, s.reps, s.lapses, cardId);
+    };
+    const Review = z.object({ card_id: z.string().max(80), at: z.number().int(), grade: z.enum(GRADES), interval_before: z.number().int(), interval_after: z.number().int(), ease_after: z.number(), due_after: z.number().int() });
+    const wire = ({ id: _id, ...r }: Rv) => r;
+    const SELECT = 'SELECT r.* FROM flashcards_reviews r JOIN flashcards_cards c ON c.id = r.card_id JOIN flashcards_decks d ON d.id = c.deck_id WHERE d.owner_id = ?';
+    return [
+      rowProvider(this.db, { kind: 'deck', policy: 'lww', table: 'flashcards_decks', owner: 'owner_id',
+        children: [{ table: 'flashcards_cards', fk: 'deck_id', key: 'id', exclude: ['due_at', 'interval_days', 'ease', 'reps', 'lapses', 'updated_at'], order: 'created_at, id',
+          defaults: { due_at: (r) => r.created_at, updated_at: (r) => r.created_at }, dependents: [{ table: 'flashcards_reviews', fk: 'card_id' }] }] }),
+      { kind: 'review', policy: 'union',
+        all: (owner) => new Map((this.db.prepare(SELECT).all(owner) as Rv[]).map((r) => [r.id, wire(r)])),
+        one: (owner, id) => { const r = this.db.prepare(`${SELECT} AND r.id = ?`).get(owner, id) as Rv | undefined; return r ? wire(r) : null; },
+        apply: (owner, id, payload) => {
+          if (payload === null) { const r = this.db.prepare(`${SELECT} AND r.id = ?`).get(owner, id) as Rv | undefined; if (r) { this.db.prepare('DELETE FROM flashcards_reviews WHERE id = ?').run(id); const c = ownCard(owner, r.card_id); if (c) recompute(r.card_id, c.created_at); } return; }
+          const r = Review.parse(payload), c = ownCard(owner, r.card_id);
+          if (!c) { if (this.db.prepare('SELECT 1 FROM flashcards_cards WHERE id = ?').get(r.card_id)) throw new Error('That card belongs to someone else.'); throw new SyncDefer('card not here yet'); }
+          this.db.prepare('INSERT OR IGNORE INTO flashcards_reviews (id, card_id, at, grade, interval_before, interval_after, ease_after, due_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, r.card_id, r.at, r.grade, r.interval_before, r.interval_after, r.ease_after, r.due_after);
+          recompute(r.card_id, c.created_at);
+        } },
+    ];
+  }
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can change your flashcards.'); return p.userId; }
   private deckRow(p: Principal, id: string) {
     const d = this.db.prepare('SELECT * FROM flashcards_decks WHERE id = ? AND owner_id = ?').get(id, userOf(p)) as { id: string; course_id: string | null } | undefined;

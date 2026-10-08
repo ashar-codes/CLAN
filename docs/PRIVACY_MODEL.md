@@ -24,6 +24,8 @@ members only; removed members and expired TEMPORARY CLANs lose access at once). 
 * Results are references + short excerpts the user could read anyway; every item's scope is re-checked.
 * Diary is `private`: **DENIED** unless the user grants `ai → diary` (Me → Privacy). Grants can expire and are revocable.
   Even granted, only the owner's entries are returned.
+* Personal sync ([SYNC.md](SYNC.md)) copies the owner's own personal data to the owner's linked devices only. Diary
+  joins it only when turned on. CLAN content, chats and other people's items never sync.
 
 Notifications show who and where, and message text only if the person turns previews on. Focus mode (manual, or a Focus
 study session) alerts nobody except for your own reminders; held notices stay in the list. Study notices are conservative:

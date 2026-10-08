@@ -15,3 +15,4 @@ export { MediaService, MEDIA_TOKEN_TTL_S } from './media.ts';
 export { Presentations, PRESENTER_GRACE_MS, type PresentationEvent } from './presentation.ts';
 export { ChatRelay, chatHandle, type ChatStore } from './chat.ts';
 export { Shares } from './shares.ts';
+export { startSyncServer, advertiseSync, browseSync, SYNC_SERVICE, type SyncHost } from './sync-server.ts';

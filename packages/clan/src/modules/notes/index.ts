@@ -8,6 +8,7 @@ import { userOf, type Permissions, type Principal, type Scope } from '../../core
 import type { SearchProvider } from '../../core/search.ts';
 import type { ContextProvider } from '../../core/context.ts';
 import type { Clans } from '../clans/index.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'notes', prefix: 'notes',
@@ -34,6 +35,13 @@ const Body = z.string().max(200_000);
 export class Notes {
   private db: Db; private bus: EventBus; private perms: Permissions; private clans: Clans; private now: () => number;
   constructor(db: Db, bus: EventBus, perms: Permissions, clans: Clans, now = () => Date.now()) { this.db = db; this.bus = bus; this.perms = perms; this.clans = clans; this.now = now; }
+
+  /** Personal sync: notes are writing — concurrent edits are preserved for comparison; "keep both" adds a copy. */
+  syncProviders(): SyncProvider[] {
+    return [rowProvider(this.db, { kind: 'note', policy: 'preserve', table: 'notes_notes', owner: 'owner_id',
+      keepBoth: (owner, _id, remote) => { const r = (remote ?? {}) as { title?: string; body?: string }; const t = this.now();
+        this.db.prepare('INSERT INTO notes_notes (id, owner_id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(randomUUID(), owner, `${String(r.title ?? 'Untitled').slice(0, 180)} (other device)`, String(r.body ?? '').slice(0, 200_000), t, t); } })];
+  }
 
   create(p: Principal, o: { title: string; body?: string }): Note {
     const owner = this.writer(p);

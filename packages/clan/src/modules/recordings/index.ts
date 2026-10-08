@@ -11,6 +11,7 @@ import type { SearchProvider } from '../../core/search.ts';
 import type { Courses } from '../courses/index.ts';
 import type { Files } from '../files/index.ts';
 import type { Notes } from '../notes/index.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'recordings', prefix: 'rec',
@@ -47,6 +48,13 @@ const LABEL: Record<TapeEventKind, string> = { important: 'Important', note: 'No
 export class Recordings {
   private db: Db; private bus: EventBus; private m: { courses: Courses; files: Files; notes: Notes }; private now: () => number;
   constructor(db: Db, bus: EventBus, m: { courses: Courses; files: Files; notes: Notes }, now = () => Date.now()) { this.db = db; this.bus = bus; this.m = m; this.now = now; }
+
+  /** Personal sync: Study Tape metadata and timeline (the video is a file and follows the file settings). A tape still
+   *  recording stays on its device; where its partial file lives is device-local. */
+  syncProviders(): SyncProvider[] {
+    return [rowProvider(this.db, { kind: 'tape', policy: 'lww', table: 'rec_tapes', owner: 'owner_id', where: "status <> 'recording'", exclude: ['part_path'],
+      children: [{ table: 'rec_events', fk: 'tape_id', key: 'id', order: 'at_ms, id' }] })];
+  }
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can record.'); return p.userId; }
   private raw(p: Principal, id: string) { return this.db.prepare('SELECT * FROM rec_tapes WHERE id = ? AND owner_id = ?').get(id, userOf(p)) as Raw | undefined; }
   private must(p: Principal, id: string) { const r = this.raw(p, id); if (!r) throw new Error('Study Tape not found.'); return r; }

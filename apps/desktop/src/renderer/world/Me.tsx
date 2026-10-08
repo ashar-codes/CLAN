@@ -7,6 +7,7 @@ import { useLoad } from './useLoad.ts';
 import { experienceIsAuto, setExperience, type Experience } from './experience.ts';
 
 const AISettingsPanel = lazy(() => import('./ai/Settings.tsx'));
+const DevicesPanel = lazy(() => import('./devices/Devices.tsx'));
 
 const MOODS = ['calm', 'happy', 'proud', 'tired', 'anxious', 'low'];
 const today = () => new Date().toLocaleDateString('en-CA');
@@ -31,6 +32,7 @@ export function Me({ experience, section }: { experience: Experience; section: '
           <label className="radio"><input type="radio" name="exp" checked={auto} onChange={() => { setExperience('auto'); setAuto(true); }} /><span><b>Automatic</b> <small className="muted">now {experience}</small></span></label>
         </fieldset>
         <Notices />
+        <Suspense fallback={null}><DevicesPanel /></Suspense>
         <Suspense fallback={null}><AISettingsPanel /></Suspense>
         <span className="eyebrow">Privacy</span>
         <p className="muted small-text">AI reading your Diary is off by default (see AI above). Notes and links are private until you share them into a CLAN. Your Diary is never shared and never searchable.</p>

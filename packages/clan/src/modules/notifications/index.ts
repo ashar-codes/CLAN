@@ -10,6 +10,8 @@ import { MessageCreated, type Chat } from '../chat/index.ts';
 import { ReminderDue } from '../reminders/index.ts';
 import { StudySessionEnded, StudySessionStarted } from '../study/index.ts';
 import type { Clans } from '../clans/index.ts';
+import type { SyncProvider } from '../../core/syncrows.ts';
+import { z } from 'zod';
 
 export const schema: ModuleSchema = {
   module: 'notifications', prefix: 'notify',
@@ -71,6 +73,20 @@ export class Notifications implements NotificationsContract {
     });
     bus.subscribe('notifications.focus+', StudySessionStarted, (e) => { if (e.payload.ownerId === this.localUser()) this.sessionFocus = e.payload.focus; });
     bus.subscribe('notifications.focus-', StudySessionEnded, (e) => { if (e.payload.ownerId === this.localUser()) this.sessionFocus = false; });
+  }
+
+  /** Personal sync: notification preferences (what was already delivered stays per device). */
+  syncProviders(): SyncProvider[] {
+    const COLS = ['groups', 'direct', 'files', 'previews', 'reminders', 'tasks', 'sessions', 'exams', 'cards'] as const;
+    const one = (owner: string) => { const r = this.db.prepare('SELECT * FROM notify_prefs WHERE user_id = ?').get(owner) as Record<string, number> | undefined; return r ? Object.fromEntries(COLS.map((c) => [c, r[c]])) : null; };
+    return [{ kind: 'notify-prefs', policy: 'lww',
+      all: (owner) => { const p = one(owner); return new Map(p ? [['prefs', p]] : []); },
+      one: (owner, id) => id === 'prefs' ? one(owner) : null,
+      apply: (owner, id, payload) => {
+        if (id !== 'prefs' || payload === null) return;
+        const v = z.object(Object.fromEntries(COLS.map((c) => [c, z.number().int().min(0).max(1)]))).parse(payload) as Record<string, number>;
+        this.db.prepare(`INSERT INTO notify_prefs (user_id, ${COLS.join(', ')}) VALUES (?, ${COLS.map(() => '?').join(', ')}) ON CONFLICT (user_id) DO UPDATE SET ${COLS.map((c) => `${c} = excluded.${c}`).join(', ')}`).run(owner, ...COLS.map((c) => v[c]!));
+      } }];
   }
   get focused() { return this.context.focus || this.sessionFocus; }
   connectStudy(s: StudySources) { this.study = s; }

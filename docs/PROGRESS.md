@@ -120,3 +120,14 @@ Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi
 * Tests 267 → 279; E2E 15 → 18 (two board, one tape).
 * Fixed: a message typed while a direct conversation was opening went to the group conversation (root cause of the
   intermittent Classroom chat E2E); desktop and phone now show no composer until the conversation is open. Real-hardware capture/audio and low-end performance not measured.
+
+## Personal Device Sync (tag `clan-personal-sync`)
+* Me › My Devices: link with a short code and approval, a signed device registry, unlink/revocation, status from real
+  counters, conflicts to compare, settings for Diary (opt-in), files (≤50 MB / all / off) and pause. See SYNC.md.
+* Engine: versioned records (HLC + hash history), tombstones, idempotent and resumable, deferred out-of-order records.
+  Applied by each module's provider: preserve (notes, Diary), newest-wins with the loser kept, union (reviews, boards).
+* LAN transport: HTTPS to the pinned per-device certificate, signed requests, DNS-SD with a rotating tag, resumable
+  SHA-256-verified file transfer.
+* Phone: the shared record contract only (typecheck + a test against a desktop database). No phone transport or linking.
+* Tests 279 → 299; E2E 18 → 19 (two instances: link, sync, offline edits, resolve, unlink, refused).
+  `pnpm benchmark:sync` results are in TESTING.md.

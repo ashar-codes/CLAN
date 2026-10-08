@@ -9,6 +9,7 @@ import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Principal, type Scope } from '../../core/permissions.ts';
 import type { SearchProvider } from '../../core/search.ts';
 import type { Courses } from '../courses/index.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'tasks', prefix: 'tasks',
@@ -31,6 +32,12 @@ type Raw = { id: string; owner_id: string; title: string; description: string; c
 export class Tasks {
   private db: Db; private bus: EventBus; private courses: Courses; private isMember: (clanId: string, userId: string) => boolean; private now: () => number;
   constructor(db: Db, bus: EventBus, courses: Courses, isMember: (clanId: string, userId: string) => boolean, now = () => Date.now()) { this.db = db; this.bus = bus; this.courses = courses; this.isMember = isMember; this.now = now; }
+
+  /** Personal sync: newest edit wins (the other version is kept for review), with checklist and references. */
+  syncProviders(): SyncProvider[] {
+    return [rowProvider(this.db, { kind: 'task', policy: 'lww', table: 'tasks_tasks', owner: 'owner_id',
+      children: [{ table: 'tasks_checklist', fk: 'task_id', key: 'id', order: 'position, id' }, { table: 'tasks_refs', fk: 'task_id', order: 'module, entity_id' }] })];
+  }
 
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can change your tasks.'); return p.userId; }
   get(p: Principal, id: string): Task | null { const r = this.db.prepare('SELECT * FROM tasks_tasks WHERE id = ? AND owner_id = ?').get(id, userOf(p)) as Raw | undefined; return r ? this.full(r) : null; }

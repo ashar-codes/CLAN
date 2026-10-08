@@ -319,3 +319,4 @@ export * from './intake.ts';
 export * from './study.ts';
 export * from './ai.ts';
 export * from './whiteboard.ts';
+export * from './sync.ts';

@@ -8,6 +8,7 @@ import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Principal, type Scope } from '../../core/permissions.ts';
 import type { SearchProvider } from '../../core/search.ts';
 import type { Courses, Topic } from '../courses/index.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'exams', prefix: 'exams',
@@ -30,6 +31,12 @@ type Raw = { id: string; owner_id: string; course_id: string; name: string; at: 
 export class Exams {
   private db: Db; private bus: EventBus; private courses: Courses; private now: () => number;
   constructor(db: Db, bus: EventBus, courses: Courses, now = () => Date.now()) { this.db = db; this.bus = bus; this.courses = courses; this.now = now; }
+
+  /** Personal sync: newest edit wins (the other version is kept for review), with topics in scope and references. */
+  syncProviders(): SyncProvider[] {
+    return [rowProvider(this.db, { kind: 'exam', policy: 'lww', table: 'exams_exams', owner: 'owner_id',
+      children: [{ table: 'exams_topics', fk: 'exam_id', order: 'topic_id' }, { table: 'exams_refs', fk: 'exam_id', order: 'module, entity_id' }] })];
+  }
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can change your exams.'); return p.userId; }
   get(p: Principal, id: string): Exam | null { const r = this.db.prepare('SELECT * FROM exams_exams WHERE id = ? AND owner_id = ?').get(id, userOf(p)) as Raw | undefined; return r ? this.full(r) : null; }
   private must(p: Principal, id: string) { const e = this.get(p, id); if (!e) throw new Error('Exam not found.'); return e; }

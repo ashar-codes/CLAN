@@ -73,7 +73,7 @@ it('Study Engine: course → … → focus session → Exam Command Center → r
   // task
   await section(p, 'Tasks');
   await p.getByLabel('Task title').fill('Problem set 3');
-  await p.getByLabel('Due', { exact: true }).fill(local(Date.now() + 3 * 3_600_000));
+  await p.getByLabel('Due', { exact: true }).fill(local(Math.min(Date.now() + 3 * 3_600_000, new Date().setHours(23, 59, 0, 0)))); // due today, even late in the evening
   await p.getByRole('button', { name: 'Add task' }).click();
   await p.getByTestId('task').filter({ hasText: 'Problem set 3' }).waitFor();
 

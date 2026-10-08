@@ -6,6 +6,7 @@ import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Principal } from '../../core/permissions.ts';
 import type { Courses } from '../courses/index.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'study', prefix: 'study',
@@ -28,6 +29,10 @@ const fix = (r: StudySession & { focus: unknown }): StudySession => ({ ...r, foc
 export class Study {
   private db: Db; private bus: EventBus; private courses: Courses; private now: () => number;
   constructor(db: Db, bus: EventBus, courses: Courses, now = () => Date.now()) { this.db = db; this.bus = bus; this.courses = courses; this.now = now; }
+
+  /** Personal sync: planned and finished sessions (a running one stays on its device until it ends). Each session is
+   *  its own record, so sessions from two devices never merge. */
+  syncProviders(): SyncProvider[] { return [rowProvider(this.db, { kind: 'study-session', policy: 'lww', table: 'study_sessions', owner: 'owner_id', where: "status <> 'active'" })]; }
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can study.'); return p.userId; }
   get(p: Principal, id: string) { const r = this.db.prepare(`SELECT ${COLS} FROM study_sessions WHERE id = ? AND owner_id = ?`).get(id, userOf(p)) as StudySession | undefined; return r ? fix(r) : null; }
   ownerOf(sessionId: string) { return (this.db.prepare('SELECT owner_id o FROM study_sessions WHERE id = ?').get(sessionId) as { o: string } | undefined)?.o ?? null; }

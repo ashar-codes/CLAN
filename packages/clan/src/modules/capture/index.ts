@@ -11,6 +11,7 @@ import type { Files } from '../files/index.ts';
 import type { Notes } from '../notes/index.ts';
 import { SavedItemChanged, type Saved } from '../saved/index.ts';
 import type { Courses } from '../courses/index.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'capture', prefix: 'capture',
@@ -47,6 +48,9 @@ export class Capture {
       if (s && s.collectionId !== this.m.saved.inbox({ kind: 'user', userId: it.owner_id })) this.mark(e.payload.itemId, 'saved', { kind: 'collection', collectionId: s.collectionId });
     }, { persistent: true });
   }
+
+  /** Personal sync: the inbox entries (what they point at syncs with its own module). */
+  syncProviders(): SyncProvider[] { return [rowProvider(this.db, { kind: 'capture', policy: 'lww', table: 'capture_items', owner: 'owner_id' })]; }
 
   /** Captures straight into a course (and topic) when given; otherwise into the Inbox. */
   async capture(p: Principal, input: CaptureInput, into?: { courseId: string; topicId?: string | null }): Promise<InboxItem> {

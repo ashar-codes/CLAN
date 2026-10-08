@@ -57,3 +57,12 @@ found (and fixed) real bugs: TLS agents recreated on every availability refresh,
 finalize window in which a peer served zeros (caught by hash checks), per-chunk 404s banning whole peers, and an endorsement that
 never retried after approval. We also mis-attributed one slowdown to disk flushing before measuring showed libuv thread-pool
 contention in the simulator (10 students per process) — the simulator now sizes the pool; the product debounces metadata writes.
+
+### Personal sync
+`packages/clan/test/sync.test.ts` covers two or three real device databases over an in-memory transport that uses the
+real request authentication. Cases: linking, replay/skew/unknown/revoked requests, idempotency, out-of-order records,
+preserve/newest/union conflicts, tombstones, Diary opt-in, foreign rows, restart mid-sync, revocation mid-sync,
+interrupted/corrupted/large/low-space files.
+`sync-lan.test.ts` runs the same over real HTTPS servers. `e2e/sync.test.ts` runs two app instances.
+`pnpm benchmark:sync` (M-series MacBook, loopback): 1,000 notes + 5,000 saved + 10,000 reviews + 1 GB in 4 files took
+15.8 s for the first full sync; the change scan took 1.2 s; a no-change round 0.4 s; a one-edit round 0.35 s.

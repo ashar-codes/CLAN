@@ -499,3 +499,9 @@ button.link.ai-link { border: 0; }
 .qc-rec { display: grid; gap: .3rem; justify-items: end; padding-bottom: .3rem; border-bottom: 1px solid var(--border); }
 @media (prefers-reduced-motion: reduce) { .rec-indicator .rec-dot, .rec-dot { animation: none; } }
 @media (max-width: 640px) { .rec-indicator { left: 12px; right: 12px; bottom: 76px; } .board-canvas { height: 60vh; } }
+
+/* Me › My Devices */
+.callout { border: 1px solid var(--line, #8884); border-radius: 10px; padding: 10px 12px; }
+.link-code { font: 600 1.4rem/1.2 ui-monospace, monospace; letter-spacing: .06em; user-select: all; }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.compare pre { white-space: pre-wrap; max-height: 180px; overflow: auto; margin: 4px 0 0; font-size: .85rem; }

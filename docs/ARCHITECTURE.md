@@ -19,6 +19,8 @@ packages/design (tokens + components, no data access) · packages/world (lazy 3D
   else); the only readers of classroom tables are `clans/classroom-import.ts` and `files/classroom-adopt.ts`, read-only;
   UI packages never import backend packages; the renderer reaches CLAN only through the preload API.
 * **Composition root** `packages/clan/src/index.ts` is the one file that knows every module.
+* **Personal sync** (`modules/sync`, [SYNC.md](SYNC.md)) reads and writes module data only through each module's
+  `syncProviders()`; it talks to other devices through a `SyncTransport` (LAN today).
 * **Communication**: direct calls to public APIs for queries/commands, typed domain events for reactions
   ([EVENTS.md](EVENTS.md)), explicit references for shared content ([RESOURCE_STORE.md](RESOURCE_STORE.md)), permission-aware
   queries everywhere ([PRIVACY_MODEL.md](PRIVACY_MODEL.md)). Module list and legacy names: [MODULES.md](MODULES.md).

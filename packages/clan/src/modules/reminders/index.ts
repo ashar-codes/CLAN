@@ -8,6 +8,7 @@ import { nextOccurrence, RECURRENCES, type Recurrence } from '@classroom/protoco
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Principal } from '../../core/permissions.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'reminders', prefix: 'reminders',
@@ -38,6 +39,9 @@ const toR = (r: Raw): Reminder => ({ id: r.id, text: r.text, dueAt: r.due_at, ta
 export class Reminders {
   private db: Db; private bus: EventBus; private now: () => number;
   constructor(db: Db, bus: EventBus, now = () => Date.now()) { this.db = db; this.bus = bus; this.now = now; }
+
+  /** Personal sync: newest edit wins (the other version is kept for review); whether it already rang is per device. */
+  syncProviders(): SyncProvider[] { return [rowProvider(this.db, { kind: 'reminder', policy: 'lww', table: 'reminders_reminders', owner: 'owner_id', exclude: ['fired_at'] })]; }
 
   create(p: Principal, o: { text: string; dueAt: number; target?: { module: string; id: string }; recurrence?: Recurrence }): Reminder {
     if (p.kind !== 'user') throw new Error('Agents cannot create reminders.');

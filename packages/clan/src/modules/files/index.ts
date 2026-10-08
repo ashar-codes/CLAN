@@ -6,6 +6,7 @@ import type { ResourceStore, RefRow } from '../../core/resources.ts';
 import type { Db } from '../../core/db.ts';
 import type { Clans } from '../clans/index.ts';
 import { adoptClassroomResources, classroomName, classroomNames } from './classroom-adopt.ts';
+import type { SyncProvider } from '../../core/syncrows.ts';
 
 export const ResourceShared = defineEvent('ResourceShared', 1, z.object({
   refId: z.string(), objectId: z.string(), scope: z.discriminatedUnion('kind', [z.object({ kind: z.literal('personal'), ownerId: z.string() }), z.object({ kind: z.literal('clan'), clanId: z.string() })]), by: z.string(),
@@ -17,6 +18,33 @@ const NAME = z.string().trim().min(1).max(255).refine((n) => !/[\\/\0]/.test(n),
 export class Files {
   private db: Db; private bus: EventBus; private store: ResourceStore; private perms: Permissions; private clans: Clans;
   constructor(db: Db, bus: EventBus, store: ResourceStore, perms: Permissions, clans: Clans) { this.db = db; this.bus = bus; this.store = store; this.perms = perms; this.clans = clans; }
+
+  /** Personal sync: the student's own files travel by content hash (deduplicated, verified on arrival). A ref keeps the
+   *  same id on every device so courses, tasks and tapes that point at it still resolve. CLAN files never sync. */
+  syncProviders(): SyncProvider[] {
+    type R = { id: string; name: string | null; created_at: number; sha256: string; size: number; mime: string };
+    const SELECT = "SELECT r.id, r.name, r.created_at, o.sha256, o.size, o.mime FROM resources_refs r JOIN resources_objects o ON o.id = r.object_id WHERE r.module = 'files' AND r.scope_kind = 'personal' AND r.scope_id = ?";
+    const wire = ({ id: _id, ...r }: R) => r;
+    const In = z.object({ name: z.string().max(255).nullable(), created_at: z.number().int(), sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().nonnegative(), mime: z.string().max(120) });
+    return [{ kind: 'file', policy: 'lww',
+      all: (owner) => new Map((this.db.prepare(SELECT).all(owner) as R[]).map((r) => [r.id, wire(r)])),
+      one: (owner, id) => { const r = this.db.prepare(`${SELECT} AND r.id = ?`).get(owner, id) as R | undefined; return r ? wire(r) : null; },
+      apply: (owner, id, payload) => {
+        const cur = this.store.getRef(id);
+        if (cur && (cur.module !== 'files' || cur.scope.kind !== 'personal' || cur.scope.ownerId !== owner)) throw new Error('That file belongs to someone else.');
+        if (payload === null) { if (cur) this.store.unref(id); return; }
+        const f = In.parse(payload), obj = this.store.bySha(f.sha256);
+        if (!obj) return { needs: { sha256: f.sha256, size: f.size, mime: f.mime } }; // bytes first; the engine re-applies after
+        if (cur && cur.objectId !== obj.id) this.store.unref(id);
+        if (cur && cur.objectId === obj.id) { this.db.prepare('UPDATE resources_refs SET name = ? WHERE id = ?').run(f.name, id); return; }
+        this.db.prepare(`INSERT INTO resources_refs (id, object_id, module, entity, entity_id, scope_kind, scope_id, name, created_by, created_at) VALUES (?, ?, 'files', 'file', ?, 'personal', ?, ?, ?, ?)`)
+          .run(id, obj.id, `sync:${id}`, owner, f.name, owner, f.created_at);
+      } }];
+  }
+  /** Where the bytes of one of `owner`'s own personal files live (served only to their linked devices). */
+  personalObject(owner: string, sha256: string) {
+    return (this.db.prepare("SELECT o.location FROM resources_objects o JOIN resources_refs r ON r.object_id = o.id WHERE o.sha256 = ? AND r.module = 'files' AND r.scope_kind = 'personal' AND r.scope_id = ? LIMIT 1").get(sha256, owner) as { location: string } | undefined)?.location ?? null;
+  }
 
   /** Adds a file to the caller's Personal Space or a CLAN they belong to (CLAN must have the `files` capability). */
   async add(p: Principal, path: string, name: string, scope: Scope, mime?: string): Promise<FileView> {

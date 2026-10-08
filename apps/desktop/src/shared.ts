@@ -269,6 +269,29 @@ export type TapeApi = {
   onProblem(cb: (p: RecProblem) => void): () => void;
 };
 
+export type SyncDevice = { fp: string; name: string; platform: string; current: boolean; revoked: boolean; addedAt: number; lastSeen: number | null; lastSync: number | null; error: string | null; endpoints: string[]; tlsSpki: string };
+export type SyncSettings = { syncDiary: boolean; files: 'all' | 'small' | 'off'; paused: boolean };
+export type SyncStatus = { devices: SyncDevice[]; settings: SyncSettings; syncing: boolean; lastError: string | null; revoked: boolean;
+  stats: { tracked: number; pending: number; conflicts: number; deferred: number; transfers: number; transferBytes: number; skippedBytes: number };
+  linkRequest: { sessionId: string; name: string; platform: string; fp: string } | null;
+  transfers: { sha256: string; size: number; mime: string; received: number; state: string; error: string | null }[] };
+export type SyncConflict = { id: string; kind: string; entityId: string; policy: string; note: string; local: unknown; remote: unknown; fromDevice: string; createdAt: number; canKeepBoth: boolean };
+/** Me › My Devices (window.classroom.sync). */
+export type SyncApi = {
+  status(): Promise<SyncStatus>;
+  startLink(): Promise<{ code: string; expiresAt: number; addresses: string[] }>;
+  cancelLink(): Promise<void>;
+  approve(sessionId: string): Promise<void>;
+  reject(sessionId: string): Promise<void>;
+  join(code: string, address?: string): Promise<{ ok: true }>;
+  now(): Promise<{ lastError: string | null }>;
+  unlink(fp: string): Promise<void>;
+  conflicts(): Promise<SyncConflict[]>;
+  resolve(id: string, choice: 'mine' | 'theirs' | 'both'): Promise<void>;
+  setSettings(p: Partial<SyncSettings>): Promise<SyncSettings>;
+  onChanged(cb: () => void): () => void;
+};
+
 /** API exposed by the preload as window.classroom. */
 export type DesktopApi = {
   clan: ClanApi;
@@ -277,6 +300,7 @@ export type DesktopApi = {
   capture: CaptureApi;
   study: StudyApi;
   ai: AIApi;
+  sync: SyncApi;
   board: BoardApi;
   rec: TapeApi;
   capabilities(): Promise<Capabilities>;

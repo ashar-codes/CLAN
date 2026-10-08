@@ -8,6 +8,7 @@ import { applyOp, emptyBoard, replay, strip, WbOp, type WbLogged, type WbState }
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Permissions, type Principal } from '../../core/permissions.ts';
+import { SyncDefer, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'whiteboard', prefix: 'wb',
@@ -36,6 +37,34 @@ export class Whiteboard {
   constructor(db: Db, bus: EventBus, perms: Permissions, o: { courseOwner(id: string): string | null; sessionOwner(id: string): string | null }, now = () => Date.now()) {
     this.db = db; this.bus = bus; this.perms = perms; this.courseOwner = o.courseOwner; this.sessionOwner = o.sessionOwner; this.now = now;
   }
+
+  /** Personal sync: personal and course boards. Boards merge (union of ops by op id; the reducer converges), so
+   *  drawing on two devices while apart keeps both. CLAN boards stay with the CLAN host and never sync. */
+  syncProviders(): SyncProvider[] {
+    type B = Row & { created_at: number; archived_at: number | null };
+    const mine = (owner: string, b: Pick<B, 'owner_kind' | 'owner_id'>) => b.owner_kind === 'personal' ? b.owner_id === owner : b.owner_kind === 'course' && this.courseOwner(b.owner_id) === owner;
+    const wire = (b: B) => ({ archived_at: b.archived_at, created_at: b.created_at, owner_id: b.owner_kind === 'personal' ? null : b.owner_id, owner_kind: b.owner_kind, title: b.title,
+      ops: (this.db.prepare('SELECT op FROM wb_ops WHERE board_id = ? ORDER BY op_id').all(b.id) as { op: string }[]).map((r) => JSON.parse(r.op) as unknown) });
+    const In = z.object({ archived_at: z.number().int().nullable(), created_at: z.number().int(), owner_id: z.string().max(80).nullable(), owner_kind: z.enum(['personal', 'course']), title: z.string().trim().min(1).max(120), ops: z.array(z.unknown()).max(200_000) });
+    const get = (id: string) => this.db.prepare("SELECT * FROM wb_boards WHERE id = ? AND owner_kind IN ('personal','course')").get(id) as B | undefined;
+    return [{ kind: 'board', policy: 'union',
+      all: (owner) => new Map((this.db.prepare("SELECT * FROM wb_boards WHERE owner_kind IN ('personal','course')").all() as B[]).filter((b) => mine(owner, b)).map((b) => [b.id, wire(b)])),
+      one: (owner, id) => { const b = get(id); return b && mine(owner, b) ? wire(b) : null; },
+      apply: (owner, id, payload, o) => tx(this.db, () => {
+        const cur = this.db.prepare('SELECT * FROM wb_boards WHERE id = ?').get(id) as B | undefined;
+        if (cur && !mine(owner, cur)) throw new Error('That board belongs to someone else.');
+        if (payload === null) { if (cur) this.purgeBoard(id); return; }
+        const b = In.parse(payload), ownerId = b.owner_kind === 'personal' ? owner : b.owner_id ?? '';
+        if (b.owner_kind === 'course' && this.courseOwner(ownerId) !== owner) throw new SyncDefer('course not here yet');
+        if (!cur) this.db.prepare('INSERT INTO wb_boards (id, owner_kind, owner_id, title, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, b.owner_kind, ownerId, b.title, owner, b.created_at, b.created_at);
+        else if (!o.merge) this.db.prepare('UPDATE wb_boards SET title = ?, archived_at = NULL WHERE id = ?').run(b.title, id);
+        else this.db.prepare('UPDATE wb_boards SET archived_at = NULL WHERE id = ?').run(id);
+        this.append(id, owner, b.ops); // duplicates (same op id) are skipped
+        const archived = o.merge && cur ? cur.archived_at ?? b.archived_at : b.archived_at;
+        if (archived) this.db.prepare('UPDATE wb_boards SET archived_at = ? WHERE id = ?').run(archived, id);
+      }) }];
+  }
+  private purgeBoard(id: string) { this.db.prepare('DELETE FROM wb_ops WHERE board_id = ?').run(id); this.db.prepare('DELETE FROM wb_snapshots WHERE board_id = ?').run(id); this.db.prepare('DELETE FROM wb_boards WHERE id = ?').run(id); }
   private row(id: string) { return this.db.prepare('SELECT * FROM wb_boards WHERE id = ? AND archived_at IS NULL').get(id) as Row | undefined; }
 
   // ---- host side (structural WhiteboardStore for the relay; the relay has already authorized the principal) ----

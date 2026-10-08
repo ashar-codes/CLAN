@@ -1,5 +1,7 @@
 // Composition root: the only place that knows every module. Modules receive their collaborators here and talk to each
 // other only through public APIs (modules/<name>/index.ts), events and the core services.
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { migrateModules, type Db, type ModuleSchema } from './core/db.ts';
 import { EventBus, eventsSchema } from './core/events.ts';
 import { Identity, identitySchema } from './core/identity.ts';
@@ -27,16 +29,18 @@ import { Agenda } from './modules/agenda/index.ts';
 import { AI, schema as aiSchema, type ProviderSettings } from './modules/ai/index.ts';
 import { Whiteboard, schema as whiteboardSchema } from './modules/whiteboard/index.ts';
 import { Recordings, TapeChanged, schema as recordingsSchema } from './modules/recordings/index.ts';
+import { PersonalSync, profileProvider, schema as syncSchema } from './modules/sync/index.ts';
 import type { AIProvider } from '@classroom/protocol';
 
 export const SCHEMAS: ModuleSchema[] = [eventsSchema, permissionsSchema, identitySchema, resourcesSchema, searchSchema, clansSchema, notesSchema, savedSchema, diarySchema, remindersSchema, chatSchema, captureSchema, notifySchema,
-  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema];
+  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema, syncSchema];
 
 export type ClanApp = ReturnType<typeof openClan>;
 
 /** Opens CLAN on an existing SQLite handle (the device database). `storageDir` holds Resource Store objects. */
 /** `aiProvider`: the host turns non-secret provider settings into a provider (reading the credential from its secure storage), or null. */
-export function openClan(db: Db, opts: { storageDir: string; now?: () => number; localName?: string; aiProvider?: (s: ProviderSettings) => AIProvider | null }) {
+/** `freeBytes`: free disk space for incoming synced files (the host knows its volume). */
+export function openClan(db: Db, opts: { storageDir: string; now?: () => number; localName?: string; aiProvider?: (s: ProviderSettings) => AIProvider | null; freeBytes?: () => Promise<number> }) {
   const now = opts.now ?? (() => Date.now());
   migrateModules(db, SCHEMAS);
   const bus = new EventBus(db, now);
@@ -79,6 +83,13 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   // CLAN Intelligence: reads through module APIs only; writes only via accepted proposals.
   const ai = new AI(db, { clans, courses, notes, files, saved, chat, exams, tasks, flashcards, study, recordings, reminders, store, broker: context }, permissions, opts.aiProvider ?? (() => null), now);
 
+  // Personal device sync: only the owner's personal data, each module through its own provider.
+  const sync = new PersonalSync(db, identity, { tmpDir: join(opts.storageDir, 'sync-incoming'), ingest: async (p, mime) => { await mkdir(join(opts.storageDir, 'sync-incoming'), { recursive: true }); return store.ingest(p, mime); }, freeBytes: opts.freeBytes }, now);
+  sync.register(profileProvider(identity));
+  for (const p of [notifications, courses, notes, saved, capture, diary, tasks, reminders, exams, flashcards, study, whiteboard, files, recordings].flatMap((m) => m.syncProviders())) sync.register(p);
+  const SEARCH: Record<string, string> = { note: 'notes', 'saved-item': 'saved', course: 'courses', task: 'tasks', exam: 'exams', deck: 'flashcards', tape: 'recordings' };
+  sync.onApplied((kind, id) => { if (SEARCH[kind]) search.reindex(SEARCH[kind], id); });
+
   me = identity.localUser(opts.localName);
   bus.deliverPending();
   /** Classroom history → CLASSROOM CLANs (+ their files). Idempotent; call at startup and when a class ends. */
@@ -88,7 +99,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const tick = (t = now()) => { reminders.fire(t); notifications.tick(t); };
   syncClassrooms();
 
-  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, me, syncClassrooms, tick };
+  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, me, syncClassrooms, tick };
 }
 
 export type { Principal, Scope } from './core/permissions.ts';
@@ -120,5 +131,6 @@ export type { AISettings, ProviderSettings, AIRequest, RunResult, Preview, Sourc
 export { AGENTS } from './modules/ai/index.ts';
 export type { Board, BoardOwner } from './modules/whiteboard/index.ts';
 export type { Tape, TapeEvent, TapeEventKind } from './modules/recordings/index.ts';
+export { PersonalSync, SyncAuthError, contentHash, verifyEd25519, linkProof, fpOf, SMALL_FILE, type SyncSettings, type DeviceView, type ConflictView, type SelfDevice } from './modules/sync/index.ts';
 export { clock as tapeClock } from './modules/recordings/index.ts';
 export * as ScreenShareEvents from './modules/screenshare/index.ts';

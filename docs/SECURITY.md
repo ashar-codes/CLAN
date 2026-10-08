@@ -147,6 +147,16 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
 * `pdfjs-dist` 6.3.289 (Mozilla PDF.js) parses untrusted PDFs in the main process (text layer only; font-face loading disabled),
   no font loading, 60 MB cap; it is loaded lazily on first extraction.
 
+## Personal device sync (SYNC.md)
+* Linking: a 60-bit, 2-minute, single-use code (not the CLAN join code). HMAC proofs are bound to the TLS SPKI the joiner
+  saw, both device keys and both nonces. The joiner signs, proving it holds its key. Explicit approval on a trusted
+  device; the registry is signed by trusted devices; a revocation can't be undone.
+* Sync requests: pinned TLS 1.3 to the peer's registered certificate, plus an Ed25519 signature over method, path, time,
+  nonce and body hash. Replay, skew, unknown and revoked devices are refused.
+* Scope: owner's personal data only. Never CLAN host secrets, memberships, OPAQUE material, TLS session keys, AI keys,
+  other members' messages or other users' files. Rows owned by another user are refused; Diary is opt-in.
+* Limit: revocation can't wipe a device that is already compromised or offline. Its local copy stays.
+
 ## Known gaps (tracked)
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
   code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.

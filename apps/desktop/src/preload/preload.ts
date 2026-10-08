@@ -51,6 +51,11 @@ const api: DesktopApi = {
     confirmPaperTopic: inv('ai:confirmPaperTopic'), proposeScope: inv('ai:proposeScope'), examGaps: inv('ai:examGaps'), openFile: inv('ai:openFile'),
     conversations: inv('ai:conversations'), deleteHistory: inv('ai:deleteHistory'), usage: inv('ai:usage'), rebuild: inv('ai:rebuild'),
   } as DesktopApi['ai'],
+  sync: {
+    status: inv('sync:status'), startLink: inv('sync:startLink'), cancelLink: inv('sync:cancelLink'), approve: inv('sync:approve'), reject: inv('sync:reject'), join: inv('sync:join'),
+    now: inv('sync:now'), unlink: inv('sync:unlink'), conflicts: inv('sync:conflicts'), resolve: inv('sync:resolve'), setSettings: inv('sync:setSettings'),
+    onChanged: (cb) => listen('sync:changed', () => cb()),
+  } as DesktopApi['sync'],
   board: {
     list: inv('board:list'), create: inv('board:create'), read: inv('board:read'), edit: inv('board:edit'), rename: inv('board:rename'), remove: inv('board:remove'), export: inv('board:export'),
   } as DesktopApi['board'],

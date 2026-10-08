@@ -19,6 +19,7 @@ import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
 import { registerStudy } from './study.ts';
+import { registerSync } from './sync.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
 import { registerBoards } from './board.ts';
 import { micArmed, registerMediaScheme, registerTapes } from './tape.ts';
@@ -358,6 +359,7 @@ app.whenReady().then(() => {
   registerAI(clan, aiCreds);
   registerBoards(clan);
   registerTapes(clan);
+  void registerSync(clan, keystore, () => loadProfile().deviceName).catch((e) => logError('sync', e));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

@@ -8,7 +8,8 @@
     "./node": "./src/node.ts",
     "./opaque-bridge": "./src/opaque-bridge.ts",
     "./tls": "./src/tls.ts",
-    "./peer": "./src/peer-node.ts"
+    "./peer": "./src/peer-node.ts",
+    "./sync": "./src/sync.ts"
   },
   "dependencies": {
     "@classroom/protocol": "workspace:*",

@@ -13,6 +13,7 @@ import type { Files } from '../files/index.ts';
 import type { Notes } from '../notes/index.ts';
 import type { Saved } from '../saved/index.ts';
 import type { Identity } from '../../core/identity.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'courses', prefix: 'courses',
@@ -63,6 +64,18 @@ const toCourse = (r: CRow): Course => ({ id: r.id, name: r.name, code: r.code, i
 export class Courses {
   private db: Db; private bus: EventBus; private m: { clans: Clans; notes: Notes; files: Files; saved: Saved; identity: Identity }; private now: () => number;
   constructor(db: Db, bus: EventBus, m: { clans: Clans; notes: Notes; files: Files; saved: Saved; identity: Identity }, now = () => Date.now()) { this.db = db; this.bus = bus; this.m = m; this.now = now; }
+
+  /** Personal sync: a course with its topics, lectures and references; newest edit wins (the other is kept for review).
+   *  Which CLAN a course is linked to is device-local (linking a device never grants CLAN membership). */
+  syncProviders(): SyncProvider[] {
+    return [rowProvider(this.db, { kind: 'course', policy: 'lww', table: 'courses_courses', owner: 'owner_id', exclude: ['clan_id'],
+      children: [
+        { table: 'courses_topics', fk: 'course_id', key: 'id', order: 'position, id', dependents: [{ table: 'courses_lecture_topics', fk: 'topic_id' }] },
+        { table: 'courses_lectures', fk: 'course_id', key: 'id', order: 'position, id', dependents: [{ table: 'courses_lecture_topics', fk: 'lecture_id' }] },
+        { table: 'courses_lecture_topics', fk: 'lecture_id', via: { table: 'courses_lectures', fk: 'course_id' }, order: 'lecture_id, topic_id' },
+        { table: 'courses_links', fk: 'course_id', order: 'id' },
+      ] })];
+  }
 
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can change your courses.'); return p.userId; }
   /** The course, if it is this person's. Every operation goes through here (cross-course / cross-user isolation). */

@@ -7,6 +7,7 @@ import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Permissions, type Principal, type Scope } from '../../core/permissions.ts';
 import type { SearchProvider } from '../../core/search.ts';
 import type { ContextProvider } from '../../core/context.ts';
+import { rowProvider, type SyncProvider } from '../../core/syncrows.ts';
 
 export const schema: ModuleSchema = {
   module: 'saved', prefix: 'saved',
@@ -62,6 +63,18 @@ type Raw = { id: string; owner_id: string; collection_id: string; url: string; t
 export class Saved {
   private db: Db; private bus: EventBus; private perms: Permissions; private now: () => number;
   constructor(db: Db, bus: EventBus, perms: Permissions, now = () => Date.now()) { this.db = db; this.bus = bus; this.perms = perms; this.now = now; }
+
+  /** Personal sync: custom collections and items. Built-in collections exist on every device with their own ids, so
+   *  items in them travel as `builtin:<kind>`. Shares into CLANs stay device-local. */
+  syncProviders(): SyncProvider[] {
+    const builtin = (owner: string, kind: string) => { this.ensureDefaults(owner); return (this.db.prepare('SELECT id FROM saved_collections WHERE owner_id = ? AND kind = ?').get(owner, kind) as { id: string }).id; };
+    return [
+      rowProvider(this.db, { kind: 'saved-collection', policy: 'lww', table: 'saved_collections', owner: 'owner_id', where: "kind = 'custom'", toLocal: (_o, r) => ({ ...r, kind: 'custom' }) }),
+      rowProvider(this.db, { kind: 'saved-item', policy: 'lww', table: 'saved_items', owner: 'owner_id',
+        toWire: (_o, r) => { const k = (this.db.prepare('SELECT kind FROM saved_collections WHERE id = ?').get(r.collection_id as string) as { kind: string } | undefined)?.kind; return k && k !== 'custom' ? { ...r, collection_id: `builtin:${k}` } : r; },
+        toLocal: (owner, r) => { const c = String(r.collection_id ?? 'builtin:inbox'); return { ...r, collection_id: c.startsWith('builtin:') ? builtin(owner, c.slice(8) === 'watch-later' ? 'watch-later' : 'inbox') : c }; } }),
+    ];
+  }
 
   collections(p: Principal): Collection[] {
     const u = this.ensureDefaults(userOf(p));
