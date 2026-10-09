@@ -1,0 +1,25 @@
+{
+  "platform": "Production Electron, macOS",
+  "marks": [
+    {
+      "action": "Hover the functional desk",
+      "ms": 698
+    },
+    {
+      "action": "Start Focus",
+      "ms": 2091
+    },
+    {
+      "action": "End Focus",
+      "ms": 3235
+    },
+    {
+      "action": "Open Guide",
+      "ms": 3957
+    },
+    {
+      "action": "Begin a study session",
+      "ms": 5805
+    }
+  ]
+}

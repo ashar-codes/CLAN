@@ -10,6 +10,7 @@ import { AskTab } from './Ask';
 import { MobileBoard, useLocalBoard } from '../board/Board';
 
 type Tab = 'courses' | 'notes' | 'tasks' | 'exams' | 'reminders' | 'cards' | 'session' | 'boards' | 'ask';
+export type MobileStudyTab = Tab;
 const TABS: [Tab, string][] = [['courses', 'Courses'], ['notes', 'Notes'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['reminders', 'Reminders'], ['cards', 'Cards'], ['session', 'Session'], ['boards', 'Boards'], ['ask', 'Ask CLAN']];
 
 export function StudyScreen({ initial = 'courses' }: { initial?: Tab }) {

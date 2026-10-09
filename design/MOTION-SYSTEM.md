@@ -22,3 +22,7 @@ Motion explains *where something went*. Nothing loops except the Guide's slow dr
 | Exam mode | page reveals top-down (`clip-path`), palette shifts to exam tokens |
 
 `prefers-reduced-motion: reduce` sets every duration to 0 and the send flight to 1 ms; state changes still happen.
+
+## Astra additions
+
+`packages/design/src/motion.ts` preserves native/3D equivalents of the existing duration tokens and a frame-rate-independent camera damping coefficient. The file-flight duration is now centralized (850 ms). Character arrival is 520 ms, followed by two quiet breathing cycles; Focus is still. Room and course entrances use the existing 240 ms rise/fade. Campus rendering is on demand, with a camera that stops requesting frames when settled. Reduced motion responds live, including for an explicitly selected Full experience. Minimal suppresses all CSS animation. Mobile uses a cancellable native opacity transition and no 3D scene.

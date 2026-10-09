@@ -505,3 +505,34 @@ button.link.ai-link { border: 0; }
 .link-code { font: 600 1.4rem/1.2 ui-monospace, monospace; letter-spacing: .06em; user-select: all; }
 .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .compare pre { white-space: pre-wrap; max-height: 180px; overflow: auto; margin: 4px 0 0; font-size: .85rem; }
+
+/* Astra: sunlit campus workshop. Existing semantic colors remain authoritative. */
+.space .room { border: 1px solid var(--line); }
+.space-hello { padding: 10px 0 4px; }
+.obj { filter: drop-shadow(0 3px 1px color-mix(in srgb, var(--wood-dark) 13%, transparent)); }
+.obj:hover, .obj:focus-visible { filter: drop-shadow(0 8px 4px color-mix(in srgb, var(--wood-dark) 22%, transparent)); }
+.plaza:not(.flat) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 300px)); justify-content: center; align-content: center; min-height: 330px; background: var(--campus-soft); border: 10px solid var(--floor); box-shadow: inset 0 0 0 2px var(--surface); position: relative; }
+.plaza:not(.flat)::before { content: ''; position: absolute; bottom: 18px; left: 8%; right: 8%; height: 22px; border-radius: 50%; background: var(--floor); pointer-events: none; }
+.plaza-spot { position: relative; border: 1px solid var(--line); box-shadow: 0 6px 0 var(--paper-2), var(--shadow-2); transition: transform var(--t-base) var(--ease-spring); }
+.plaza-spot:focus-within, .plaza-spot:hover { transform: translateY(-4px); }
+.plaza.empty { grid-template-columns: 1fr; }
+.scene { border: 1px solid var(--line); box-shadow: var(--shadow-1); }
+.tower .floors { border-top: 10px solid var(--c); border-radius: 14px 14px 3px 3px; box-shadow: 7px 7px 0 var(--paper-2); }
+.study-tabs { max-width: 100%; }
+.card, .page-head, .stack, .row > *, .room-with-chat > * { min-width: 0; }
+.page-head h1, .plaza-spot b, .today-row, .chat-bubble, .saved-card { overflow-wrap: anywhere; }
+.session-bar, .exam-command, .guide-panel { animation: enter var(--t-base) var(--ease-out); }
+@media (max-width: 600px) {
+  .plaza:not(.flat) { padding: 16px; border-width: 5px; }
+  .room .obj-label { opacity: 1; font-size: 15px; }
+  .tabs-main button, .study-tabs button, .room-tabs button { min-height: 44px; }
+  .wheel-pop { left: 50% !important; max-width: calc(100vw - 24px); }
+  .space-side .row { gap: 8px; }
+}
+.me-grid > *, .diary-book, .diary-text { min-width: 0; max-width: 100%; }
+.diary-text { width: 100%; }
+.me-card fieldset { min-inline-size: 0; }
+.me-card select { min-width: 0; width: 100%; max-width: 100%; }
+.me-card > * { min-width: 0; }
+@media (max-width: 850px) { .diary-active .diary-book { grid-row: 1; } }
+.course-space, .command-center { animation: enter var(--t-base) var(--ease-out); }

@@ -44,9 +44,10 @@ function BottomShape({ kind, c }: { kind: Bottom; c: string }) {
 export function CLANmate({ spec, beacon, size = 120, label }: { spec: CLANmateSpec; beacon?: BeaconState; size?: number; label?: string }) {
   const legsBare = spec.bottom === 'skirt' || spec.bottom === 'shorts';
   return (
-    <span className="c-mate" style={{ position: 'relative', display: 'inline-block', width: size * (80 / 140), height: size }} role="img" aria-label={label}>
+    <span className="c-mate" data-state={beacon ?? 'available'} style={{ position: 'relative', display: 'inline-block', width: size * (80 / 140), height: size }} role={label ? 'img' : undefined} aria-label={label} aria-hidden={!label || undefined}>
       <svg viewBox="0 0 80 140" width="100%" height="100%" aria-hidden>
         <ellipse cx="40" cy="134" rx="22" ry="4" fill="rgba(29,35,32,.14)" />
+        <g className="c-mate-body">
         {spec.backpack && <rect x="48" y="48" width="16" height="30" rx="6" fill={spec.backpack} />}
         {legsBare && <g fill={spec.skin}><rect x="28" y="96" width="9" height="30" rx="4" /><rect x="43" y="96" width="9" height="30" rx="4" /></g>}
         <BottomShape kind={spec.bottom} c={spec.bottomColor} />
@@ -62,10 +63,16 @@ export function CLANmate({ spec, beacon, size = 120, label }: { spec: CLANmateSp
         {HAIR[spec.hair](spec.hairColor)}
         <g fill="#1d2320"><circle cx="35" cy="30" r="1.6" /><circle cx="45" cy="30" r="1.6" /></g>
         <g fill="#e98a7a" opacity=".45"><circle cx="31.5" cy="34" r="2.4" /><circle cx="48.5" cy="34" r="2.4" /></g>
+        <path d="M37 36q3 3 6 0" fill="none" stroke="#603d32" strokeWidth="1.2" strokeLinecap="round" />
+        <path d="M26 54v26h5V52z" fill="#fff" opacity=".14" />
         {spec.accessory === 'glasses' && <g fill="none" stroke="#1d2320" strokeWidth="1.4"><circle cx="35" cy="30" r="4" /><circle cx="45" cy="30" r="4" /><path d="M39 30h2" /></g>}
         {spec.accessory === 'headphones' && <g fill="none" stroke="#2b2f2d" strokeWidth="3"><path d="M25 30a15 15 0 0 1 30 0" /><rect x="22" y="27" width="5" height="9" rx="2" fill="#2b2f2d" /><rect x="53" y="27" width="5" height="9" rx="2" fill="#2b2f2d" /></g>}
         {spec.accessory === 'cap' && <path d="M25 22c2-8 8-11 15-11s13 3 15 11zM40 21h22c0 3-2 4-5 4H40z" fill={spec.topColor} stroke="rgba(0,0,0,.15)" />}
         {spec.accessory === 'scarf' && <path d="M30 42h20v6H30zM44 46h6v14h-6z" fill="#e3a92f" />}
+        {(beacon === 'studying' || beacon === 'focus') && <g transform="rotate(-8 40 75)"><rect x="26" y="69" width="28" height="20" rx="2" fill="var(--burgundy)" /><path d="M40 70v17M29 73h7M44 73h7" stroke="var(--surface)" strokeWidth="1.5" /></g>}
+        {beacon === 'presenting' && <path d="M62 82l9-22" stroke={spec.skin} strokeWidth="6" strokeLinecap="round" />}
+        {beacon === 'transfer' && <g className="c-mate-parcel"><rect x="49" y="65" width="20" height="15" rx="3" fill="var(--transfer)" /><path d="M54 72h10m-4-3 4 3-4 3" fill="none" stroke="var(--surface)" strokeWidth="1.5" /></g>}
+        </g>
       </svg>
       {beacon && <span style={{ position: 'absolute', right: -size * 0.12, top: size * 0.22 }}><CLANBeacon state={beacon} size={Math.max(16, size * 0.2)} /></span>}
     </span>

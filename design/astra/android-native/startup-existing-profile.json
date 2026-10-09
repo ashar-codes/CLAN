@@ -1,0 +1,9 @@
+{
+  "platform": "Android emulator, not physical hardware",
+  "method": "3 force-stop cold activity launches with existing profile; am start -W; no pm clear",
+  "runs": [
+    "Starting: Intent { cmp=app.classroomlan.student/.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: app.classroomlan.student/.MainActivity\nTotalTime: 553\nWaitTime: 558\nComplete\n",
+    "Starting: Intent { cmp=app.classroomlan.student/.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: app.classroomlan.student/.MainActivity\nTotalTime: 686\nWaitTime: 693\nComplete\n",
+    "Starting: Intent { cmp=app.classroomlan.student/.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: app.classroomlan.student/.MainActivity\nTotalTime: 425\nWaitTime: 429\nComplete\n"
+  ]
+}

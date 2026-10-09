@@ -1,0 +1,292 @@
+{
+  "startupMs": 2181,
+  "scene": {
+    "sceneMs": 394
+  },
+  "memory": [
+    {
+      "type": "Browser",
+      "workingSetKB": 255168
+    },
+    {
+      "type": "GPU",
+      "workingSetKB": 117296
+    },
+    {
+      "type": "Utility",
+      "workingSetKB": 45120
+    },
+    {
+      "type": "Tab",
+      "workingSetKB": 200368
+    }
+  ],
+  "frame": {
+    "p50Ms": 8.30000000000291,
+    "p90Ms": 9.299999999999272,
+    "samples": 120
+  },
+  "checks": [
+    {
+      "screen": "01-my-space",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "01-my-space",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "01-my-space",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "01-my-space",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "07-diary",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "07-diary",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "07-diary",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "07-diary",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "customization": true
+    },
+    {
+      "screen": "02-commons",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "02-commons",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "02-commons",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "02-commons",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "04-knowledge-campus",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "04-knowledge-campus",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "04-knowledge-campus",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "04-knowledge-campus",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "05-course",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "05-course",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "05-course",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "05-course",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "06-saved",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "06-saved",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "06-saved",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "06-saved",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "08-exam-prep",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "08-exam-prep",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "08-exam-prep",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "08-exam-prep",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "10-whiteboard",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "10-whiteboard",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "10-whiteboard",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "10-whiteboard",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "mode-reduced",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "mode-reduced",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "mode-reduced",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "mode-reduced",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "mode": "Reduced",
+      "canvases": 0,
+      "courseAccess": false
+    },
+    {
+      "screen": "mode-minimal",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "mode-minimal",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "mode-minimal",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "mode-minimal",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "mode": "Minimal",
+      "canvases": 0,
+      "courseAccess": false
+    },
+    {
+      "reducedMotionDuration": "1e-06s"
+    },
+    {
+      "roomAvatarMatches": true
+    },
+    {
+      "screen": "03-clan-room",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "03-clan-room",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "03-clan-room",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "03-clan-room",
+      "width": 360,
+      "overflow": false
+    },
+    {
+      "screen": "09-chat",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "screen": "09-chat",
+      "width": 1024,
+      "overflow": false
+    },
+    {
+      "screen": "09-chat",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "screen": "09-chat",
+      "width": 360,
+      "overflow": false
+    }
+  ],
+  "errors": [],
+  "platform": "macOS Electron; responsive captures are not native mobile"
+}

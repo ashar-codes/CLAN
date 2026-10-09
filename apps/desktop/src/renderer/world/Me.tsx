@@ -5,6 +5,7 @@ import type { DiaryEntry, HomeView } from '../../shared.ts';
 import { api } from '../App.tsx';
 import { useLoad } from './useLoad.ts';
 import { experienceIsAuto, setExperience, type Experience } from './experience.ts';
+import { AvatarEditor, useAvatar } from './avatar';
 
 const AISettingsPanel = lazy(() => import('./ai/Settings.tsx'));
 const DevicesPanel = lazy(() => import('./devices/Devices.tsx'));
@@ -16,14 +17,15 @@ export function Me({ experience, section }: { experience: Experience; section: '
   const [h, reloadHome] = useLoad<HomeView>(api.clan.home);
   const [name, setName] = useState('');
   const [auto, setAuto] = useState(experienceIsAuto());
+  const [avatar, setAvatar] = useAvatar(h?.me.name ?? 'Me');
   useEffect(() => { if (h) setName(h.me.name); }, [h]);
   return (
-    <div className="me-grid">
+    <div className={`me-grid${section === 'diary' ? ' diary-active' : ''}`}>
       <section className="card stack me-card">
-        {h && <div className="me-mate"><CLANmate spec={mateFor(h.me.name)} size={150} label="Your CLANmate" /></div>}
+        {h && <div className="me-mate"><CLANmate spec={avatar} size={150} label="Your CLANmate" /></div>}
         <span className="eyebrow">You</span>
         <form className="row" onSubmit={async (e) => { e.preventDefault(); await api.clan.rename(name); reloadHome(); }}><input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} aria-label="Your name" /><button>Save name</button></form>
-        <p className="muted small-text">Your CLANmate’s look is generated for now; choosing your own arrives with Profiles.</p>
+        <AvatarEditor spec={avatar} onChange={setAvatar} />
         <fieldset className="experience"><legend className="eyebrow">Visual experience</legend>
           {(['full', 'reduced', 'minimal'] as const).map((e) => (
             <label key={e} className="radio"><input type="radio" name="exp" checked={!auto && experience === e} onChange={() => { setExperience(e); setAuto(false); }} />

@@ -1,8 +1,9 @@
 // Phone whiteboard: the CLAN board over the class connection, and your own boards (personal / course) stored in core on
 // the phone — one op format and one reducer everywhere (same convergence as desktop; personal boards also sync between
 // your devices). Touch: one finger draws/erases/moves/places text (by tool), two fingers pan + pinch-zoom. Stylus force
-// is used as pressure where reported. Drawn with plain Views (no SVG/canvas dependency); strokes are segment chains.
+// is used as pressure where reported. Drawn on two demand-rendered canvas layers in the installed WebView engine.
 // Edits made while disconnected wait in an outbox and are re-sent (same op ids) after the board re-syncs.
+import { CanvasLayer } from './CanvasLayer';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { PanResponder, Pressable, Text, TextInput, View, type GestureResponderEvent } from 'react-native';
 import { applyOp, emptyBoard, hit, inverse, simplify, visible, type ClientMessage, type ServerMessage, type WbBoardView, type WbObject, type WbObjectData, type WbOp } from '@classroom/protocol';
@@ -119,25 +120,23 @@ export function MobileBoard({ c, board, title }: { c: C; board: BoardModel; titl
       }
     },
   }), [board, can]); // eslint-disable-line react-hooks/exhaustive-deps
-  const objs = visible(board.s.current, 0);
-  // Committed objects re-render only when the board, viewport or selection changes — not on every finger move of a
-  // new stroke (that was the main source of jank with many strokes).
-  const erasedN = g.current?.erased.size ?? 0;
-  const layer = useMemo(() => objs.filter((o) => !(g.current?.erased.has(o.id))).map((o) => <Obj key={o.id} o={o} vp={vp} selected={o.id === sel} />), [board.v, vp, sel, erasedN]); // eslint-disable-line react-hooks/exhaustive-deps
+  const objs = useMemo(() => visible(board.s.current, 0), [board.v]);
+  const moving = g.current?.move ? board.s.current.objects.get(g.current.move.id) ?? null : null;
+  const preview: WbObjectData | null = draft && g.current ? { kind: 'stroke', page: 0, x: g.current.start[0], y: g.current.start[1], w: 0, h: 0, points: draft, color: '#17233b', width: tool === 'highlighter' ? 14 : 3, z: 0, ...(tool === 'highlighter' ? { highlighter: true } : {}) } : null;
   return (
     <View style={{ gap: 6 }} accessibilityLabel={`${title}: ${objs.length} objects`}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }} accessibilityRole="toolbar">
         {(['hand', ...(can ? ['pen', 'highlighter', 'eraser', 'select', 'text', 'sticky'] : [])] as Tool[]).map((t) =>
-          <Pressable key={t} accessibilityRole="button" accessibilityState={{ selected: tool === t }} onPress={() => setTool(t)} style={{ minHeight: 40, paddingHorizontal: 10, justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: tool === t ? c.accent : c.border }}>
+          <Pressable key={t} accessibilityRole="button" accessibilityState={{ selected: tool === t }} onPress={() => setTool(t)} style={{ minHeight: 48, paddingHorizontal: 10, justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: tool === t ? c.accent : c.border }}>
             <Text style={{ color: tool === t ? c.accent : c.text }}>{{ hand: 'Pan', pen: 'Pen', highlighter: 'Highlight', eraser: 'Erase', select: 'Select', text: 'Text', sticky: 'Sticky' }[t]}</Text></Pressable>)}
-        {can && <Pressable accessibilityRole="button" onPress={board.undo} style={{ minHeight: 40, paddingHorizontal: 10, justifyContent: 'center' }}><Text style={{ color: c.text }}>Undo</Text></Pressable>}
-        {can && sel && <Pressable accessibilityRole="button" onPress={() => { board.commit([board.op.del(sel)]); setSel(null); }} style={{ minHeight: 40, paddingHorizontal: 10, justifyContent: 'center' }}><Text style={{ color: c.danger }}>Delete</Text></Pressable>}
+        {can && <Pressable accessibilityRole="button" onPress={board.undo} style={{ minHeight: 48, paddingHorizontal: 10, justifyContent: 'center' }}><Text style={{ color: c.text }}>Undo</Text></Pressable>}
+        {can && sel && <Pressable accessibilityRole="button" onPress={() => { board.commit([board.op.del(sel)]); setSel(null); }} style={{ minHeight: 48, paddingHorizontal: 10, justifyContent: 'center' }}><Text style={{ color: c.danger }}>Delete</Text></Pressable>}
       </View>
       {!can && <Text style={{ color: c.muted }}>View only</Text>}
       {!!board.error && <Text style={{ color: c.danger }}>{board.error}</Text>}
       <View {...pan.panHandlers} testID="board-canvas" style={{ height: 420, borderRadius: 14, overflow: 'hidden', backgroundColor: '#fffdf8', borderWidth: 1, borderColor: c.border }}>
-        {layer}
-        {draft && g.current && <Obj o={{ kind: 'stroke', page: 0, x: g.current.start[0], y: g.current.start[1], w: 0, h: 0, points: draft, color: '#17233b', width: tool === 'highlighter' ? 14 : 3, z: 0, ...(tool === 'highlighter' ? { highlighter: true } : {}) } as never} vp={vp} selected={false} />}
+        <CanvasLayer objects={objs} vp={vp} selected={sel} erased={[...(g.current?.erased ?? [])]} moving={moving} draft={preview} />
+        {objs.filter((o) => (o.text || o.ref) && !g.current?.erased.has(o.id)).map((o) => <View key={o.id} accessible accessibilityLabel={o.text ?? o.ref?.title} pointerEvents="none" style={{ position: 'absolute', left: (o.x - vp.x) * vp.z, top: (o.y - vp.y) * vp.z, width: Math.max(24, o.w * vp.z), height: Math.max(24, o.h * vp.z) }} />)}
       </View>
       {sticky && <View style={{ flexDirection: 'row', gap: 6 }}>
         <TextInput autoFocus value={sticky.text} onChangeText={(t) => setSticky({ ...sticky, text: t })} placeholder={sticky.kind === 'text' ? 'Text' : 'Sticky note'} accessibilityLabel={sticky.kind === 'text' ? 'Text to place' : 'Sticky note text'} style={{ flex: 1, borderWidth: 1, borderColor: c.border, borderRadius: 10, minHeight: 44, paddingHorizontal: 8, color: c.text }} />
@@ -147,24 +146,4 @@ export function MobileBoard({ c, board, title }: { c: C; board: BoardModel; titl
       </View>}
     </View>
   );
-}
-
-/** Screen placement of one object (strokes = segment chain, capped to 300 segments for rendering). */
-function Obj({ o, vp, selected }: { o: WbObject | WbObjectData; vp: { x: number; y: number; z: number }; selected: boolean }) {
-  const X = (x: number) => (x - vp.x) * vp.z, Y = (y: number) => (y - vp.y) * vp.z;
-  const seg = (ax: number, ay: number, bx: number, by: number, w: number, key: string | number, color: string, alpha = 1) => {
-    const len = Math.hypot(bx - ax, by - ay), ang = Math.atan2(by - ay, bx - ax);
-    return <View key={key} style={{ position: 'absolute', left: (ax + bx) / 2 - len / 2, top: (ay + by) / 2 - w / 2, width: Math.max(1, len), height: w, backgroundColor: color, opacity: alpha, borderRadius: w / 2, transform: [{ rotate: `${ang}rad` }] }} />;
-  };
-  const w = Math.max(1, o.width * vp.z);
-  if (o.kind === 'stroke' && o.points) {
-    const pts = o.points.length > 300 ? o.points.filter((_, i) => i % Math.ceil(o.points!.length / 300) === 0) : o.points;
-    return <>{pts.slice(1).map(([x, y], i) => seg(X(o.x + pts[i]![0]), Y(o.y + pts[i]![1]), X(o.x + x), Y(o.y + y), w, i, o.color, o.highlighter ? 0.32 : 1))}</>;
-  }
-  if (o.kind === 'line' || o.kind === 'arrow') return seg(X(o.x), Y(o.y), X(o.x + o.w), Y(o.y + o.h), w, 0, o.color);
-  const box = { position: 'absolute' as const, left: X(Math.min(o.x, o.x + o.w)), top: Y(Math.min(o.y, o.y + o.h)), width: Math.abs(o.w) * vp.z, height: Math.abs(o.h) * vp.z, borderColor: selected ? '#1f6feb' : o.color };
-  if (o.kind === 'rect' || o.kind === 'ellipse') return <View style={{ ...box, borderWidth: w, borderRadius: o.kind === 'ellipse' ? 9999 : 0 }} />;
-  if (o.kind === 'text') return <Text style={{ position: 'absolute', left: X(o.x), top: Y(o.y), fontSize: Math.max(8, o.width * vp.z), color: o.color }}>{o.text}</Text>;
-  if (o.kind === 'sticky') return <View style={{ ...box, backgroundColor: o.fill ?? '#fde68a', padding: 6 * vp.z }}><Text style={{ fontSize: Math.max(8, 15 * vp.z), color: o.color }}>{o.text}</Text></View>;
-  return <View style={{ ...box, backgroundColor: '#ffffff', borderWidth: 1, padding: 6 * vp.z }}><Text style={{ fontSize: Math.max(8, 13 * vp.z), color: '#17233b' }} numberOfLines={2}>{o.kind === 'note' ? '✎ ' : o.kind === 'link' ? '↗ ' : '▤ '}{o.ref?.title}</Text></View>;
 }

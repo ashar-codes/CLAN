@@ -1,0 +1,17 @@
+
+ RUN  v5.0.3 /Users/ashar/clan-build/apps/desktop
+
+ ✓ e2e/peers.test.ts > teacher + two students: peer transfer, signature verified, teacher-only switch, peer disappears mid-transfer 92581ms
+ ↓ e2e/board-tape.test.ts > Study Group board: concurrent drawing, text/sticky/file card, rejoin restores, host again persists
+ ↓ e2e/board-tape.test.ts > Classroom board: students view only until the teacher lets them draw
+ ✓ e2e/board-tape.test.ts > Study Tape: session → record → markers → stop → play → jump → link → restart persists 15293ms
+ ✓ e2e/astra-canvas.test.ts > mobile canvas renders thousands of strokes, preserves marks, culls and clears its preview 4766ms
+ ✓ e2e/astra-world.test.ts > Astra object actions, responsive layout, reduced motion and GPU fallback stay usable 9065ms
+
+ Test Files  4 passed (4)
+      Tests  4 passed | 2 skipped (6)
+   Start at  11:57:12
+   Duration  127.54s (tests 98%, import 1%)
+
+
+ RUN  v5.0.3 /Users/ashar/clan-build/apps/desktop

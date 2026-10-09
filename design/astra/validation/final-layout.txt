@@ -1,0 +1,38 @@
+Scope: all 11 workspace projects
+✓ Lockfile passes supply-chain policies (verified 14h ago)
+../..                                    | Progress: resolved 0, reused 1, downloaded 0, added 0
+../..                                    |  +20  -62 ++------
+../..                                    | Progress: resolved 0, reused 77, downloaded 0, added 20, done
+
+Done in 1.8s using pnpm v11.20.0
+
+ RUN  v5.0.3 /Users/ashar/clan-build/apps/desktop
+
+ ❯ e2e/clan.test.ts (1 test | 1 failed) 27727ms
+   × Study Group: create → join by code → approve → host file → peer-assisted → remove → end 27176ms
+ ✓ e2e/astra-world.test.ts (1 test) 4903ms
+   ✓ Astra object actions, responsive layout, reduced motion and GPU fallback stay usable 4901ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  e2e/clan.test.ts > Study Group: create → join by code → approve → host file → peer-assisted → remove → end
+AssertionError: expected ' · via 1 peer' to contain 'host-signed ✓'
+
+Expected: "host-signed ✓"
+Received: " · via 1 peer"
+
+ ❯ e2e/clan.test.ts:85:15
+     83|   const via = await fB.getByTestId('file-via').textContent();
+     84|   expect(via).toMatch(/1 peer/);
+     85|   expect(via).toContain('host-signed ✓');
+       |               ^
+     86|   expect(sha(readFileSync(join(dlB, 'OS Study Group', 'Notes.pdf')))).…
+     87|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 1 passed (2)
+   Start at  16:57:43
+   Duration  33.93s (tests 98%, import 2%)

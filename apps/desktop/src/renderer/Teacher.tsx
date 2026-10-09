@@ -200,7 +200,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
       {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}
       {experience === 'minimal' && boardNode}
       <div className="room-with-chat">
-        {experience !== 'minimal' && <HostRoom board={boardNode} pres={pres} onPresent={() => setAsk((n) => n + 1)} onStopPresenter={() => pres.live && send({ t: 'present.stop', presentationId: pres.live.id })} code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={toast}
+        {experience !== 'minimal' && <HostRoom kind={info.clanType} board={boardNode} pres={pres} onPresent={() => setAsk((n) => n + 1)} onStopPresenter={() => pres.live && send({ t: 'present.stop', presentationId: pres.live.id })} code={started.code} hostName={info.hostName} members={members} resources={resources} onShared={toast}
           people={personSender(chat, (handle) => setDm({ handle, n: Date.now() }), true)}
           onRemove={(id) => send({ t: 'member.remove', memberId: id })} onBlock={(id) => confirm('Block this device from this ' + L.session + '?') && send({ t: 'member.block', memberId: id })} />}
         <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>

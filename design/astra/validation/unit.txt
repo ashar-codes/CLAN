@@ -1,0 +1,83 @@
+$ vitest run
+
+ RUN  v5.0.3 /Users/ashar/Desktop/My Projects/untitled folder
+
+{"level":20,"time":1791510345854,"pid":9046,"hostname":"Ashars-MacBook-Pro-2.local","name":"lk-rtc","msg":"Connect callback received"}
+(node:9045) Warning: Closing file descriptor 36 on garbage collection
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9045) [DEP0137] DeprecationWarning: Closing a FileHandle object on garbage collection is deprecated. Please close FileHandle objects explicitly using FileHandle.prototype.close(). In the future, an error will be thrown if a file descriptor is closed during garbage collection.
+{"level":20,"time":1791510355946,"pid":9046,"hostname":"Ashars-MacBook-Pro-2.local","name":"lk-rtc","msg":"Connect callback received"}
+{"level":20,"time":1791510360669,"pid":9046,"hostname":"Ashars-MacBook-Pro-2.local","name":"lk-rtc","msg":"Connect callback received"}
+{"level":20,"time":1791510364767,"pid":9046,"hostname":"Ashars-MacBook-Pro-2.local","name":"lk-rtc","msg":"Connect callback received"}
+(node:9045) Warning: Closing file descriptor 1073 on garbage collection
+(node:9045) Warning: Closing file descriptor 788 on garbage collection
+(node:9045) Warning: Closing file descriptor 421 on garbage collection
+(node:9045) Warning: Closing file descriptor 761 on garbage collection
+(node:9045) Warning: Closing file descriptor 760 on garbage collection
+(node:9045) Warning: Closing file descriptor 861 on garbage collection
+(node:9045) Warning: Closing file descriptor 944 on garbage collection
+(node:9045) Warning: Closing file descriptor 744 on garbage collection
+(node:9045) Warning: Closing file descriptor 828 on garbage collection
+(node:9045) Warning: Closing file descriptor 773 on garbage collection
+(node:9045) Warning: Closing file descriptor 736 on garbage collection
+(node:9045) Warning: Closing file descriptor 876 on garbage collection
+(node:9045) Warning: Closing file descriptor 881 on garbage collection
+(node:9045) Warning: Closing file descriptor 850 on garbage collection
+(node:9045) Warning: Closing file descriptor 1024 on garbage collection
+(node:9045) Warning: Closing file descriptor 812 on garbage collection
+(node:9045) Warning: Closing file descriptor 943 on garbage collection
+(node:9045) Warning: Closing file descriptor 803 on garbage collection
+(node:9045) Warning: Closing file descriptor 801 on garbage collection
+(node:9045) Warning: Closing file descriptor 685 on garbage collection
+(node:9045) Warning: Closing file descriptor 781 on garbage collection
+(node:9045) Warning: Closing file descriptor 754 on garbage collection
+(node:9045) Warning: Closing file descriptor 979 on garbage collection
+(node:9045) Warning: Closing file descriptor 678 on garbage collection
+(node:9045) Warning: Closing file descriptor 965 on garbage collection
+(node:9045) Warning: Closing file descriptor 493 on garbage collection
+(node:9045) Warning: Closing file descriptor 1041 on garbage collection
+(node:9045) Warning: Closing file descriptor 799 on garbage collection
+(node:9045) Warning: Closing file descriptor 797 on garbage collection
+(node:9045) Warning: Closing file descriptor 774 on garbage collection
+(node:9045) Warning: Closing file descriptor 657 on garbage collection
+(node:9045) Warning: Closing file descriptor 807 on garbage collection
+(node:9045) Warning: Closing file descriptor 813 on garbage collection
+(node:9045) Warning: Closing file descriptor 701 on garbage collection
+(node:9045) Warning: Closing file descriptor 951 on garbage collection
+(node:9045) Warning: Closing file descriptor 545 on garbage collection
+(node:9045) Warning: Closing file descriptor 772 on garbage collection
+(node:9045) Warning: Closing file descriptor 773 on garbage collection
+(node:9045) Warning: Closing file descriptor 775 on garbage collection
+(node:9045) Warning: Closing file descriptor 582 on garbage collection
+(node:9045) Warning: Closing file descriptor 779 on garbage collection
+(node:9045) Warning: Closing file descriptor 811 on garbage collection
+(node:9045) Warning: Closing file descriptor 812 on garbage collection
+(node:9045) Warning: Closing file descriptor 814 on garbage collection
+(node:9045) Warning: Closing file descriptor 603 on garbage collection
+(node:9045) Warning: Closing file descriptor 605 on garbage collection
+(node:9045) Warning: Closing file descriptor 810 on garbage collection
+(node:9045) Warning: Closing file descriptor 809 on garbage collection
+(node:9045) Warning: Closing file descriptor 801 on garbage collection
+(node:9045) Warning: Closing file descriptor 800 on garbage collection
+(node:9045) Warning: Closing file descriptor 535 on garbage collection
+(node:9045) Warning: Closing file descriptor 938 on garbage collection
+(node:9045) Warning: Closing file descriptor 704 on garbage collection
+(node:9045) Warning: Closing file descriptor 724 on garbage collection
+(node:9045) Warning: Closing file descriptor 1205 on garbage collection
+(node:9045) Warning: Closing file descriptor 568 on garbage collection
+(node:9045) Warning: Closing file descriptor 432 on garbage collection
+(node:9045) Warning: Closing file descriptor 433 on garbage collection
+(node:9045) Warning: Closing file descriptor 434 on garbage collection
+(node:9045) Warning: Closing file descriptor 836 on garbage collection
+(node:9045) Warning: Closing file descriptor 723 on garbage collection
+(node:9045) Warning: Closing file descriptor 725 on garbage collection
+(node:9045) Warning: Closing file descriptor 739 on garbage collection
+(node:9045) Warning: Closing file descriptor 1206 on garbage collection
+(node:9045) Warning: Closing file descriptor 1207 on garbage collection
+(node:9045) Warning: Closing file descriptor 1051 on garbage collection
+(node:9045) Warning: Closing file descriptor 888 on garbage collection
+
+ Test Files  31 passed (31)
+      Tests  307 passed (307)
+   Start at  06:45:32
+   Duration  127.98s (tests 93%, import 5%, transform 2%)

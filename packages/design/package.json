@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./tokens.css": "./src/tokens.css",
     "./palette": "./src/palette.ts",
-    "./avatar": "./src/avatar.ts"
+    "./avatar": "./src/avatar.ts",
+    "./motion": "./src/motion.ts"
   },
   "peerDependencies": {
     "react": "19.2.3"

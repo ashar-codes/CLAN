@@ -10,7 +10,8 @@
     "build:android": "expo prebuild -p android && cd android && ./gradlew assembleRelease",
     "build:ios": "expo prebuild -p ios && echo 'Open ios/*.xcworkspace in Xcode to archive'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build:bridge": "node scripts/build-opaque-bridge.mts"
+    "build:bridge": "node scripts/build-opaque-bridge.mts",
+    "build:board": "node scripts/build-board-renderer.mts"
   },
   "dependencies": {
     "@clan/core": "workspace:*",

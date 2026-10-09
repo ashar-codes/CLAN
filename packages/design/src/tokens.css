@@ -129,3 +129,31 @@
 .c-room-only { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--brick); color: #fff; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .c-room-item { background: var(--surface); color: var(--ink); border-radius: 4px; padding: 10px 8px; font: 700 10px var(--font-body); text-transform: uppercase; box-shadow: 0 2px 0 rgba(0,0,0,.18); transform: rotate(var(--r)); }
 .c-room-empty, .c-room-more { color: #fff8ec; font: 600 13px var(--font-body); text-shadow: 0 1px 0 rgba(0,0,0,.25); }
+
+/* Astra motion: finite presence gestures; no perpetual idle work. */
+:root { --t-presence: 1600ms; --t-transfer: 850ms; }
+.c-mate-body { transform-origin: 40px 128px; animation: mate-arrive var(--t-slow) var(--ease-spring) both, mate-breathe var(--t-presence) ease-in-out var(--t-slow) 2; }
+.c-mate[data-state='studying'] .c-mate-body { transform: rotate(-3deg); }
+.c-mate[data-state='focus'] .c-mate-body { animation: none; }
+.c-mate[data-state='away'] { opacity: .65; }
+.c-mate[data-state='presenting'] .c-mate-body { transform: rotate(3deg); }
+.c-mate-parcel { animation: mate-arrive var(--t-base) var(--ease-spring) both; }
+@keyframes mate-arrive { from { opacity: 0; transform: translateY(7px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes mate-breathe { 50% { transform: translateY(-1.5px) rotate(.8deg); } }
+.c-room { border: 1px solid var(--line); padding-top: 22px; box-shadow: inset 0 10px 25px color-mix(in srgb, var(--wood-dark) 8%, transparent); }
+.c-room-wall { border-radius: 18px; }
+.c-room-person { animation: mate-arrive var(--t-slow) var(--ease-out) both; }
+.c-room-person.drop { background: var(--study-soft); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0ms !important; scroll-behavior: auto !important; }
+}
+:root[data-experience='minimal'] *, :root[data-experience='minimal'] *::before, :root[data-experience='minimal'] *::after { animation: none !important; transition: none !important; }
+.c-room[data-kind='STUDY_GROUP'] { --wall: var(--study-soft); }
+.c-room[data-kind='PROJECT_TEAM'] { --wall: var(--notebook-soft); }
+.c-room[data-kind='FRIENDS'] { --wall: var(--campus-soft); }
+.c-room[data-kind='TEMPORARY'] { --wall: var(--brick-soft); }
+.c-room[data-kind='FRIENDS'] .c-room-table { border-radius: 80px; max-width: 440px; }
+.c-room[data-kind='PROJECT_TEAM'] .c-room-table { border-radius: 12px; }
+.c-room[data-kind='TEMPORARY'] .c-room-table { border-radius: 18px 18px 55px 55px; }
+.c-room-person.leaving { pointer-events: none; animation: mate-depart var(--t-slow) var(--ease-out) forwards; }
+@keyframes mate-depart { to { opacity: 0; transform: translateY(8px) scale(.94); } }

@@ -1,8 +1,9 @@
-// The Commons: people nearby around a courtyard. Distance ring = how close they actually are on the network.
+// Decorative social seating. Positions and rings never represent physical distance.
 import { useEffect, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import type { NearbyPersonViewModel } from './index.ts';
 import { Mate3D, token } from './mate3d.tsx';
+import { useSceneMotion } from './motion';
 
 const RADIUS = { here: 1.6, near: 3, far: 4.4 };
 
@@ -19,10 +20,11 @@ function Fit() {
 
 export default function CommonsScene({ people, selectedId, onSelect, onReady }: { people: NearbyPersonViewModel[]; selectedId?: string; onSelect(id: string): void; onReady?(): void }) {
   const [hover, setHover] = useState(false);
+  const motion = useSceneMotion();
   const by = { here: [] as NearbyPersonViewModel[], near: [] as NearbyPersonViewModel[], far: [] as NearbyPersonViewModel[] };
   for (const p of people) by[p.distance].push(p);
   return (
-    <Canvas camera={{ position: [0, 6.5, 8], fov: 38 }} dpr={[1, 2]} style={{ cursor: hover ? 'pointer' : 'default' }} aria-label="Commons" onCreated={() => requestAnimationFrame(() => onReady?.())}>
+    <Canvas frameloop={motion && people.length > 0 ? 'always' : 'demand'} camera={{ position: [0, 6.5, 8], fov: 38 }} dpr={[1, 1.5]} style={{ cursor: hover ? 'pointer' : 'default' }} aria-label="Commons — decorative seating, not physical locations" onCreated={() => onReady?.()}>
       <color attach="background" args={[token('--paper')]} />
       <hemisphereLight args={['#fff6e8', '#b9a990', 1.4]} />
       <directionalLight position={[4, 8, 5]} intensity={1.2} />

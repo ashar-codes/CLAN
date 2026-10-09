@@ -1,0 +1,12 @@
+
+ RUN  v5.0.3 /Users/ashar/clan-build/apps/desktop
+
+ ✓ e2e/screen.test.ts > Study Group: member presents → host wall shows live frames → switch source → stop → wall returns 36939ms
+ ✓ e2e/screen.test.ts > Classroom: student requests → host allows → student presents → host stops it 33513ms
+ ✓ e2e/screen.test.ts > Minimal experience still shows the presentation; nothing is captured without an explicit pick (server-side refusal: media.test.ts) 16906ms
+ ✓ e2e/astra-world.test.ts > Astra object actions, responsive layout, reduced motion and GPU fallback stay usable 3975ms
+
+ Test Files  2 passed (2)
+      Tests  4 passed (4)
+   Start at  12:00:25
+   Duration  93.31s (tests 99%, import 1%)

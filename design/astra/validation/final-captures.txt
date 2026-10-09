@@ -1,0 +1,13 @@
+{
+  "startupMs": 2181,
+  "scene": {
+    "sceneMs": 394
+  },
+  "frame": {
+    "p50Ms": 8.30000000000291,
+    "p90Ms": 9.299999999999272,
+    "samples": 120
+  },
+  "errors": [],
+  "overflow": []
+}

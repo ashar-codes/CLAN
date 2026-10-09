@@ -4,6 +4,7 @@ import { mateFor, RoomStage, type RoomPerson } from '@clan/design';
 import type { Member, ResourceView } from '@classroom/protocol';
 import { api } from '../App.tsx';
 import { flyPacket } from './flight.ts';
+import { useAvatar } from './avatar';
 import { RoomSurface, type Presentation } from './Presentation.tsx';
 
 const KIND = (m: string) => (/pdf/.test(m) ? 'pdf' : /image/.test(m) ? 'img' : /video/.test(m) ? 'video' : /zip|compressed/.test(m) ? 'zip' : /presentation|powerpoint/.test(m) ? 'slides' : 'file');
@@ -54,15 +55,16 @@ function personActions(a: PersonActions | undefined, p: RoomPerson & { handle?: 
   ];
 }
 
-export function HostRoom({ code, hostName, members, resources, onRemove, onBlock, onShared, pres, onPresent, onStopPresenter, people: chatPeople, board }: {
+export function HostRoom({ code, hostName, members, resources, onRemove, onBlock, onShared, pres, onPresent, onStopPresenter, people: chatPeople, board, kind }: {
   code: string; hostName: string | null; members: Member[]; resources: { id: string; name: string; mime: string }[];
   onRemove(id: string): void; onBlock(id: string): void; onShared(msg: string): void;
-  pres: Presentation; onPresent(): void; onStopPresenter(): void; people?: PersonActions; board?: ReactNode;
+  pres: Presentation; onPresent(): void; onStopPresenter(): void; people?: PersonActions; board?: ReactNode; kind?: string;
 }) {
   const [sel, setSel] = useState<{ p: RoomPerson & { handle?: string }; at: DOMRect; m?: Member } | null>(null);
   const roster = members.filter((m) => m.status === 'approved');
+  const [avatar] = useAvatar(hostName ?? 'host');
   const people: (RoomPerson & { handle?: string })[] = [
-    { id: 'host', name: hostName ?? 'You', spec: mateFor(hostName ?? 'host'), beacon: pres.live?.presenter === 'host' ? 'presenting' : 'available', host: true, you: true },
+    { id: 'host', name: hostName ?? 'You', spec: avatar, beacon: pres.live?.presenter === 'host' ? 'presenting' : 'available', host: true, you: true },
     ...roster.map((m) => ({ id: m.id, handle: m.handle, name: m.fullName, spec: mateFor(m.fullName), beacon: pres.live?.presenter === m.id ? 'presenting' as const : m.connected ? 'available' as const : 'away' as const })),
   ];
   const drop = async (files: File[]) => {
@@ -73,7 +75,7 @@ export function HostRoom({ code, hostName, members, resources, onRemove, onBlock
   };
   return (
     <>
-      <RoomStage people={people} items={resources.map((r) => ({ id: r.id, name: r.name, kind: KIND(r.mime) }))} selected={sel?.p.id}
+      <RoomStage kind={kind} people={people} items={resources.map((r) => ({ id: r.id, name: r.name, kind: KIND(r.mime) }))} selected={sel?.p.id}
         wall={<RoomSurface mode={pres.live ? 'SCREEN_SHARE' : board ? 'WHITEBOARD' : 'DEFAULT'} screen={pres.live ? { pres, live: pres.live } : undefined} board={board}><div className="wall-code"><span>Join with</span><b aria-label="Join code" className="c-num">{code.slice(0, 3)} {code.slice(3)}</b><span>in the CLAN app · table = everyone · a CLANmate = only them</span></div></RoomSurface>}
         dropLabel="Drop files here to share with everyone" onDropFiles={drop}
         onDropOnPerson={chatPeople ? (p, files) => void sendToPerson(chatPeople, people.find((x) => x.id === p.id)!, files, onShared) : undefined}
@@ -95,14 +97,15 @@ export function HostRoom({ code, hostName, members, resources, onRemove, onBlock
   );
 }
 
-export function MemberRoom({ hostName, hostLabel, people, resources, pres, presenterName, actions, onTableDrop, onToast, board }: {
+export function MemberRoom({ hostName, hostLabel, people, resources, pres, presenterName, actions, onTableDrop, onToast, board, kind }: {
   hostName: string | null; hostLabel: string; people: { name: string; host: boolean; connected: boolean; handle?: string }[] | null; resources: ResourceView[];
-  pres: Presentation; presenterName: string | null; actions?: PersonActions & { me: string | null }; board?: ReactNode;
+  pres: Presentation; presenterName: string | null; actions?: PersonActions & { me: string | null }; board?: ReactNode; kind?: string;
   /** Members who may share files: dropping on the table shares with everyone. */
   onTableDrop?(files: File[]): Promise<string>; onToast?(m: string): void;
 }) {
   const [arrived, setArrived] = useState<string | null>(null);
   const [youName, setYou] = useState('You');
+  const [avatar] = useAvatar(youName);
   const [sel, setSel] = useState<{ p: RoomPerson & { handle?: string }; at: DOMRect } | null>(null);
   useEffect(() => { api.getProfile().then((p) => p.fullName && setYou(p.fullName)).catch(() => {}); }, []);
   const seen = useRef(new Set<string>());
@@ -110,7 +113,7 @@ export function MemberRoom({ hostName, hostLabel, people, resources, pres, prese
   const list: (RoomPerson & { handle?: string })[] = (people && people.length ? people : [{ name: hostName ?? hostLabel, host: true, connected: true }, { name: youName, host: false, connected: true }])
     .map((p, i) => {
       const you = !p.host && (actions?.me ? 'handle' in p && p.handle === actions.me : p.name === youName);
-      return { id: p.host ? 'host' : you ? 'you' : `m${i}`, handle: 'handle' in p ? p.handle : undefined, name: p.host ? (hostName ?? p.name) : p.name, spec: mateFor(p.host ? (hostName ?? 'host') : p.name), beacon: pres.live && (p.host ? pres.live.presenter === 'host' : p.name === presenterName) ? 'presenting' as const : p.connected ? 'available' as const : 'away' as const, host: p.host, you };
+      return { id: p.host ? 'host' : you ? 'you' : `m${i}`, handle: 'handle' in p ? p.handle : undefined, name: p.host ? (hostName ?? p.name) : p.name, spec: you ? avatar : mateFor(p.host ? (hostName ?? 'host') : p.name), beacon: pres.live && (p.host ? pres.live.presenter === 'host' : p.name === presenterName) ? 'presenting' as const : p.connected ? 'available' as const : 'away' as const, host: p.host, you };
     });
   useEffect(() => api.onFileState((s) => {
     const r = resources.find((x) => x.id === s.resourceId);
@@ -129,7 +132,7 @@ export function MemberRoom({ hostName, hostLabel, people, resources, pres, prese
   });
   return (
     <>
-      <RoomStage people={list} items={resources.filter((r) => !r.direct).map((r) => ({ id: r.id, name: r.name, kind: KIND(r.mime) }))} selected={sel?.p.id}
+      <RoomStage kind={kind} people={list} items={resources.filter((r) => !r.direct).map((r) => ({ id: r.id, name: r.name, kind: KIND(r.mime) }))} selected={sel?.p.id}
         dropLabel={tableDrop ? 'Drop files here to share with everyone' : undefined} onDropFiles={tableDrop}
         onDropOnPerson={actions?.canSendFiles ? (p, files) => { const x = list.find((y) => y.id === p.id); if (x?.handle) void sendToPerson(actions, x, files, toast); } : undefined}
         onPerson={actions ? (p, el) => setSel({ p: list.find((x) => x.id === p.id)!, at: el.getBoundingClientRect() }) : undefined}

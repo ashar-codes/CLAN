@@ -92,3 +92,28 @@ interrupted/corrupted/large/low-space files.
 * **macOS throttling:** processes started from a background or automation shell get background QoS. Under memory
   pressure that throttles the emulator and the E2E Electron apps until hooks and quits time out. Run them from a
   normal terminal, or through `launchctl submit` as above.
+
+## Astra visual phase
+
+Phase 12 evidence is in [design/astra/REPORT.md](../design/astra/REPORT.md), including the preserved 307-test suite,
+new motion/canvas/fallback checks, desktop E2E retries, four production viewport sizes and native Android measurements.
+The mobile board now uses two demand-rendered canvases through the installed WebView; the historical View-renderer
+numbers above remain the baseline. Read the report's sample-window and separate-WebView-process caveats before comparing
+frame time or memory. Emulator evidence does not establish physical-device performance.
+
+Reproduction (serialize tests which create real CLAN hosts):
+
+```sh
+pnpm --filter @classroom/mobile build:board
+pnpm typecheck
+pnpm test
+pnpm build:desktop
+pnpm test:e2e
+node apps/desktop/scripts/astra-qa.ts
+node apps/desktop/scripts/astra-motion-capture.ts
+apps/mobile/scripts/android-dev.sh --release
+python3 apps/mobile/e2e/android_board_bench.py
+python3 apps/mobile/e2e/android_cross_device.py
+```
+
+Android scripts reset the disposable emulator app profile. Do not use a personal-device profile for these runs.

@@ -1,0 +1,104 @@
+
+ RUN  v5.0.3 /Users/ashar/Desktop/My Projects/untitled folder/apps/desktop
+
+ × e2e/peers.test.ts > teacher + two students: peer transfer, signature verified, teacher-only switch, peer disappears mid-transfer 24772ms
+   → locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+  - waiting for getByText('Waiting for the teacher') to be visible
+
+ ✓ e2e/screen.test.ts > Study Group: member presents → host wall shows live frames → switch source → stop → wall returns 34785ms
+ ✓ e2e/screen.test.ts > Classroom: student requests → host allows → student presents → host stops it 30838ms
+ ✓ e2e/screen.test.ts > Minimal experience still shows the presentation; nothing is captured without an explicit pick (server-side refusal: media.test.ts) 11573ms
+ ✓ e2e/board-tape.test.ts > Study Group board: concurrent drawing, text/sticky/file card, rejoin restores, host again persists 11669ms
+ ✓ e2e/board-tape.test.ts > Classroom board: students view only until the teacher lets them draw 6565ms
+ × e2e/board-tape.test.ts > Study Tape: session → record → markers → stop → play → jump → link → restart persists 18769ms
+   → expected 0 to be greater than 1
+ ✓ e2e/chat.test.ts > Study Group: group chat, reply, send to one member only, table share, direct conversation, re-host keeps history 14195ms
+ ✓ e2e/chat.test.ts > Classroom: a student sees only their CLAN’s conversation, can message the teacher, and cannot send files 10151ms
+ ✓ e2e/chat.test.ts > clan:// intake: a link from another app lands in the Inbox; malformed or dangerous payloads are ignored 1188ms
+ ✓ e2e/join.test.ts > secure join, approve, files, assignment + signed receipt, MITM/downgrade/clone rejected, device-key rejoin 18253ms
+ ✓ e2e/clan.test.ts > Study Group: create → join by code → approve → host file → peer-assisted → remove → end 11127ms
+ ✓ e2e/direct.test.ts > Host again over Direct (mock): code → BLE bootstrap → Wi-Fi package → OPAQUE/TLS → approve → files (host + peer) → end removes the network 14419ms
+ ✓ e2e/study.test.ts > Study Engine: course → … → focus session → Exam Command Center → restart persists 8634ms
+ ✓ e2e/study.test.ts > Classroom → linked Course → assignment appears in Course and Today, not as a Task 3195ms
+ ✓ e2e/sync.test.ts > My Devices: link, sync, offline edits on both, resolve, unlink, refused 8143ms
+ ✓ e2e/ai.test.ts > Ask → Document → Compare → Quiz → drafts → Exam Coach → accept → restart 22643ms
+ ✓ e2e/ai.test.ts > security: unrelated CLAN and Diary without permission are refused through the real bridge 1606ms
+ ✓ e2e/mobile-bridge.test.ts > bundled bridge page pairs with the real server (correct code joins, wrong code refused, unknown ops rejected) 2046ms
+ ↓ e2e/perf.test.ts > PERF whiteboard render
+ ↓ e2e/perf.test.ts > PERF Study Tape recording 720p / 1080p
+ × e2e/astra-world.test.ts > Astra object actions, responsive layout, reduced motion and GPU fallback stay usable 4852ms
+   → expected [ 'Your shelves' ] to include 'Saved'
+ ✓ e2e/astra-canvas.test.ts > mobile canvas renders thousands of strokes, preserves marks, culls and clears its preview 2274ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  e2e/screen.test.ts [ e2e/screen.test.ts ]
+Error: Hook timed out in 30000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ e2e/screen.test.ts:11:1
+      9| const apps: ElectronApplication[] = [];
+     10| const dirs: string[] = [];
+     11| afterAll(async () => { await Promise.all(apps.map((a) => a.close().cat…
+       | ^
+     12| async function launch() {
+     13|   const userData = mkdtempSync(join(tmpdir(), 'clan-')); dirs.push(use…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  e2e/astra-world.test.ts > Astra object actions, responsive layout, reduced motion and GPU fallback stay usable
+AssertionError: expected [ 'Your shelves' ] to include 'Saved'
+ ❯ e2e/astra-world.test.ts:17:92
+     15|    await tab('My Space');
+     16|    const button = p.locator('svg.room').getByRole('button', { name: ne…
+     17|    await button.press('Enter'); await expect.poll(() => p.locator('h1'…
+       |                                                                                            ^
+     18|   }
+     19|   await tab('My Space'); await p.getByRole('button', { name: 'Journal:…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ e2e/astra-world.test.ts:17:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  e2e/board-tape.test.ts > Study Tape: session → record → markers → stop → play → jump → link → restart persists
+AssertionError: expected 0 to be greater than 1
+ ❯ e2e/board-tape.test.ts:174:126
+    172|   await expect.poll(() => p.getByTestId('tape-video').evaluate((v: HTM…
+    173|   await p.getByTestId('tape-event').filter({ hasText: '📝' }).getByRol…
+    174|   await expect.poll(() => p.getByTestId('tape-video').evaluate((v: HTM…
+       |                                                                                                                              ^
+    175|   await p.getByTestId('tape-player').getByLabel('Lecture', { exact: tr…
+    176|   await expect.poll(() => p.evaluate(async (l) => (await window.classr…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ e2e/board-tape.test.ts:174:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  e2e/peers.test.ts > teacher + two students: peer transfer, signature verified, teacher-only switch, peer disappears mid-transfer
+TimeoutError: locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+  - waiting for getByText('Waiting for the teacher') to be visible
+
+ ❯ joinAs e2e/peers.test.ts:37:51
+     35|   await page.locator('.code-input').fill(code);
+     36|   await page.getByRole('button', { name: 'Join', exact: true }).click(…
+     37|   await page.getByText('Waiting for the teacher').waitFor({ timeout: 1…
+       |                                                   ^
+     38| }
+     39|
+ ❯ e2e/peers.test.ts:53:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { log: [ '  - waiting for getByText('Waiting for the teacher') to be visible' ] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  4 failed | 9 passed | 1 skipped (14)
+      Tests  3 failed | 18 passed | 2 skipped (23)
+   Start at  11:51:21
+   Duration  333.20s (tests 98%, import 2%)

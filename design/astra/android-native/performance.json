@@ -1,0 +1,60 @@
+{
+  "platform": "Android emulator, not physical hardware",
+  "coldActivity": "Starting: Intent { cmp=app.classroomlan.student/.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: app.classroomlan.student/.MainActivity\nTotalTime: 4851\nWaitTime: 4940\nComplete\n",
+  "rows": [
+    {
+      "addedStrokes": 80,
+      "hostObjects": 108,
+      "sampleFrames": 118,
+      "p50Ms": 24.934475,
+      "p90Ms": 35.942681,
+      "androidSummary": [
+        "Janky frames: 141 (39.94%)",
+        "50th percentile: 28ms",
+        "90th percentile: 53ms",
+        "Janky frames: 141 (39.94%)",
+        "50th percentile: 28ms",
+        "90th percentile: 53ms"
+      ],
+      "pssSummary": [
+        "TOTAL PSS:   172669            TOTAL RSS:   345872      TOTAL SWAP (KB):        0"
+      ]
+    },
+    {
+      "addedStrokes": 920,
+      "hostObjects": 1058,
+      "sampleFrames": 119,
+      "p50Ms": 26.455724,
+      "p90Ms": 41.454413,
+      "androidSummary": [
+        "Janky frames: 130 (34.85%)",
+        "50th percentile: 24ms",
+        "90th percentile: 40ms",
+        "Janky frames: 130 (34.85%)",
+        "50th percentile: 24ms",
+        "90th percentile: 40ms"
+      ],
+      "pssSummary": [
+        "TOTAL PSS:   176755            TOTAL RSS:   350376      TOTAL SWAP (KB):        0"
+      ]
+    },
+    {
+      "addedStrokes": 4000,
+      "hostObjects": 5088,
+      "sampleFrames": 119,
+      "p50Ms": 31.18036,
+      "p90Ms": 51.809253,
+      "androidSummary": [
+        "Janky frames: 110 (34.48%)",
+        "50th percentile: 30ms",
+        "90th percentile: 48ms",
+        "Janky frames: 110 (34.48%)",
+        "50th percentile: 30ms",
+        "90th percentile: 48ms"
+      ],
+      "pssSummary": [
+        "TOTAL PSS:   209696            TOTAL RSS:   384880      TOTAL SWAP (KB):        0"
+      ]
+    }
+  ]
+}

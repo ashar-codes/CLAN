@@ -1,0 +1,8 @@
+
+ RUN  v5.0.3 /Users/ashar/Desktop/My Projects/untitled folder
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  11:51:22
+   Duration  720ms (transform 73%, setup 18%, worker 4%, import 3%, tests 1%)

@@ -1,0 +1,1 @@
+$ tsc -p tsconfig.json && tsc -p apps/desktop/tsconfig.json && tsc -p apps/mobile/tsconfig.json && tsc -p apps/visual-lab/tsconfig.json

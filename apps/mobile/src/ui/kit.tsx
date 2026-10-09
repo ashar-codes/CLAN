@@ -1,10 +1,11 @@
-// CLAN's phone kit: the shared palette, room-like headers and a compact CLANmate — no 3D, no animation. Touch targets
+// CLAN's phone kit: the shared palette, room-like headers and a compact CLANmate — lightweight scenes and reduced-motion-aware entry. Touch targets
 // are ≥ 48 dp, every control has an accessibility label, and data reads come straight from @clan/core.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Platform, Pressable, ScrollView, Text, TextInput, useColorScheme, View, type TextInputProps } from 'react-native';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { AccessibilityInfo, Animated, Platform, Pressable, ScrollView, Text, TextInput, useColorScheme, View, type TextInputProps } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { dark, light } from '@clan/design/palette';
 import { mateFor } from '@clan/design/avatar';
+import { MOTION } from '@clan/design/motion';
 
 const theme = (p: typeof light | typeof dark) => ({ bg: p.paper, bg2: p.paper2, surface: p.surface, text: p.ink, text2: p.ink2, muted: p.ink3, border: p.line, accent: p.ink, danger: p.brick,
   ok: p.campus, warn: p.notebook, wall: p.wall, floor: p.floor, wood: p.wood, study: p.study, ai: p.ai, transfer: p.transfer, burgundy: p.burgundy });
@@ -29,7 +30,15 @@ export function act(f: () => unknown): string | null { try { const r = f(); if (
 // ---- layout ----
 export function Screen({ children }: { children: ReactNode }) {
   const c = useC();
-  return <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 96 }} keyboardShouldPersistTaps="handled">{children}</ScrollView>;
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    let mounted = true;
+    const stop = () => { opacity.stopAnimation(); opacity.setValue(1); };
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', stop);
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduced) => { if (!mounted || reduced) return; opacity.setValue(.7); Animated.timing(opacity, { toValue: 1, duration: MOTION.base, useNativeDriver: true }).start(); });
+    return () => { mounted = false; stop(); sub.remove(); };
+  }, [opacity]);
+  return <Animated.View style={{ flex: 1, opacity }}><ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 96 }} keyboardShouldPersistTaps="handled">{children}</ScrollView></Animated.View>;
 }
 export const H1 = ({ children }: { children: ReactNode }) => { const c = useC(); return <Text accessibilityRole="header" style={{ color: c.text, fontSize: 26, fontWeight: '800' }}>{children}</Text>; };
 export const H2 = ({ children }: { children: ReactNode }) => { const c = useC(); return <Text accessibilityRole="header" style={{ color: c.text, fontSize: 17, fontWeight: '700' }}>{children}</Text>; };
@@ -106,6 +115,10 @@ export function Mate({ name, size = 44 }: { name: string; size?: number }) {
     <View accessible accessibilityLabel={`${name}'s CLANmate`} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: m.topColor, overflow: 'hidden', alignItems: 'center' }}>
       <View style={{ position: 'absolute', top: 6 * u, width: 22 * u, height: 12 * u, borderTopLeftRadius: 11 * u, borderTopRightRadius: 11 * u, backgroundColor: m.hairColor }} />
       <View style={{ marginTop: 9 * u, width: 18 * u, height: 18 * u, borderRadius: 9 * u, backgroundColor: m.skin }} />
+      <View style={{ position: 'absolute', top: 17 * u, left: 17 * u, width: 2 * u, height: 2 * u, borderRadius: u, backgroundColor: '#17233b' }} />
+      <View style={{ position: 'absolute', top: 17 * u, right: 17 * u, width: 2 * u, height: 2 * u, borderRadius: u, backgroundColor: '#17233b' }} />
+      {(m.hair === 'long' || m.hair === 'bob') && <View style={{ position: 'absolute', top: 10 * u, left: 10 * u, height: (m.hair === 'long' ? 22 : 15) * u, width: 5 * u, borderRadius: 3 * u, backgroundColor: m.hairColor }} />}
+      {m.hair === 'bun' && <View style={{ position: 'absolute', top: 2 * u, width: 8 * u, height: 8 * u, borderRadius: 4 * u, backgroundColor: m.hairColor }} />}
       <View style={{ marginTop: 2 * u, width: 30 * u, height: 16 * u, borderTopLeftRadius: 12 * u, borderTopRightRadius: 12 * u, backgroundColor: m.topColor, borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)' }} />
     </View>
   );
@@ -114,12 +127,13 @@ export function Mate({ name, size = 44 }: { name: string; size?: number }) {
 export function RoomBand({ title, sub, right }: { title: string; sub?: string; right?: ReactNode }) {
   const c = useC();
   return (
-    <View accessibilityRole="header" accessibilityLabel={`${title}${sub ? `, ${sub}` : ''}`} style={{ borderRadius: 20, overflow: 'hidden', backgroundColor: c.wall }}>
+    <View accessibilityRole="header" accessibilityLabel={`${title}${sub ? `, ${sub}` : ''}`} style={{ borderRadius: 24, overflow: 'hidden', backgroundColor: c.wall, borderWidth: 1, borderColor: c.border }}>
+      <View accessible={false} importantForAccessibility="no-hide-descendants" style={{ position: 'absolute', right: 12, top: 10, width: 100, height: 100, borderRadius: 50, backgroundColor: c.surface, opacity: .5 }} />
       <View style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 24, fontWeight: '800' }}>{title}</Text>{sub ? <Text style={{ color: c.text2 }}>{sub}</Text> : null}</View>
         {right}
       </View>
-      <View style={{ height: 10, backgroundColor: c.wood }} />
+      <View style={{ height: 7, backgroundColor: c.wood }} /><View style={{ height: 12, backgroundColor: c.floor }} />
     </View>
   );
 }

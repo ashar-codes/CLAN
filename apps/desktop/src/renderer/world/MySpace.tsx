@@ -6,6 +6,7 @@ import type { AgendaItem, HomeView } from '../../shared.ts';
 import { openItem, useStudy } from './study/common.tsx';
 import { useRecorder } from './tape/recorder.tsx';
 import type { Experience } from './experience.ts';
+import { useAvatar } from './avatar';
 
 export type SpaceTarget = 'commons' | 'clans' | 'study' | 'notes' | 'saved' | 'me' | 'diary' | 'guide' | 'exams' | 'board' | 'tasks' | `course:${string}`;
 
@@ -27,6 +28,7 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
   h: HomeView; nearby: number; beacon: BeaconState; experience: Experience; go(t: SpaceTarget): void; quick: ReactNode;
 }) {
   const { notes, saved, courses } = h.library;
+  const [avatar] = useAvatar(h.me.name);
   const books = [
     ...Array.from({ length: Math.min(courses, 4) }, () => 'var(--burgundy)'),
     ...Array.from({ length: Math.min(notes, 5) }, () => 'var(--study)'),
@@ -47,11 +49,26 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
           <defs>
             <linearGradient id="win" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--window)" /><stop offset="1" stopColor="var(--notebook-soft)" /></linearGradient>
             <radialGradient id="lamp" cx=".5" cy=".5" r=".5"><stop offset="0" stopColor="var(--notebook)" stopOpacity=".55" /><stop offset="1" stopColor="var(--notebook)" stopOpacity="0" /></radialGradient>
+            <linearGradient id="room-light" x1="1" y1="0" x2="0" y2="1"><stop stopColor="var(--surface)" stopOpacity=".65" /><stop offset="1" stopColor="var(--surface)" stopOpacity="0" /></linearGradient>
           </defs>
           <rect width="1000" height="380" fill="var(--wall)" />
           <rect y="380" width="1000" height="140" fill="var(--floor)" />
+          <g aria-hidden>
+            <path d="M0 0l35 35v345L0 420zM1000 0l-30 35v345l30 40z" fill="var(--wood-dark)" opacity=".08" />
+            <rect x="35" y="35" width="935" height="345" rx="16" fill="url(#room-light)" />
+            {[410, 450, 500].map((y) => <path key={y} d={`M0 ${y}h1000`} stroke="var(--wood-dark)" opacity=".12" />)}
+            {[80, 250, 450, 670, 880].map((x) => <path key={x} d={`M${x} 380l${(x - 500) * .2} 140`} stroke="var(--wood-dark)" opacity=".1" />)}
+            <path d="M580 204l160 0 155 246-330 0z" fill="var(--surface)" opacity=".24" />
+            <ellipse cx="575" cy="464" rx="225" ry="35" fill="var(--study-soft)" />
+            <ellipse cx="575" cy="464" rx="207" ry="27" fill="none" stroke="var(--surface)" strokeWidth="3" opacity=".65" />
+            <ellipse cx="155" cy="397" rx="118" ry="13" fill="var(--wood-dark)" opacity=".12" />
+            <ellipse cx="858" cy="500" rx="60" ry="10" fill="var(--wood-dark)" opacity=".12" />
+            <path d="M807 380l8-47h45l7 47z" fill="var(--brick)" />
+            <path d="M837 336v-72" stroke="var(--campus)" strokeWidth="5" />
+            <path d="M837 306c-42 0-47-38-47-38 38-3 47 38 47 38M838 291c37 0 42-39 42-39-32 0-42 39-42 39M838 326c32 0 39-28 39-28-33-4-39 28-39 28" fill="var(--campus)" />
+          </g>
           <path d="M0 380h1000" stroke="var(--line)" strokeWidth="6" />
-          <g aria-hidden><rect x="575" y="60" width="190" height="140" rx="10" fill="url(#win)" stroke="var(--line)" strokeWidth="8" /><path d="M670 60v140M575 130h190" stroke="var(--line)" strokeWidth="6" /></g>
+          <g aria-hidden><rect x="575" y="60" width="190" height="140" rx="20" fill="url(#win)" stroke="var(--surface)" strokeWidth="10" /><circle cx="715" cy="94" r="18" fill="var(--surface)" opacity=".7" /><path d="M580 170q40-32 80 0t100-10v35H580z" fill="var(--campus-soft)" /><path d="M670 60v140M575 130h190" stroke="var(--surface)" strokeWidth="6" /><rect x="562" y="200" width="216" height="10" rx="5" fill="var(--wood)" /></g>
 
           <Obj label="Library" hint={`${notes} notes, ${saved} saved, ${courses} courses`} onGo={() => go('study')}>
             <rect x="56" y="110" width="210" height="282" rx="8" fill="var(--wood)" /><rect x="66" y="120" width="190" height="262" fill="var(--wood-dark)" />
@@ -113,7 +130,7 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
           </Obj>
 
           <Obj label="You" hint="profile and settings" onGo={() => go('me')}>
-            <foreignObject x="250" y="300" width="130" height="190"><CLANmate spec={mateFor(h.me.name)} beacon={beacon} size={170} /></foreignObject>
+            <foreignObject x="250" y="300" width="130" height="190"><CLANmate spec={avatar} beacon={beacon} size={170} /></foreignObject>
           </Obj>
         </svg>
       )}

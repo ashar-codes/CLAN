@@ -52,6 +52,15 @@ createServer((req, res) => {
       if (u === '/chat') { send({ t: 'chat.send', id: randomUUID(), thread: { kind: 'group' }, body: b.body }); return json(res, { ok: true }); }
       if (u === '/wall') { send({ t: 'wb.wall', mode: b.mode ?? 'WHITEBOARD', takeover: true }); send({ t: 'wb.memberEdit', on: true }); return json(res, { ok: true }); }
       if (u === '/draw') { send({ t: 'wb.ops', ops: [{ t: 'put', id: randomUUID(), obj: randomUUID(), clock: ++wbClock, data: { kind: 'sticky', page: 0, x: 40, y: 40, w: 170, h: 120, color: '#17233b', fill: '#fde68a', width: 1, z: 1, text: b.text ?? 'From the host' } }] }); return json(res, { ok: true }); }
+      // Test-only loopback controller: same validated operations as an ordinary host drawing.
+      if (u === '/strokes') {
+        const count = Math.max(0, Math.min(10000, Math.floor(Number(b.count) || 0)));
+        for (let i = 0; i < count; i += 20) {
+          send({ t: 'wb.ops', ops: Array.from({ length: Math.min(20, count - i) }, (_, k) => ({ t: 'put', id: randomUUID(), obj: randomUUID(), clock: ++wbClock, data: { kind: 'stroke', page: 0, x: ((i + k) % 40) * 12, y: Math.floor((i + k) / 40) % 60 * 10, w: 0, h: 0, points: Array.from({ length: 24 }, (_, j) => [j * .4, Math.sin(j * .5) * 3]), color: '#17233b', width: 1, z: i + k } })) });
+          if (i % 20 === 0) await new Promise((r) => setTimeout(r, 50));
+        }
+        return json(res, { sent: count });
+      }
       if (u === '/file') return json(res, await s.shareFile(b.path, b.to ?? 'clan'));
       json(res, { error: 'not found' }, 404);
     } catch (e) { json(res, { error: (e as Error).message }, 500); }

@@ -7,7 +7,8 @@ const KEY = 'clan.experience';
 
 function auto(): Experience {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return 'reduced';
-  try { const c = document.createElement('canvas'); if (!(c.getContext('webgl2') ?? c.getContext('webgl'))) return 'reduced'; } catch { return 'reduced'; }
+  if (matchMedia('(max-width: 600px)').matches) return 'reduced';
+  try { const c = document.createElement('canvas'); const gl = c.getContext('webgl2') ?? c.getContext('webgl'); if (!gl) return 'reduced'; gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { return 'reduced'; }
   return 'full';
 }
 const read = (): Experience | null => { try { const v = localStorage.getItem(KEY); return v === 'full' || v === 'reduced' || v === 'minimal' ? v : null; } catch { return null; } };
@@ -27,6 +28,12 @@ export const experienceIsAuto = () => read() === null;
 
 export function useExperience(): Experience {
   const [e, setE] = useState(current);
-  useEffect(() => { subs.add(setE); return () => { subs.delete(setE); }; }, []);
+  useEffect(() => {
+    subs.add(setE);
+    const media = matchMedia('(prefers-reduced-motion: reduce)'), small = matchMedia('(max-width: 600px)');
+    const change = () => { if (experienceIsAuto()) setExperience('auto'); };
+    media.addEventListener('change', change); small.addEventListener('change', change);
+    return () => { subs.delete(setE); media.removeEventListener('change', change); small.removeEventListener('change', change); };
+  }, []);
   return e;
 }

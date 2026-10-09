@@ -225,7 +225,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       {experience === 'minimal' && boardNode}
       {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
       <div className="room-with-chat">
-        {experience !== 'minimal' && <MemberRoom board={boardNode} pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : chat.host ? [{ name: info.hostName ?? L.host, host: true, connected: true, handle: chat.host }] : null} resources={resources}
+        {experience !== 'minimal' && <MemberRoom kind={info.clanType} board={boardNode} pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : chat.host ? [{ name: info.hostName ?? L.host, host: true, connected: true, handle: chat.host }] : null} resources={resources}
           actions={{ ...personSender(chat, (handle) => setDm({ handle, n: Date.now() }), can.includes('SEND_FILES')), me: chat.me }} onToast={toast}
           onTableDrop={can.includes('SEND_FILES') ? async (files) => { const r = await api.chat.sendDropped(chat.conn, files, 'clan'); return r.length ? `Shared ${r.length === 1 ? r[0]!.name : `${r.length} files`} with everyone in the ${L.session}` : 'Nothing was shared.'; } : undefined} />}
         <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>

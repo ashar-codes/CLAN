@@ -8,7 +8,7 @@ import type { Lab } from '../main.tsx';
 
 const t0 = { v: 0 };
 const CommonsScene = lazy(() => { t0.v = performance.now(); return loadCommons(); });
-const RING = { here: 'At your table', near: 'In this building', far: 'On campus network' } as const;
+const RING = { here: 'Seating group A', near: 'Seating group B', far: 'Seating group C' } as const;
 const RADIUS = { here: 22, near: 34, far: 46 };
 
 function Fallback({ onSelect }: { onSelect(id: string): void }) {
@@ -36,7 +36,7 @@ export function Commons({ lab }: { lab: Lab }) {
       </div>
       <aside className="side">
         <h1 className="c-title">Commons</h1>
-        <p className="muted">People reachable on this network right now. Tap someone to send, chat or study together.</p>
+        <p className="muted">Visual Lab demo characters in decorative seating. Positions do not represent physical locations.</p>
         {(['here', 'near', 'far'] as const).map((d) => (
           <section key={d}><span className="c-eyebrow">{RING[d]}</span>
             {PEOPLE.filter((p) => p.distance === d).map((p) => (
