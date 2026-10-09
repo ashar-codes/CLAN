@@ -1,67 +1,48 @@
 #!/usr/bin/env python3
-"""Native Android release benchmark. Uses the unchanged protocol via the test peer.
-Measures Android gfxinfo (host UI frames, not a GPU-only WebView FPS claim), PSS and cold activity startup.
-Run after release installation; resets the emulator app's disposable test profile.
-"""
-import json, os, subprocess, time, re
-from android_cross_device import adb, nodes, center, find, tap, type_, http, until, PKG, HOST_IP
-OUT = os.path.abspath('design/astra/android-native')
-os.makedirs(OUT, exist_ok=True)
-def screenshot(name):
-    with open(os.path.join(OUT, name+'.png'),'wb') as f: f.write(adb('exec-out','screencap','-p'))
-def measure(count):
-    print(f'Measuring after adding {count} strokes', flush=True)
-    if count: http(47499, '/strokes', {'count': count})
-    time.sleep(4)
-    tap('Pen')
-    x,y = find('board-canvas', scroll=False)
-    adb('shell','dumpsys','gfxinfo',PKG,'reset')
-    for i in range(30): adb('shell','input','swipe',str(x-120),str(y-80+i%4*30),str(x+120),str(y+50+i%4*30),'240')
-    raw = adb('shell','dumpsys','gfxinfo',PKG,'framestats').decode()
-    mem = adb('shell','dumpsys','meminfo',PKG).decode()
-    frames=[]; cols=None
-    for line in raw.splitlines():
-        if line.startswith('Flags,'): cols=line.split(',')
-        elif cols and re.match(r'^0,\d',line):
-            v=line.split(',')
-            try:
-                dt=(int(v[cols.index('FrameCompleted')])-int(v[cols.index('IntendedVsync')]))/1e6
-                if 0 < dt < 10000: frames.append(dt)
-            except (IndexError,ValueError): pass
-    frames.sort()
-    key=str(count)
-    open(os.path.join(OUT,'gfxinfo-'+key+'.txt'),'w').write(raw)
-    open(os.path.join(OUT,'memory-'+key+'.txt'),'w').write(mem)
-    # WebView renderers are separate Android processes; package PSS alone is incomplete.
-    # Keep all sandbox process snapshots in this otherwise isolated test emulator.
-    for line in adb('shell','ps','-A').decode().splitlines():
-        if 'webview:sandboxed_process' in line:
-            pid = line.split()[1]
-            open(os.path.join(OUT, f'webview-{key}-{pid}.txt'), 'w').write(adb('shell','dumpsys','meminfo',pid).decode())
-    screenshot('whiteboard-'+key)
-    return {'addedStrokes':count,'hostObjects':len(http(47499,'/state')['board']), 'sampleFrames':len(frames),'p50Ms':frames[len(frames)//2] if frames else None,'p90Ms':frames[int(len(frames)*.9)] if frames else None, 'androidSummary':[s.strip() for s in raw.splitlines() if any(k in s for k in ['Janky frames:','50th percentile:','90th percentile:'])], 'pssSummary':[s.strip() for s in mem.splitlines() if 'TOTAL PSS:' in s or 'TOTAL RSS:' in s]}
-peer = subprocess.Popen(['node','tools/sim/class-peer.ts','--host',HOST_IP],stdout=subprocess.PIPE,text=True)
-try:
-    peer.stdout.readline(); state=http(47499,'/state')
-    adb('shell','pm','clear',PKG)
-    cold=adb('shell','am','start','-W','-n',PKG+'/.MainActivity').decode(); time.sleep(4)
-    type_('Full name','Astra Test'); type_('Student / roll number','ASTRA-12'); type_('Device name','Astra-Pixel'); tap('Save')
-    find('Join a CLAN')
-    screenshot('my-space')
-    tap('Join a CLAN');
-    # Same manual bootstrap entry as the cross-device test.
-    type_('Six digit classroom code',state['code'])
-    type_('Host address',state['bootstrap'])
-    tap('Join')
-    for _ in range(3):
-        for n in nodes():
-            if n.get('text') in ['Allow', 'Don’t allow', "Don't allow"]:
-                x,y=center(n); adb('shell','input','tap',str(x),str(y)); time.sleep(1); break
-    until(lambda: any(m['status']=='approved' for m in http(47499,'/state')['members']),'approval')
-    time.sleep(3); http(47499,'/wall',{})
-    find('board-canvas'); screenshot('clan-room')
-    rows=[measure(80),measure(920),measure(4000)]
-    open(os.path.join(OUT,'performance.json'),'w').write(json.dumps({'platform':'Android emulator, not physical hardware','coldActivity':cold,'rows':rows},indent=2))
-    print(json.dumps(rows,indent=2),flush=True)
-finally:
-    peer.terminate(); peer.wait(timeout=20)
+"""Phone whiteboard benchmark on the Android emulator: the same workload for whichever renderer the installed build uses
+(canvas = normal build; legacy views = EXPO_PUBLIC_BOARD_RENDERER=views). A headless CLAN host (tools/sim/class-peer.ts)
+puts the board on the wall, adds strokes in stages, and at each stage the phone draws the same 30 swipes.
+Per stage: frame p50/p90/p99 and janky % from `gfxinfo` (reset before the swipes), app PSS and WebView renderer PSS.
+Usage: python3 apps/mobile/e2e/android_board_bench.py <label> [stages...]   (default stages: 100 1000 5000 total strokes)
+Emulator numbers: relative comparison only; not physical-phone performance."""
+import json, os, re, subprocess, sys, time
+sys.path.insert(0, os.path.dirname(__file__))
+from android_cross_device import ADB, PKG, HOST_IP, adb, find, http, tap, type_, until
+
+def pss(proc_filter):
+    out = adb('shell', 'dumpsys', 'meminfo').decode('utf8', 'ignore').split('Total PSS by process:')[1].split('Total PSS by OOM')[0]
+    return round(sum(int(m.group(1).replace(',', '')) for m in re.finditer(r'^\s*([\d,]+)K: (\S+)', out, re.M) if proc_filter(m.group(2))) / 1024, 1)
+def frames():
+    out = adb('shell', 'dumpsys', 'gfxinfo', PKG).decode('utf8', 'ignore')
+    g = lambda k: (re.search(k + r':\s*([\d.]+)', out) or [None, 'nan'])[1]
+    jank = re.search(r'Janky frames: (\d+) \(([\d.]+)%\)', out)
+    return {'frames': int(g('Total frames rendered')), 'p50': float(g('50th percentile')), 'p90': float(g('90th percentile')), 'p99': float(g('99th percentile')), 'jankyPct': float(jank[2]) if jank else None}
+
+def main():
+    label, stages = sys.argv[1], [int(x) for x in sys.argv[2:]] or [100, 1000, 5000]
+    host = subprocess.Popen(['node', 'tools/sim/class-peer.ts', '--host', HOST_IP], stdout=subprocess.PIPE, text=True)
+    try:
+        host.stdout.readline(); cls = http(47499, '/state')
+        adb('shell', 'am', 'force-stop', PKG); adb('shell', 'pm', 'grant', PKG, 'android.permission.POST_NOTIFICATIONS'); adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(4)
+        tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')
+        until(lambda: any(m['status'] == 'approved' and m['connected'] for m in http(47499, '/state')['members']), 'joined', 60)
+        http(47499, '/wall', {'mode': 'WHITEBOARD'}); time.sleep(2)  # pen is the default tool
+        x0, y0 = find('board-canvas')
+        results, have = [], 0
+        for total in stages:
+          try:
+            http(47499, '/strokes', {'count': total - have}); have = total
+            until(lambda: len(http(47499, '/state')['board']) >= total, f'{total} strokes on the host', 180); time.sleep(8)  # phone catches up
+            adb('shell', 'dumpsys', 'gfxinfo', PKG, 'reset')
+            for i in range(30): adb('shell', 'input', 'swipe', str(x0 - 300), str(y0 - 150 + (i % 10) * 30), str(x0 + 300), str(y0 - 120 + (i % 10) * 30), '300')
+            time.sleep(2)
+            r = {'strokes': total, **frames(), 'appPssMiB': pss(lambda n: n == PKG), 'webviewRendererPssMiB': pss(lambda n: 'sandboxed_process' in n or 'webview' in n.lower())}
+          except Exception as e:  # a crash (e.g. OOM) is a result, not a reason to lose the earlier stages
+            r = {'strokes': total, 'failed': repr(e)[:200], 'appAlive': bool(adb('shell', 'pidof', PKG).strip())}
+          print(json.dumps(r), flush=True); results.append(r)
+          if 'failed' in r: break
+        out = f'design/beta/bench-board-{label}.json'
+        os.makedirs(os.path.dirname(out), exist_ok=True); json.dump({'label': label, 'emulator': 'Android 16 arm64 (Pixel profile), release build', 'results': results}, open(out, 'w'), indent=2)
+    finally: host.kill(); host.wait()
+
+if __name__ == '__main__': main()

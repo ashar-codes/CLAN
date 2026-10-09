@@ -25,6 +25,8 @@ export type Limits = {
   maxAssignmentsPerSession: number;
   /** Idle socket timeout for transfers; a stalled student frees its slot. */
   transferIdleMs: number;
+  /** A live socket that sends nothing (no message, no pong) for a whole interval is dropped: a lost network never sends a close. */
+  socketHeartbeatMs: number;
   /** Unfinished OPAQUE pairing attempts per source address at once. */
   pairInflightPerSource: number;
   /** Manifest chunk size for new resources (see BENCHMARKS.md for how it was chosen). */
@@ -43,6 +45,7 @@ export const DEFAULT_LIMITS: Limits = {
   maxResourcesPerSession: 1000,
   maxAssignmentsPerSession: 200,
   transferIdleMs: 60_000,
+  socketHeartbeatMs: 15_000,
   pairInflightPerSource: 4,
   chunkSize: 1024 * 1024,
 };

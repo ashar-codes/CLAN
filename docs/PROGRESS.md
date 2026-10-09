@@ -142,3 +142,20 @@ Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi
   LiveKit), board text tool, outbox and personal boards, native date pickers.
 * **iOS:** blocked (no Xcode / Apple team). The trust code is tested on macOS.
 * **Tests:** 299 → 306. Desktop E2E: 19 passed, 2 PERF-only benchmarks skipped. One Android emulator E2E script.
+
+## Closed-Beta Hardening (tag `clan-beta-hardening`)
+* **Fixed:** phone chat lost messages sent while it reconnected (they raised the unread count but never appeared); the
+  host showed a member whose network vanished as connected indefinitely (now a 15 s heartbeat); an Android OS backup
+  restore produced a phone that could not start (`allowBackup` off, unreadable database moved aside); a crash-damaged
+  desktop database was fatal (now restored from automatic, pre-update and daily backups); dev switches honoured in
+  packaged builds; unhandled main-process rejections were silent; sync garbage JSON → 500; an E2E race (`astra-world`).
+* **Security:** Electron fuses (no run-as-Node / NODE_OPTIONS / inspect, asar only, integrity), WebSocket message
+  ceiling, bounded media proxy, sync body 64 → 32 MB with 8 MB pages, errors logged by kind only.
+* **Data:** Me › Your data (export / import / back up now / show backups), Me › Beta feedback (local file; opt-in,
+  previewable diagnostics), backups skipped below 1 GB free.
+* **Performance:** the OPAQUE join WebView is mounted only while joining (idle phone ~235 → ~122 MiB). Paired board
+  benchmark: the legacy View renderer runs out of memory by 1,000–5,000 strokes; canvas stays at p50 26–28 ms. Raw
+  SQLCipher key, draft coalescing and 3D prefetch were measured, showed no gain and were reverted.
+* **Tests:** 321 unit; desktop E2E 21 → 22 (+2 PERF-only skipped); new Android reliability suite; packaged macOS
+  install/update/rollback check. See BETA_READINESS.md and design/beta/.
+

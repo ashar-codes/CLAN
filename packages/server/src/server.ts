@@ -100,6 +100,9 @@ const AUTH_TIMEOUT_MS = 5000;
 const SEED_MIN_CHUNKS = 8;
 const SEEDERS = 4;
 const MAX_WS_MESSAGE = 64 * 1024;
+const WS_MAX_PER_SECOND = 300;
+/** Media signalling proxy bounds: concurrent sockets, and frames queued while the SFU side connects. */
+const MEDIA_MAX_SOCKETS = 256, MEDIA_MAX_QUEUED = 64;
 /** Splits items into batches whose JSON stays under `max` bytes. */
 const sizedChunks = <T>(items: T[], max: number) => { const out: T[][] = []; let cur: T[] = [], n = 0; for (const it of items) { const b = JSON.stringify(it).length; if (cur.length && n + b > max) { out.push(cur); cur = []; n = 0; } cur.push(it); n += b; } if (cur.length) out.push(cur); return out; };
 
@@ -332,6 +335,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     } catch (e) { throw new ApiError(503, 'media_unavailable', (e as Error).message); }
   });
   // LiveKit signalling, carried inside the pinned CLAN TLS channel to the loopback-only SFU.
+  let mediaSockets = 0;
   app.register(async (scope) => {
     scope.route({
       method: 'GET', url: '/media/*',
@@ -342,12 +346,15 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       },
       wsHandler: (ws, req) => {
         if (media?.state !== 'ready') return ws.close(1013, 'media unavailable');
+        if (mediaSockets >= MEDIA_MAX_SOCKETS) return ws.close(1013, 'too many media connections');
+        mediaSockets++;
         const up = new UpstreamSocket(media.signalUrl + req.url.slice('/media'.length));
-        const queue: unknown[] = [];
-        up.on('open', () => { for (const m of queue.splice(0)) up.send(m as Buffer); });
+        const queue: Buffer[] = [];
+        up.on('open', () => { for (const m of queue.splice(0)) up.send(m); });
         up.on('message', (d, bin) => { if (ws.readyState === ws.OPEN) ws.send(d, { binary: bin }); });
-        ws.on('message', (d: Buffer, bin: boolean) => { if (up.readyState === up.OPEN) up.send(d, { binary: bin }); else queue.push(d); });
-        const end = () => { if (up.readyState <= 1) up.close(); if (ws.readyState <= 1) ws.close(); };
+        ws.on('message', (d: Buffer, bin: boolean) => { if (up.readyState === up.OPEN) up.send(d, { binary: bin }); else if (queue.length < MEDIA_MAX_QUEUED) queue.push(d); else ws.close(1008, 'too much before connect'); });
+        let ended = false;
+        const end = () => { if (!ended) { ended = true; mediaSockets--; } if (up.readyState <= 1) up.close(); if (ws.readyState <= 1) ws.close(); };
         up.on('close', end); up.on('error', end); ws.on('close', end); ws.on('error', end);
       },
     });
@@ -508,7 +515,16 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       let principal: Principal | null = null;
       const authTimer = setTimeout(() => ws.close(WS_CLOSE.authFailed, 'auth timeout'), AUTH_TIMEOUT_MS);
 
+      // Ceiling across all message types (chat and board ops also have their own limits): a flooding socket is closed.
+      let windowStart = Date.now(), inWindow = 0;
+      let alive = true;
+      const beat = setInterval(() => { if (!alive) return ws.terminate(); alive = false; ws.ping(); }, limits.socketHeartbeatMs);
+      ws.on('pong', () => { alive = true; });
       ws.on('message', (raw) => {
+        alive = true;
+        const now = Date.now();
+        if (now - windowStart >= 1000) { windowStart = now; inWindow = 0; }
+        if (++inWindow > WS_MAX_PER_SECOND) return ws.close(WS_CLOSE.badMessage, 'too many messages');
         let msg: ClientMessage;
         try {
           const r = ClientMessage.safeParse(JSON.parse(String(raw)));
@@ -634,7 +650,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       });
 
       ws.on('close', () => {
-        clearTimeout(authTimer);
+        clearTimeout(authTimer); clearInterval(beat);
         const p = sockets.get(ws);
         sockets.delete(ws);
         if (p?.role === 'student' && !shuttingDown) {

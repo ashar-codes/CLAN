@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { ClanType, JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
 import { pairAndJoin, reconnect, type Candidate } from '@classroom/client';
 import { pinnedTransport } from '@classroom/client/node';
-import { logError } from '@classroom/server';
+import { backupDb, logError, openDbSafely } from '@classroom/server';
 import { Keystore } from './keystore.ts';
 import { Trust } from './trust.ts';
 import { candidateInterfaces, openDb, startClassroomServer, type RunningServer } from '@classroom/server';
@@ -20,6 +20,8 @@ import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
 import { registerStudy } from './study.ts';
 import { registerSync } from './sync.ts';
+import { registerData } from './data.ts';
+import { registerFeedback } from './feedback.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
 import { registerBoards } from './board.ts';
 import { micArmed, registerMediaScheme, registerTapes } from './tape.ts';
@@ -47,7 +49,11 @@ if (process.env.CLASSROOM_USER_DATA) app.setPath('userData', process.env.CLASSRO
 let server: RunningServer | null = null;
 let keystore: Keystore;
 let trust: Trust;
-const db = () => (dbHandle ??= openDb(join(app.getPath('userData'), 'teacher.db')));
+// The device database opens after an integrity check; a damaged file is kept aside and the newest healthy automatic
+// backup is restored (see backupDb below). Nothing is ever deleted.
+let dbRecovered: ReturnType<typeof openDbSafely>['recovered'] = null;
+const backupsDir = () => join(app.getPath('userData'), 'backups');
+const db = () => dbHandle ??= (() => { const r = openDbSafely(join(app.getPath('userData'), 'teacher.db'), backupsDir()); dbRecovered = r.recovered; if (r.recovered) logError('db', new Error(`database restored from ${r.recovered.from ?? 'nothing (fresh)'}; damaged copy kept`)); return r.db; })();
 let dbHandle: ReturnType<typeof openDb> | undefined; // legacy file name; it is this device's database
 let clan: ReturnType<typeof registerClan>;
 
@@ -331,7 +337,7 @@ function createWindow() {
   // Links (Saved, chat) open in the system browser; the app window itself never navigates or opens pages.
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (url !== win.webContents.getURL()) e.preventDefault(); });
-  const dev = process.env.CLASSROOM_DEV_URL;
+  const dev = app.isPackaged ? undefined : process.env.CLASSROOM_DEV_URL; // a packaged app only ever loads its own files
   if (dev) win.loadURL(dev);
   else win.loadFile(join(here, '../renderer/index.html'));
 }
@@ -347,6 +353,7 @@ app.whenReady().then(() => {
   // Microphone only right after the student started a Study Tape with “Microphone” ticked (audio only, never camera).
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb, details) => cb(perm === 'display-capture' || (perm === 'media' && micArmed() && !!(details as { mediaTypes?: string[] }).mediaTypes?.length && (details as { mediaTypes: string[] }).mediaTypes.every((t) => t === 'audio'))));
   process.on('uncaughtException', (e) => logError('main', e));
+  process.on('unhandledRejection', (e) => logError('main', e)); // a failed startup step must be visible, not silent
   direct = new DesktopDirect();
   void direct.recover(); // a crash may have left a Direct network or firewall rules behind
   powerMonitor.on('resume', () => { void direct.net?.restart().catch((e) => logError('direct', e)); }); // same SSID/passphrase: members rejoin with their device keys
@@ -359,8 +366,14 @@ app.whenReady().then(() => {
   registerAI(clan, aiCreds);
   registerBoards(clan);
   registerTapes(clan);
+  registerData(clan, backupsDir(), () => backupDb(db(), backupsDir(), { keep: 3 }));
+  registerFeedback(clan, keystore);
   void registerSync(clan, keystore, () => loadProfile().deviceName).then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
+  // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).
+  const backup = () => { try { backupDb(db(), backupsDir(), { keep: 3 }); } catch (e) { logError('backup', e); } };
+  setTimeout(backup, 5_000).unref(); setInterval(backup, 24 * 3600_000).unref();
   createWindow();
+  if (dbRecovered) void dialog.showMessageBox({ type: 'warning', title: 'CLAN restored your data', message: dbRecovered.from ? 'Your data file was damaged, so CLAN restored its most recent automatic backup.' : 'Your data file was damaged and no healthy backup was found, so CLAN started fresh.', detail: `The damaged file was kept at:\n${dbRecovered.keptAt}\n\nIf you use other linked devices, they will sync your study data back.` });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

@@ -45,14 +45,6 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
   const get = useCallback(<T,>(path: string, init?: RequestInit) => api<T>(conn.transport, conn.url, conn.token, path, init), [conn]);
   const merge = (list: ChatMessageView[], add: ChatMessageView[]) => [...new Map([...list, ...add].map((x) => [x.id, x])).values()].sort((a, b) => a.seq - b.seq);
 
-  const refresh = useCallback(async () => {
-    const r = await get<{ me: string; host: string; threads: ChatThreadView[] }>('/api/chat/threads');
-    setMe(r.me); setHost(r.host); setThreads(r.threads);
-    const list = outbox.list(clanId);
-    setPending((p) => ({ ...p, ...Object.fromEntries(list.map((m) => [m.id, { m }])) }));
-    for (const m of list) send(m);
-  }, [get, clanId, send]);
-
   const open = useCallback(async (id: string) => {
     setActive(id);
     const p = await get<{ messages: ChatMessageView[] }>(`/api/chat/threads/${id}/messages?limit=50`);
@@ -61,6 +53,17 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
     if (last) send({ t: 'chat.cursor', threadId: id, delivered: last, read: last });
     setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, unread: 0 } : t)));
   }, [get, send]);
+
+  const refresh = useCallback(async () => {
+    const r = await get<{ me: string; host: string; threads: ChatThreadView[] }>('/api/chat/threads');
+    setMe(r.me); setHost(r.host); setThreads(r.threads);
+    const list = outbox.list(clanId);
+    setPending((p) => ({ ...p, ...Object.fromEntries(list.map((m) => [m.id, { m }])) }));
+    for (const m of list) send(m);
+    // (Re)connected: messages sent while the socket was down only show up in the thread list's unread count — reload
+    // the conversation that is open so they appear.
+    if (ref.current.active) await open(ref.current.active);
+  }, [get, clanId, send, open]);
 
   /** No composer while a direct conversation opens, so nothing typed meanwhile goes to the wrong conversation. */
   const [opening, setOpening] = useState(false);

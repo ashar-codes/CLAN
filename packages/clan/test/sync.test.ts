@@ -107,6 +107,17 @@ describe('sync', () => {
     expect((await sync(a, b))).toMatchObject({ pulled: 0, pushed: 0 });
   });
 
+  it('pages stay under ~8 MB however large the notes are, and nothing is skipped', async () => {
+    const { a, b } = pair();
+    for (let i = 0; i < 60; i++) a.app.notes.create(a.me, { title: `big ${i}`, body: 'x'.repeat(190_000) });
+    a.app.sync.refresh();
+    let since = 0, pages = 0, seen = 0;
+    for (let more = true; more; pages++) { const p = a.app.sync.changes(since, 200); expect(JSON.stringify(p).length).toBeLessThan(9 * 1024 * 1024); seen += p.records.filter((r) => r.kind === 'note').length; since = p.next; more = p.more; }
+    expect(seen).toBe(60); expect(pages).toBeGreaterThan(1);
+    await sync(b, a);
+    expect(b.app.notes.mine(b.me, 100)).toHaveLength(60);
+  });
+
   it('is idempotent and tolerates out-of-order records (a review before its card)', async () => {
     const { a, b } = pair();
     const deck = a.app.flashcards.createDeck(a.me, { name: 'D' }); const card = a.app.flashcards.addCard(a.me, deck.id, { front: 'f', back: 'b' });

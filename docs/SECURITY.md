@@ -177,7 +177,25 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
 * **Release builds:** no development fallbacks (no trust-all, no plaintext keystore). The dev client is only in debug
   builds.
 
+## Closed-beta hardening (Phase 13, BETA_READINESS.md)
+* **Packaged desktop:** Electron fuses off for `RunAsNode`, `NODE_OPTIONS`, `--inspect`; only the asar loads, with embedded
+  asar integrity validation (configured; a tampered asar was not tried). Verified: an injected `NODE_OPTIONS --require` and `ELECTRON_RUN_AS_NODE` both do nothing in the packaged app,
+  but run in plain Electron). Without this any local process could run code as CLAN, with CLAN's keychain access to the
+  safeStorage-wrapped AI keys. `CLASSROOM_DEV_URL` and the deterministic AI provider are ignored in packaged builds.
+* **Resource limits:** per-socket ceiling of 300 messages/s on the classroom WebSocket (closed with 4400); the
+  unauthenticated media proxy is capped at 256 sockets and 64 queued frames; personal-sync bodies ≤ 32 MB (pages are cut
+  at 8 MB so large notes still sync), garbage JSON is a 400. A heartbeat drops sockets that answer nothing for 15 s, so a
+  member whose network vanished is shown offline and stops receiving (previously "connected" until the OS gave up).
+* **Phone data:** `android:allowBackup=false` (a restore onto another phone carried a database whose Keystore key can't
+  follow → the app could not start). An unreadable database is moved aside, never deleted.
+* **Diagnostics:** errors are logged by kind only (last 50 `{context, name, code}`, no messages). Feedback and its
+  diagnostics are saved to a file the student picks; nothing is uploaded.
+* **Exports** contain the student's own records only (no device keys, chats, AI keys or owner ids); Diary only when
+  ticked. Files are written `0600`.
+
 ## Known gaps (tracked)
+* A packaged desktop app still accepts Chromium's `--remote-debugging-port`: a process running as the same user can
+  drive the UI (and the preload API) — the same reach it already has over the unencrypted desktop database.
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
   code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.
 * Mobile OPAQUE runs inside a WebView: the 6-digit code passes over the app↔WebView message channel (in-process).

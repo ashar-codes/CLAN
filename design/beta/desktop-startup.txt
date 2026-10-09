@@ -1,0 +1,12 @@
+{"fresh":true,"windowMs":1437,"domMs":1533,"readyMs":1680,"campusMs":374}
+{"fresh":true,"windowMs":572,"domMs":601,"readyMs":705,"campusMs":842}
+{"fresh":true,"windowMs":562,"domMs":592,"readyMs":693,"campusMs":832}
+{"fresh":true,"windowMs":567,"domMs":590,"readyMs":682,"campusMs":838}
+{"fresh":true,"windowMs":583,"domMs":610,"readyMs":703,"campusMs":845}
+{"fresh":false,"windowMs":555,"domMs":589,"readyMs":683,"campusMs":829}
+{"fresh":false,"windowMs":553,"domMs":569,"readyMs":665,"campusMs":838}
+{"fresh":false,"windowMs":600,"domMs":626,"readyMs":720,"campusMs":833}
+{"fresh":false,"windowMs":559,"domMs":576,"readyMs":671,"campusMs":841}
+{"fresh":false,"windowMs":563,"domMs":582,"readyMs":674,"campusMs":842}
+fresh median: window 572 · dom 601 · ready 703 · campus 838 ms
+existing median: window 559 · dom 582 · ready 674 · campus 838 ms

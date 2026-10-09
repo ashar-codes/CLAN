@@ -1,9 +1,9 @@
 export { startClassroomServer, ephemeralIdentity, type RunningServer, type ServerOptions, type TeacherIdentity } from './server.ts';
 export { Pairing } from './pairing.ts';
-export { redact, logError } from './redact.ts';
+export { redact, logError, recentErrors } from './redact.ts';
 export { createClassroomTls } from './tls.ts';
 export { Classroom, JoinError, newJoinCode, TOKEN_IDLE_MS, type ClanSession } from './classroom.ts';
-export { openDb, migrate } from './db.ts';
+export { openDb, openDbSafely, backupDb, migrate } from './db.ts';
 export { candidateInterfaces, type Iface } from './netinfo.ts';
 export { Throttle } from './throttle.ts';
 export { Resources } from './resources.ts';

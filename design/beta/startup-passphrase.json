@@ -1,0 +1,42 @@
+{
+  "label": "passphrase",
+  "emulator": "Android 16 arm64 (Pixel profile), release build",
+  "runs": [
+    {
+      "fresh": true,
+      "activityMs": 1051,
+      "contentReadyMs": 3004,
+      "frameGapMs": 600
+    },
+    {
+      "fresh": true,
+      "activityMs": 593,
+      "contentReadyMs": 2243,
+      "frameGapMs": 632
+    },
+    {
+      "fresh": true,
+      "activityMs": 445,
+      "contentReadyMs": 2457,
+      "frameGapMs": 571
+    },
+    {
+      "fresh": false,
+      "activityMs": 778,
+      "contentReadyMs": 4916,
+      "frameGapMs": 600
+    },
+    {
+      "fresh": false,
+      "activityMs": 650,
+      "contentReadyMs": 3766,
+      "frameGapMs": 571
+    },
+    {
+      "fresh": false,
+      "activityMs": 534,
+      "contentReadyMs": 4206,
+      "frameGapMs": 571
+    }
+  ]
+}

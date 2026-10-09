@@ -51,6 +51,8 @@ const api: DesktopApi = {
     confirmPaperTopic: inv('ai:confirmPaperTopic'), proposeScope: inv('ai:proposeScope'), examGaps: inv('ai:examGaps'), openFile: inv('ai:openFile'),
     conversations: inv('ai:conversations'), deleteHistory: inv('ai:deleteHistory'), usage: inv('ai:usage'), rebuild: inv('ai:rebuild'),
   } as DesktopApi['ai'],
+  feedback: { preview: inv('feedback:preview'), save: inv('feedback:save') } as DesktopApi['feedback'],
+  data: { export: inv('data:export'), import: inv('data:import'), backups: inv('data:backups'), backupNow: inv('data:backupNow') } as DesktopApi['data'],
   sync: {
     status: inv('sync:status'), startLink: inv('sync:startLink'), cancelLink: inv('sync:cancelLink'), approve: inv('sync:approve'), reject: inv('sync:reject'), join: inv('sync:join'),
     now: inv('sync:now'), unlink: inv('sync:unlink'), conflicts: inv('sync:conflicts'), resolve: inv('sync:resolve'), setSettings: inv('sync:setSettings'),

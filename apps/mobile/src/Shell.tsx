@@ -2,7 +2,7 @@
 // (wall, wood, the student's CLANmate). Joining a live CLAN opens the existing pinned-TLS join flow.
 import { useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { phoneClan, me } from './core/clan';
+import { dataNotice, phoneClan, me } from './core/clan';
 import { syncNow } from './sync/phone';
 import { StudyScreen, type MobileStudyTab } from './screens/Study';
 import { InboxScreen } from './screens/Inbox';
@@ -58,6 +58,7 @@ function Home({ onJoin, go, onStudy }: { onJoin(): void; go(t: Tab): void; onStu
   ];
   return (
     <Screen>
+      {!!dataNotice() && <Card tone="warn"><Text accessibilityRole="alert" style={{ color: c.text }}>{dataNotice()}</Text></Card>}
       <RoomBand title={`${name.split(' ')[0]}'s desk`} sub={new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} right={<Mate name={name} size={52} />} />
       <Row><Btn primary label="Join a CLAN" onPress={onJoin} /><Btn label={session ? 'Studying…' : 'Start studying'} onPress={() => onStudy('session')} /><Btn label="Capture" onPress={() => go('inbox')} /></Row>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }} accessibilityLabel="My Space objects">

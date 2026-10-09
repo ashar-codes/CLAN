@@ -1,0 +1,42 @@
+{
+  "label": "rawkey",
+  "emulator": "Android 16 arm64 (Pixel profile), release build",
+  "runs": [
+    {
+      "fresh": true,
+      "activityMs": 857,
+      "contentReadyMs": 3278,
+      "frameGapMs": 571
+    },
+    {
+      "fresh": true,
+      "activityMs": 581,
+      "contentReadyMs": 2404,
+      "frameGapMs": 600
+    },
+    {
+      "fresh": true,
+      "activityMs": 736,
+      "contentReadyMs": 2235,
+      "frameGapMs": 600
+    },
+    {
+      "fresh": false,
+      "activityMs": 599,
+      "contentReadyMs": 4415,
+      "frameGapMs": 571
+    },
+    {
+      "fresh": false,
+      "activityMs": 563,
+      "contentReadyMs": 4073,
+      "frameGapMs": 571
+    },
+    {
+      "fresh": false,
+      "activityMs": 633,
+      "contentReadyMs": 4192,
+      "frameGapMs": 545
+    }
+  ]
+}

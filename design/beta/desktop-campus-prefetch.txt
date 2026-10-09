@@ -1,0 +1,6 @@
+# IDLE_MS=2000, idle prefetch of the 3D chunk (reverted: no effect)
+fresh median: window 634 · dom 670 · ready 768 · campus 823 ms
+existing median: window 600 · dom 621 · ready 761 · campus 841 ms
+# IDLE_MS=2000, no prefetch
+fresh median: window 607 · dom 636 · ready 749 · campus 843 ms
+existing median: window 614 · dom 644 · ready 749 · campus 854 ms

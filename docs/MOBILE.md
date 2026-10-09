@@ -58,7 +58,14 @@ phone-only data model.
 | Runs | ✓ emulator (Android 16, arm64) | — |
 | Physical device | not run | not run |
 
-* **Verified on the emulator:** the cross-device flows in `e2e/android_cross_device.py`.
+* **Verified on the emulator:** the cross-device flows in `e2e/android_cross_device.py` and the interruptions in
+  `e2e/android_reliability.py` (crash right after saving, airplane mode, host frozen 20 s, network lost, leave/rejoin,
+  camera denied, unreadable database). Needs `adb root` (a non-Play emulator image).
+* **Data on the phone:** `allowBackup` is off — the database key is in the Keystore, so a restored copy could never be
+  opened. If the database can't be unlocked anyway, it is moved aside (not deleted), the app starts fresh and Home says
+  how to bring study data back (device sync). Uninstalling deletes phone data.
+* **Memory:** the OPAQUE join WebView is mounted only while joining (released 60 s after the last use): idle at Home
+  the app + WebView renderer went from ~235 to ~122 MiB PSS on the emulator.
 * **iOS trust:** the trust code (`PinnedTrust.swift`, including first contact) is compiled and tested with swiftc
   on macOS.
 * **Not verified anywhere:** the iOS module, the iOS Share Extension, and all iOS UI.

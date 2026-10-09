@@ -3,14 +3,17 @@
 // Keychain / Android Keystore (expo-secure-store). Opened once per app process.
 import * as SecureStore from 'expo-secure-store';
 import { getRandomBytes } from 'expo-crypto';
-import { Directory, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import { openClan, type ClanApp } from '@clan/core';
 import { b64u } from '@classroom/protocol';
-import { openPhoneDb } from './sqlite';
+import { openPhoneDb, UnreadableDatabase } from './sqlite';
 
 const DB_KEY = 'clan.db.key.v1';
 let app: ClanApp | null = null;
 let opening: Promise<ClanApp> | null = null;
+let notice: string | null = null;
+/** Set when the database had to be started fresh; shown once on Home. */
+export const dataNotice = () => notice;
 
 async function dbKey() {
   const o = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
@@ -25,7 +28,17 @@ export function openPhoneClan(name?: string): Promise<ClanApp> {
   return (opening ??= (async () => {
     const storage = new Directory(Paths.document, 'CLAN', 'storage');
     if (!storage.exists) storage.create({ intermediates: true, idempotent: true });
-    const db = openPhoneDb('clan.db', await dbKey());
+    const key = await dbKey();
+    let db: ReturnType<typeof openPhoneDb>;
+    try { db = openPhoneDb('clan.db', key); }
+    catch (e) {
+      if (!(e instanceof UnreadableDatabase)) throw e;
+      // e.g. restored onto a new phone without its Keystore key: keep the file (never delete), start a fresh database
+      const dir = new Directory(Paths.document, 'SQLite'), at = Date.now();
+      for (const ext of ['', '-wal', '-shm']) { const f = new File(dir, `clan.db${ext}`); if (f.exists) f.moveSync(new File(dir, `clan.db.unreadable-${at}${ext}`)); }
+      notice = 'This phone’s earlier CLAN data couldn’t be unlocked (it was kept, not deleted). Link this phone to your computer in Me › My Devices to bring your study data back.';
+      db = openPhoneDb('clan.db', key);
+    }
     app = openClan(db as never, { storageDir: storage.uri.replace(/\/$/, ''), localName: name });
     return app;
   })());

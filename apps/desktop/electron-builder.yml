@@ -8,6 +8,15 @@ npmRebuild: false
 protocols:
   - { name: CLAN, schemes: [clan] }
 asar: true
+# A packaged CLAN only runs its own signed code: no ELECTRON_RUN_AS_NODE / NODE_OPTIONS / --inspect (they would let any
+# local process run code as CLAN, with CLAN's keychain access to the safeStorage-wrapped keys), and only the verified asar.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  enableCookieEncryption: true
 mac:
   category: public.app-category.education
   target: [dmg, zip]

@@ -1,0 +1,6 @@
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+[41m[1m FAIL [22m[49m e2e/astra-world.test.ts[2m > [22mAstra object actions, responsive layout, reduced motion and GPU fallback stay usable
+[31m[1mAssertionError[22m: expected 0 to be greater than 0[39m
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m13 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (15)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m21 passed[39m[22m[2m | [22m[33m2 skipped[39m[90m (24)[39m
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @classroom/desktop@0.1.0 test:e2e: `vite build -c vite.main.config.ts && vite build -c vite.preload.config.ts && vite build && vitest run -c vitest.e2e.config.ts`

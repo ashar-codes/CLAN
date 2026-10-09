@@ -6,10 +6,19 @@ import { openDatabaseSync, type SQLiteDatabase, type SQLiteStatement } from 'exp
 type Param = string | number | null | Uint8Array;
 const MAX_CACHED = 400;
 
-export function openPhoneDb(name: string, key: string) {
-  const db: SQLiteDatabase = openDatabaseSync(name);
+export class UnreadableDatabase extends Error {}
+
+/** Opens the SQLCipher database; a key that doesn't unlock it (e.g. data restored onto a new phone) → UnreadableDatabase. */
+function openKeyed(name: string, key: string): SQLiteDatabase {
   if (!/^[A-Za-z0-9_-]{43}$/.test(key)) throw new Error('Bad database key.');
+  const db = openDatabaseSync(name);
   db.execSync(`PRAGMA key = '${key}'`); // SQLCipher: must be first; the key comes from secure storage only
+  try { db.execSync('SELECT count(*) FROM sqlite_master'); } catch { db.closeSync(); throw new UnreadableDatabase('This phone’s CLAN data can’t be unlocked.'); }
+  return db;
+}
+
+export function openPhoneDb(name: string, key: string) {
+  const db: SQLiteDatabase = openKeyed(name, key);
   db.execSync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   const cache = new Map<string, SQLiteStatement>();
   const stmt = (sql: string) => {

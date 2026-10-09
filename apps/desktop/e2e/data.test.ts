@@ -1,0 +1,77 @@
+// Your data + beta feedback + crash recovery in the real app: export → import into another app (Diary only when ticked),
+// feedback saved locally with/without diagnostics (no private text), and a damaged database after a crash is restored
+// from the automatic backup on the next launch.
+import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, openSync, writeSync, closeSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, expect, it } from 'vitest';
+
+const apps: ElectronApplication[] = [];
+const dirs: string[] = [];
+const tmp = (p = 'clan-data-') => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
+afterAll(async () => { await Promise.all(apps.map((a) => a.close().catch(() => {}))); for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+
+async function launch(userData = tmp()) {
+  const app = await electron.launch({ args: ['.'], cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData } });
+  apps.push(app);
+  const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
+  return { app, page, userData };
+}
+const pickDir = (app: ElectronApplication, dir: string) => app.evaluate(({ dialog }, d) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [d] })) as never; }, dir);
+const saveTo = (app: ElectronApplication, path: string) => app.evaluate(({ dialog }, f) => { dialog.showSaveDialog = (async () => ({ canceled: false, filePath: f })) as never; }, path);
+const me = (p: Page) => p.getByRole('button', { name: 'Me', exact: true }).click();
+const addNote = async (p: Page, title: string, body: string) => {
+  await p.getByRole('button', { name: 'Study', exact: true }).click(); await p.getByRole('tablist', { name: 'Study area' }).getByRole('tab', { name: 'Notes', exact: true }).click();
+  await p.getByRole('button', { name: 'New note' }).click(); await p.getByLabel('Title', { exact: true }).fill(title); await p.getByLabel('Note', { exact: true }).fill(body);
+  await p.getByRole('button', { name: 'Save', exact: true }).click();
+};
+
+it('export → import, local feedback without private text, and recovery from a damaged database', async () => {
+  const a = await launch();
+  await addNote(a.page, 'Exported note', 'PRIVATE-NOTE-BODY');
+  await a.page.evaluate(() => (window as unknown as { classroom: { clan: { writeDiary(o: unknown): Promise<unknown> } } }).classroom.clan.writeDiary({ day: '2026-10-01', body: 'PRIVATE-DIARY' }));
+
+  // export without Diary, then with
+  const out = tmp('clan-export-');
+  await me(a.page); await pickDir(a.app, out);
+  await a.page.getByRole('button', { name: 'Export my data…' }).click();
+  await a.page.getByRole('status').filter({ hasText: /^Exported/ }).waitFor();
+  const folder = join(out, readdirSync(out).find((n) => n.startsWith('CLAN export'))!), exp = readFileSync(join(folder, 'clan-export.json'), 'utf8');
+  expect(exp).toContain('PRIVATE-NOTE-BODY'); expect(exp).not.toContain('PRIVATE-DIARY');
+
+  // feedback: diagnostics only when ticked, and never private text
+  const fb1 = join(tmp('clan-fb-'), 'a.json'), fb2 = join(tmp('clan-fb-'), 'b.json');
+  await a.page.getByLabel('Your feedback').fill('The board felt slow'); await saveTo(a.app, fb1);
+  await a.page.getByRole('button', { name: 'Save feedback…' }).click(); await a.page.getByRole('status').filter({ hasText: /^Saved to/ }).waitFor();
+  expect(JSON.parse(readFileSync(fb1, 'utf8'))).not.toHaveProperty('diagnostics');
+  await a.page.getByLabel('Your feedback').fill('Again, with diagnostics'); await a.page.getByRole('checkbox', { name: /Attach diagnostics/ }).check();
+  await a.page.getByRole('button', { name: "Show exactly what's attached" }).click(); await a.page.getByLabel('Diagnostics preview').waitFor();
+  await saveTo(a.app, fb2); await a.page.getByRole('button', { name: 'Save feedback…' }).click(); await a.page.getByRole('status').filter({ hasText: /^Saved to/ }).waitFor();
+  const fb = readFileSync(fb2, 'utf8');
+  expect(JSON.parse(fb).diagnostics.counts.note).toBe(1);
+  for (const secret of ['PRIVATE-NOTE-BODY', 'PRIVATE-DIARY', 'Exported note']) expect(fb).not.toContain(secret);
+
+  // import into a fresh app
+  const b = await launch();
+  await me(b.page); await pickDir(b.app, folder);
+  await b.page.getByRole('button', { name: 'Import an export…' }).click();
+  await b.page.getByRole('status').filter({ hasText: /^Imported/ }).waitFor();
+  await b.page.getByRole('button', { name: 'Study', exact: true }).click(); await b.page.getByRole('tablist', { name: 'Study area' }).getByRole('tab', { name: 'Notes', exact: true }).click();
+  await b.page.getByRole('button', { name: /^Exported note/ }).waitFor();
+
+  // crash with a damaged database → next launch restores the automatic backup
+  const backups = join(a.userData, 'backups');
+  await me(a.page); await a.page.getByRole('button', { name: 'Back up now' }).click(); await a.page.getByRole('status').filter({ hasText: 'Backed up.' }).waitFor();
+  expect(existsSync(backups) && readdirSync(backups).length).toBeGreaterThan(0);
+  a.app.process().kill('SIGKILL');
+  const dbPath = join(a.userData, 'teacher.db');
+  for (const ext of ['-wal', '-shm']) rmSync(dbPath + ext, { force: true });
+  const fd = openSync(dbPath, 'r+'), size = statSync(dbPath).size;
+  for (let off = 0; off < size; off += 4096) writeSync(fd, Buffer.alloc(512, 0xa5), 0, 512, off);
+  closeSync(fd);
+  const a2 = await launch(a.userData);
+  await a2.page.getByRole('button', { name: 'Study', exact: true }).click(); await a2.page.getByRole('tablist', { name: 'Study area' }).getByRole('tab', { name: 'Notes', exact: true }).click();
+  await a2.page.getByRole('button', { name: /^Exported note/ }).waitFor({ timeout: 20_000 });
+  expect(readdirSync(a.userData).some((n) => n.startsWith('teacher.db.corrupt-'))).toBe(true); // kept, not deleted
+});

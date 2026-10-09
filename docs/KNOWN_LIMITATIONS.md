@@ -34,3 +34,13 @@
 * Removed/blocked students keep files they already downloaded; a peer that missed the revocation push accepts them until the
   capability expires (≤ 15 min).
 * Teacher handoff/delegation is designed, not implemented. Mesh is not implemented.
+* **Closed beta (BETA_READINESS.md):** no signing for any platform; the Android release APK is debug-signed and has no
+  `versionCode`; Windows and iOS have never been built; no physical phone has run CLAN.
+* Rolling back a desktop build after a database migration needs a manual restore of the pre-update backup.
+* Uninstalling the phone app deletes its data (no OS backup by design); device sync with a computer is the way back.
+* Opening Study in Full mode spends ~0.8 s on the 3D campus setup each time (prefetching the chunk did not help: the cost
+  is scene initialization, not download). Reduced and Minimal never load it.
+* Emulator whiteboard frame time is flat (p50 26–28 ms) from 100 to 5,000 strokes, i.e. bounded by the emulator, not the
+  board; physical-phone frame time is unknown.
+* The SFU publish test spends ~15 s of its 20 s budget waiting for LiveKit to refuse an unauthorised publish (flake risk on
+  a loaded machine).

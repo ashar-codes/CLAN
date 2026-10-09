@@ -25,9 +25,9 @@ export type SyncServerOptions = { host: SyncHost; tls: { certPem: string; keyPem
 export const SYNC_SERVICE = 'clansync';
 
 export async function startSyncServer(o: SyncServerOptions) {
-  const app = Fastify({ https: { cert: o.tls.certPem, key: o.tls.keyPem, minVersion: 'TLSv1.3' }, bodyLimit: 64 * 1024 * 1024, logger: false });
+  const app = Fastify({ https: { cert: o.tls.certPem, key: o.tls.keyPem, minVersion: 'TLSv1.3' }, bodyLimit: 32 * 1024 * 1024, logger: false }); // pages are capped at 8 MB by the engine; bigger bodies are refused unparsed
   const linkTries = new Throttle(10, 60_000, 5 * 60_000);
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => { try { done(null, { raw: body as string, json: JSON.parse(body as string) }); } catch (e) { done(e as Error); } });
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => { try { done(null, { raw: body as string, json: JSON.parse(body as string) }); } catch { done(Object.assign(new Error('Malformed JSON.'), { statusCode: 400 })); } });
   const fail = (reply: FastifyReply, e: unknown) => {
     const code = (e as { code?: string }).code;
     const status = code === 'revoked' ? 403 : code === 'unknown_device' || code === 'bad_auth' || code === 'replay' || code === 'stale' ? 401 : code === 'bad_code' || code === 'no_link' ? 400 : e instanceof z.ZodError ? 400 : 500;

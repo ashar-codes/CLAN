@@ -112,8 +112,27 @@ pnpm test:e2e
 node apps/desktop/scripts/astra-qa.ts
 node apps/desktop/scripts/astra-motion-capture.ts
 apps/mobile/scripts/android-dev.sh --release
-python3 apps/mobile/e2e/android_board_bench.py
+python3 apps/mobile/e2e/android_board_bench.py canvas
 python3 apps/mobile/e2e/android_cross_device.py
 ```
 
 Android scripts reset the disposable emulator app profile. Do not use a personal-device profile for these runs.
+
+## Closed-beta hardening (Phase 13)
+
+Results and raw logs: [`design/beta/`](../design/beta); release readiness: [BETA_READINESS.md](BETA_READINESS.md).
+
+* **Unit:** `pnpm test` from the repo root (the root config's 20 s timeout applies; running vitest inside a package uses
+  the 5 s default and the SFU/peer tests time out — not a failure of the code). New: `data-safety.test.ts` (backups,
+  pre-update backup, damaged database recovery, low disk, export/import, diagnostics), `hardening.test.ts` (WebSocket
+  flood, malformed frames, vanished member heartbeat, sync server refusals), byte-bounded sync pages.
+* **Desktop E2E:** `data.test.ts` (export → import, feedback without private text, crash + damaged database → restore).
+  Fixed a race in `astra-world.test.ts` (counted courses before they loaded).
+* **Android reliability:** `python3 apps/mobile/e2e/android_reliability.py` (needs `adb root`).
+* **Benchmarks:** `android_board_bench.py <label>` (same 30 swipes per stage; per-process PSS; a crash is recorded),
+  `startup_bench.py <label>` (fresh + existing profile, content-ready by screen capture), desktop
+  `node apps/desktop/scripts/startup-bench.ts`, packaged `node apps/desktop/scripts/install-check.ts old.app new.app`.
+  The legacy View renderer used for the paired board comparison is kept in `design/beta/bench-legacy/` (switch it into
+  `Board.tsx` to reproduce; it is not part of the app).
+* Run long suites with normal QoS (e.g. `launchctl submit`) on macOS: background-throttled shells make the emulator
+  and Electron time out.

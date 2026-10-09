@@ -23,7 +23,7 @@ export class Credentials {
 
 /** Settings → provider (or none). The deterministic provider exists only for automated tests (CLAN_AI_PROVIDER=deterministic). */
 export function providerFactory(creds: Credentials) {
-  const test = process.env.CLAN_AI_PROVIDER === 'deterministic';
+  const test = !app.isPackaged && process.env.CLAN_AI_PROVIDER === 'deterministic';
   return (s: ProviderSettings): AIProvider | null => {
     if (s.kind === 'openai-compatible' && s.baseUrl && s.model) {
       try { return openAICompatible({ baseUrl: s.baseUrl, model: s.model, embeddingModel: s.embeddingModel, label: s.label || new URL(s.baseUrl).host, apiKey: () => creds.get(s.baseUrl) }); } catch { return null; }

@@ -12,3 +12,4 @@ coverage/
 apps/mobile/modules/*/android/build/
 apps/mobile/modules/*/android/.cxx/
 apps/mobile/e2e/.tmp-*
+__pycache__/

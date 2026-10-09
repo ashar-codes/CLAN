@@ -1,0 +1,36 @@
+{
+  "label": "canvas-run3",
+  "emulator": "Android 16 arm64 (Pixel profile), release build",
+  "results": [
+    {
+      "strokes": 100,
+      "frames": 445,
+      "p50": 25.0,
+      "p90": 40.0,
+      "p99": 53.0,
+      "jankyPct": 28.99,
+      "appPssMiB": 167.3,
+      "webviewRendererPssMiB": 159.7
+    },
+    {
+      "strokes": 1000,
+      "frames": 465,
+      "p50": 26.0,
+      "p90": 40.0,
+      "p99": 53.0,
+      "jankyPct": 27.31,
+      "appPssMiB": 172.7,
+      "webviewRendererPssMiB": 183.9
+    },
+    {
+      "strokes": 5000,
+      "frames": 407,
+      "p50": 28.0,
+      "p90": 48.0,
+      "p99": 69.0,
+      "jankyPct": 38.08,
+      "appPssMiB": 200.1,
+      "webviewRendererPssMiB": 195.5
+    }
+  ]
+}

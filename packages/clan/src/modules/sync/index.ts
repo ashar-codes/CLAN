@@ -57,6 +57,9 @@ export const linkProof = (code: string, transcript: string) => createHmac('sha25
 const eq = (a: string, b: string) => { const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b); return x.length === y.length && timingSafeEqual(x, y); };
 const isFk = (e: unknown) => /FOREIGN KEY constraint failed/.test(String((e as Error)?.message));
 const HISTORY = 16;
+export const EXPORT_FORMAT = 'clan-personal-export/v1';
+/** A page of change records stays under ~8 MB of payload (the LAN server refuses bodies over 32 MB). */
+const PAGE_BYTES = 8 * 1024 * 1024;
 
 export class PersonalSync {
   private db: Db; private identity: Identity; private now: () => number; private tmpDir: string;
@@ -198,13 +201,16 @@ export class PersonalSync {
     this.refresh();
     const owner = this.identity.localUser();
     const rows = this.db.prepare('SELECT * FROM sync_meta WHERE seq > ? ORDER BY seq LIMIT ?').all(since, limit + 1) as (Omit<Meta, 'history' | 'deleted'> & { history: string; deleted: number })[];
-    const more = rows.length > limit, page = rows.slice(0, limit);
+    let more = rows.length > limit, page = rows.slice(0, limit);
     const records: SyncRecord[] = [];
-    for (const r of page) {
+    let bytes = 0;
+    for (const [i, r] of page.entries()) {
+      if (bytes > PAGE_BYTES && records.length) { page = page.slice(0, i); more = true; break; } // keep request bodies bounded
       let payload: unknown = null;
       if (r.kind === 'device') payload = this.entry(r.id);
       else { const p = this.providers.get(r.kind); if (!p || !this.enabled(p)) continue; if (!r.deleted) payload = p.one(owner, r.id); if (!r.deleted && payload === null) continue; }
       records.push({ kind: r.kind, id: r.id, version: r.version, hash: r.hash, history: JSON.parse(r.history), deleted: !!r.deleted, payload });
+      bytes += JSON.stringify(payload).length;
     }
     return { records, next: page.at(-1)?.seq ?? since, more };
   }
@@ -325,11 +331,34 @@ export class PersonalSync {
    *  applied by its module's provider as local data, then detected as a normal local change. Returns how many applied. */
   importLocal(raw: unknown[]) {
     const owner = this.identity.localUser(); let n = 0;
-    for (const r of raw.map((x) => SyncRecord.parse(x))) {
-      const p = this.providers.get(r.kind); if (!p) continue;
-      try { tx(this.db, () => p.apply(owner, r.id, r.payload, { merge: false })); n++; } catch { /* skip what can't apply (e.g. a dangling reference) */ }
+    let todo = raw.map((x) => SyncRecord.parse(x)).filter((r) => this.providers.has(r.kind));
+    for (let pass = 0; pass < 4 && todo.length; pass++) { // later passes catch records whose parent came later (a review before its deck)
+      const left: SyncRecord[] = [];
+      for (const r of todo) {
+        try { const res = tx(this.db, () => this.providers.get(r.kind)!.apply(owner, r.id, r.payload, { merge: false })); if (res && 'needs' in res) left.push(r); else n++; }
+        catch { left.push(r); }
+      }
+      if (left.length === todo.length) break;
+      todo = left;
     }
     return n;
+  }
+
+  /** Personal export: every synced kind as change records (the same shapes sync uses), owner ids never included.
+   *  Diary only when the student asks. Files are listed by SHA-256; the host copies their bytes next to the export. */
+  exportAll(o: { diary?: boolean } = {}) {
+    const owner = this.identity.localUser(), records: SyncRecord[] = [], v = hlc(this.now(), 0, 'export');
+    for (const p of this.providers.values()) {
+      if (p.sensitive && !o.diary) continue;
+      for (const [id, payload] of p.all(owner)) records.push({ kind: p.kind, id, version: v, hash: contentHash(payload), history: [], deleted: false, payload });
+    }
+    return { format: EXPORT_FORMAT, exportedAt: this.now(), records };
+  }
+  /** Imports a personal export into this device's account (applied by each module; files must already be stored). */
+  importExport(raw: unknown) {
+    const x = z.object({ format: z.literal(EXPORT_FORMAT), records: z.array(z.unknown()).max(1_000_000) }).safeParse(raw);
+    if (!x.success) throw new Error('This is not a CLAN export.');
+    return this.importLocal(x.data.records);
   }
 
   // ---------------- conflicts ----------------
@@ -517,6 +546,14 @@ export class PersonalSync {
     if (!signer || fpOf(e.publicKey) !== e.fp) return false;
     const { sig, ...rest } = e;
     return verifyEd25519(signer.publicKey, deviceStatement(rest), sig);
+  }
+  /** For an opt-in diagnostic export: how many items of each kind and the sync counters — numbers only, never content,
+   *  ids, names or keys. */
+  diagnostics() {
+    const owner = this.identity.localUser(), counts: Record<string, number> = {};
+    for (const p of this.providers.values()) counts[p.kind] = p.all(owner).size;
+    const d = this.devices();
+    return { counts, sync: { linked: !!this.account(), devices: d.length, revoked: d.filter((x) => x.revoked).length, selfRevoked: this.selfRevoked(), settings: this.settings(), ...this.stats() } };
   }
   /** Storage numbers for the UI (no invented progress). */
   stats() {

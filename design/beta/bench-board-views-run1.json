@@ -1,0 +1,21 @@
+{
+  "label": "views-run1",
+  "emulator": "Android 16 arm64 (Pixel profile), release build",
+  "results": [
+    {
+      "strokes": 100,
+      "frames": 152,
+      "p50": 150.0,
+      "p90": 200.0,
+      "p99": 300.0,
+      "jankyPct": 100.0,
+      "appPssMiB": 287.3,
+      "webviewRendererPssMiB": 152.3
+    },
+    {
+      "strokes": 1000,
+      "failed": "app died: java.lang.OutOfMemoryError (Java heap 192 MiB growth limit)",
+      "appAlive": false
+    }
+  ]
+}

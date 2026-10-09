@@ -303,6 +303,10 @@ export type DesktopApi = {
   study: StudyApi;
   ai: AIApi;
   sync: SyncApi;
+  /** Beta feedback, saved to a file the student chooses; diagnostics only when ticked (previewable). Never uploaded. */
+  feedback: { preview(): Promise<unknown>; save(f: { kind: 'problem' | 'idea' | 'other'; text: string; diagnostics: boolean }): Promise<{ path: string } | null> };
+  /** Me › Your data: export / import (folder the student picks), automatic backups folder. */
+  data: { export(o: { diary: boolean }): Promise<{ records: number; files: number; diary: boolean } | null>; import(): Promise<{ records: number; files: number } | null>; backups(): Promise<string>; backupNow(): Promise<{ at: number }> };
   board: BoardApi;
   rec: TapeApi;
   capabilities(): Promise<Capabilities>;

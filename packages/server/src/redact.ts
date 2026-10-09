@@ -26,5 +26,12 @@ function safeJson(v: unknown) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
 
-/** The only logging path the server uses. */
-export const logError = (context: string, e: unknown) => console.error(`[classroom] ${context}: ${redact(e)}`);
+const recent: { at: number; context: string; name: string; code: string | null }[] = [];
+/** The only logging path the server uses. Also keeps the last 50 error *kinds* (context, name, code — never messages,
+ *  which can carry paths or user text) for an opt-in diagnostic export. */
+export const logError = (context: string, e: unknown) => {
+  console.error(`[classroom] ${context}: ${redact(e)}`);
+  recent.push({ at: Date.now(), context: context.slice(0, 40), name: e instanceof Error ? e.name.slice(0, 40) : typeof e, code: (e as { code?: unknown })?.code ? String((e as { code: unknown }).code).slice(0, 40) : null });
+  if (recent.length > 50) recent.shift();
+};
+export const recentErrors = () => recent.map((r) => ({ ...r }));

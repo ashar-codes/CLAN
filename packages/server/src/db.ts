@@ -1,3 +1,5 @@
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync } from 'node:fs';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 // Append-only list. Never edit a shipped migration; add a new one.
@@ -232,4 +234,47 @@ export function migrate(db: Db, upTo = MIGRATIONS.length): number {
     }
   }
   return Math.max(version, upTo);
+}
+
+// ---- data safety (device database) ----
+const backupName = (t: number) => `teacher-${new Date(t).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.db`;
+const isBackup = (n: string) => /^teacher-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/.test(n);
+const healthy = (path: string) => {
+  try { const d = new DatabaseSync(path, { readOnly: true }); try { return (d.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check === 'ok'; } finally { d.close(); } } catch { return false; }
+};
+
+/** A consistent copy of the live database (VACUUM INTO: a snapshot, safe while the app runs). Keeps the newest `keep`. */
+/** null = skipped: the copy would leave less than `reserve` bytes free (a backup must never be what fills the disk). */
+export function backupDb(db: Db, dir: string, o: { keep?: number; now?: number; reserve?: number } = {}): string | null {
+  mkdirSync(dir, { recursive: true });
+  const dest = join(dir, backupName(o.now ?? Date.now()));
+  if (existsSync(dest)) return dest;
+  const { page_count: pages, page_size: size } = { ...(db.prepare('PRAGMA page_count').get() as object), ...(db.prepare('PRAGMA page_size').get() as object) } as { page_count: number; page_size: number };
+  const fs = statfsSync(dir);
+  if (fs.bavail * fs.bsize < pages * size + (o.reserve ?? 1024 ** 3)) return null;
+  db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+  const all = readdirSync(dir).filter(isBackup).sort();
+  for (const old of all.slice(0, Math.max(0, all.length - (o.keep ?? 3)))) rmSync(join(dir, old), { force: true });
+  return dest;
+}
+
+/**
+ * Opens the device database after an integrity check. A corrupt or unreadable file is never deleted: it is moved aside
+ * and the newest backup that passes its own check is restored (no healthy backup → a fresh database). Reports what happened.
+ */
+export function openDbSafely(path: string, backupsDir: string): { db: Db; recovered: null | { from: string | null; keptAt: string } } {
+  if (!existsSync(path) || healthy(path)) {
+    if (existsSync(path)) { // an update is about to migrate: keep a copy of the old schema first (rollback = restore it)
+      const raw = new DatabaseSync(path);
+      try { const v = (raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version; if (v > 0 && v < MIGRATIONS.length) backupDb(raw, backupsDir); }
+      finally { raw.close(); }
+    }
+    return { db: openDb(path), recovered: null };
+  }
+  const keptAt = `${path}.corrupt-${Date.now()}`;
+  renameSync(path, keptAt);
+  for (const ext of ['-wal', '-shm']) if (existsSync(path + ext)) renameSync(path + ext, keptAt + ext);
+  const good = existsSync(backupsDir) ? readdirSync(backupsDir).filter(isBackup).sort().reverse().find((n) => healthy(join(backupsDir, n))) ?? null : null;
+  if (good) copyFileSync(join(backupsDir, good), path);
+  return { db: openDb(path), recovered: { from: good, keptAt } };
 }

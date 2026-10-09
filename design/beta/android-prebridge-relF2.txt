@@ -1,0 +1,18 @@
+crash / relaunch
+  ✓ SIGKILL right after saving: the note is there after relaunch
+offline personal use
+  ✓ airplane mode: note written, app restarted, note still there
+live CLAN interruptions
+  ✓ joined
+  ✓ messages flow
+  ✓ host unresponsive 20 s: phone reconnected, messages flow
+  ✓ network lost until the host noticed → phone reconnected
+  ✓ messages flow after Wi-Fi interruption
+permission denial
+  ✓ camera denied: Inbox says how to turn it on
+  ✓ Inbox still usable without the camera
+unreadable database
+  ✓ Home explains the data could not be unlocked and how to get it back
+  ✓ unreadable data kept aside, not deleted
+  ✓ fresh database works
+all passed

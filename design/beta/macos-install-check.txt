@@ -1,0 +1,4 @@
+✓ installed 0.1.0, note written
+✓ updated in place to 0.1.1: data kept
+✓ rolled back to 0.1.0: data kept (same schema; a rollback across a migration is not supported)
+✓ uninstalled (app removed): profile kept — 24 entries

@@ -25,7 +25,8 @@ it('Astra object actions, responsive layout, reduced motion and GPU fallback sta
   expect(await p.getByLabel('Hairstyle', { exact: true }).inputValue()).toBe('bun');
   for (const mode of ['Reduced','Minimal']) {
    await p.getByRole('radio', { name: new RegExp(`^${mode}`) }).check(); await tab('Study');
-   expect(await p.locator('canvas').count()).toBe(0); expect(await p.getByText('Course with no topics', { exact: true }).count()).toBeGreaterThan(0); await tab('Me');
+   await p.getByText('Course with no topics', { exact: true }).first().waitFor(); // courses load async: count() alone raced it
+   expect(await p.locator('canvas').count()).toBe(0); await tab('Me');
   }
   await p.getByRole('radio', { name: /^Full/ }).check(); await p.emulateMedia({ reducedMotion: 'reduce' }); await tab('My Space');
   expect(await p.locator('.c-mate-body').evaluate((e) => parseFloat(getComputedStyle(e).animationDuration))).toBeLessThan(.001);

@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { CLANmate, mateFor } from '@clan/design';
 import type { DiaryEntry, HomeView } from '../../shared.ts';
 import { api } from '../App.tsx';
-import { useLoad } from './useLoad.ts';
+import { errText, useLoad } from './useLoad.ts';
 import { experienceIsAuto, setExperience, type Experience } from './experience.ts';
 import { AvatarEditor, useAvatar } from './avatar';
 
@@ -36,6 +36,8 @@ export function Me({ experience, section }: { experience: Experience; section: '
         <Notices />
         <Suspense fallback={null}><DevicesPanel /></Suspense>
         <Suspense fallback={null}><AISettingsPanel /></Suspense>
+        <YourData />
+        <BetaFeedback />
         <span className="eyebrow">Privacy</span>
         <p className="muted small-text">AI reading your Diary is off by default (see AI above). Notes and links are private until you share them into a CLAN. Your Diary is never shared and never searchable.</p>
       </section>
@@ -74,5 +76,45 @@ function Notices() {
       <label className="check"><input type="checkbox" checked={p.previews} onChange={(e) => void set('previews', e.target.checked)} /> Show message text in notifications</label>
       <small className="muted">Focus mode holds every alert. Nothing notifies you about a conversation you have open.</small>
     </fieldset>
+  );
+}
+
+/** Your data: export to a folder you choose (Diary only if ticked), import an export, open automatic backups. */
+function YourData() {
+  const [diary, setDiary] = useState(false), [msg, setMsg] = useState('');
+  const run = async (f: () => Promise<string>) => { try { setMsg(await f()); } catch (e) { setMsg(errText(e)); } };
+  return (
+    <section className="stack" aria-label="Your data">
+      <span className="eyebrow">Your data</span>
+      <p className="muted small-text">Automatic backups of everything on this computer are kept (newest three). Export makes a copy you can keep or move.</p>
+      <label className="radio"><input type="checkbox" checked={diary} onChange={(e) => setDiary(e.target.checked)} /><span>Include my Diary in the export</span></label>
+      <div className="row">
+        <button onClick={() => void run(async () => { const r = await api.data.export({ diary }); return r ? `Exported ${r.records} items and ${r.files} files${r.diary ? ', including your Diary' : ''}.` : ''; })}>Export my data…</button>
+        <button className="ghost" onClick={() => void run(async () => { const r = await api.data.import(); return r ? `Imported ${r.records} items and ${r.files} files.` : ''; })}>Import an export…</button>
+        <button className="ghost" onClick={() => void run(async () => { await api.data.backupNow(); return 'Backed up.'; })}>Back up now</button>
+        <button className="ghost" onClick={() => void api.data.backups()}>Show backups</button>
+      </div>
+      {msg && <p className="muted small-text" role="status">{msg}</p>}
+    </section>
+  );
+}
+
+/** Beta feedback: written here, saved as a file you send yourself. Diagnostics (versions, counts, error kinds) only if ticked. */
+function BetaFeedback() {
+  const [kind, setKind] = useState<'problem' | 'idea' | 'other'>('problem'), [text, setText] = useState(''), [diag, setDiag] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null), [msg, setMsg] = useState('');
+  return (
+    <section className="stack" aria-label="Beta feedback">
+      <span className="eyebrow">Beta feedback</span>
+      <div className="row" role="radiogroup" aria-label="Feedback kind">
+        {(['problem', 'idea', 'other'] as const).map((k) => <label key={k} className="radio"><input type="radio" name="fb-kind" checked={kind === k} onChange={() => setKind(k)} /><span>{k === 'problem' ? 'Something went wrong' : k === 'idea' ? 'An idea' : 'Other'}</span></label>)}
+      </div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={10000} rows={4} aria-label="Your feedback" placeholder="What happened, or what would help?" />
+      <label className="radio"><input type="checkbox" checked={diag} onChange={(e) => { setDiag(e.target.checked); if (!e.target.checked) setPreview(null); }} /><span>Attach diagnostics <small className="muted">versions, platform, item counts and error types — never your notes, Diary, chats, files, names or keys</small></span></label>
+      {diag && <button className="ghost" onClick={async () => setPreview(JSON.stringify(await api.feedback.preview(), null, 2))}>Show exactly what's attached</button>}
+      {preview && <pre className="small-text" aria-label="Diagnostics preview" style={{ maxHeight: 200, overflow: 'auto' }}>{preview}</pre>}
+      <button disabled={!text.trim()} onClick={async () => { try { const r = await api.feedback.save({ kind, text, diagnostics: diag }); if (r) { setMsg(`Saved to ${r.path}. Send that file to the CLAN team yourself — nothing is uploaded.`); setText(''); } } catch (e) { setMsg(errText(e)); } }}>Save feedback…</button>
+      {msg && <p className="muted small-text" role="status">{msg}</p>}
+    </section>
   );
 }
