@@ -22,7 +22,7 @@ def main():
     label, stages = sys.argv[1], [int(x) for x in sys.argv[2:]] or [100, 1000, 5000]
     host = subprocess.Popen(['node', 'tools/sim/class-peer.ts', '--host', HOST_IP], stdout=subprocess.PIPE, text=True)
     try:
-        host.stdout.readline(); cls = http(47499, '/state')
+        assert host.stdout.readline(), 'test host failed to start (port in use?)'; cls = http(47499, '/state')
         adb('shell', 'am', 'force-stop', PKG); adb('shell', 'pm', 'grant', PKG, 'android.permission.POST_NOTIFICATIONS'); adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(4)
         tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')
         until(lambda: any(m['status'] == 'approved' and m['connected'] for m in http(47499, '/state')['members']), 'joined', 60)

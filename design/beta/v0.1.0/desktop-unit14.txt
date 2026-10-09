@@ -1,0 +1,10 @@
+TYPECHECK-OK
+     × wrong code is throttled per source, then globally (each OPAQUE start counts as one guess) 66741ms
+     × the SFU enforces publishing; viewers receive live, changing frames; a host stop revokes publishing 21090ms
+     × a corrupted transfer is discarded and retried; low storage waits; large files are opt-in; CLAN files never sync 30045ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  packages/clan/test/sync.test.ts > files > a corrupted transfer is discarded and retried; low storage waits; large files are opt-in; CLAN files never sync
+ FAIL  packages/server/test/media.test.ts > screen sharing (local SFU) > the SFU enforces publishing; viewers receive live, changing frames; a host stop revokes publishing
+ FAIL  packages/server/test/unit.test.ts > classroom membership > wrong code is throttled per source, then globally (each OPAQUE start counts as one guess)
+ Test Files  3 failed | 31 passed (34)
+      Tests  3 failed | 318 passed (321)

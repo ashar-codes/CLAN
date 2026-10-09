@@ -1,0 +1,26 @@
+profile + core on the phone
+  ✓ encrypted core database opened; Home shows the agenda
+personal device sync
+  ✓ linked by code with approval on the laptop; first sync done
+  ✓ laptop note arrived on the phone
+  ✓ phone note arrived on the laptop
+   laptop before reconnect: [('From the laptop', 'laptop edit while apart')] {'tracked': 5, 'pending': 5, 'conflicts': 0, 'deferred': 0, 'transfers': 0, 'transferBytes': 0, 'skippedBytes': 0}
+   laptop after reconnect: [('From the laptop', 'laptop edit while apart')] conflicts: [('Edited on two devices while apart. Compare and choose.', 'laptop edit while apart', 'phone edit while apart')]
+  ✓ offline edits on both kept as a conflict; "Keep both" converged on both devices
+   laptop devices: [{'fp': 'FY_jMjk1Q9b492drQOSMYG', 'revoked': False}, {'fp': 'Cvz6v_Gz1o_JiXtgJvSyK8', 'revoked': True}]  phone fp: Cvz6v_Gz1o_JiXtgJvSyK8
+   laptop after phone sync: [('FY_jMjk1Q9b492drQOSMYG', False, None), ('Cvz6v_Gz1o_JiXtgJvSyK8', True, 1791575104509)]
+  ✓ unlinked on the laptop → phone refused and says so
+Share to CLAN
+  ✓ shared link + text saved to the Inbox (offline, private)
+live CLAN
+  ✓ joined over OPAQUE + pinned TLS
+  ✓ host message shown on the phone
+  ✓ phone message accepted by the host
+  ✓ host board op on the phone
+  ✓ phone board op on the host
+  ✓ host file downloaded and SHA-256 verified
+all passed
+DEBUG-SIGNAL SIGTERM 2026-10-09T19:48:29.741Z
+DEBUG-END 2026-10-09T19:48:29.743Z Error
+DEBUG-SIGNAL SIGTERM 2026-10-09T19:48:31.085Z
+DEBUG-END 2026-10-09T19:48:31.086Z Error

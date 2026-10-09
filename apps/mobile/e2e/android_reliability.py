@@ -20,7 +20,7 @@ def has(label):
     except AssertionError: return False
 def host():
     p = subprocess.Popen(['node', 'tools/sim/class-peer.ts', '--host', HOST_IP], stdout=subprocess.PIPE, text=True)
-    p.stdout.readline(); return p
+    assert p.stdout.readline(), 'test host failed to start (port in use?)'; return p
 
 def main():
     assert b'root' in adb('shell', 'id'), 'needs `adb root`'

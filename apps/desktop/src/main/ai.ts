@@ -51,7 +51,7 @@ export function registerAI(c: ClanApp, creds: Credentials) {
   const runs = new Map<string, AbortController>();
   const endpoint = () => c.ai.settings(me).provider.baseUrl;
 
-  handle('ai:status', () => ({ ...c.ai.status(me), hasKey: creds.has(endpoint()), localAvailable: process.env.CLAN_AI_PROVIDER === 'deterministic', secureStorage: safeStorage.isEncryptionAvailable() }));
+  handle('ai:status', () => ({ ...c.ai.status(me), hasKey: creds.has(endpoint()), localAvailable: !app.isPackaged && process.env.CLAN_AI_PROVIDER === 'deterministic', secureStorage: safeStorage.isEncryptionAvailable() }));
   handle('ai:settings', () => c.ai.settings(me));
   handle('ai:setSettings', (raw) => c.ai.setSettings(me, raw));
   handle('ai:agents', () => c.ai.agents().map((a) => ({ id: a.id, name: a.name, reads: a.reads, proposals: a.proposals, cannot: a.cannot })));

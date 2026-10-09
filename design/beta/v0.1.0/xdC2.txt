@@ -1,0 +1,29 @@
+node:events:487
+      throw er; // Unhandled 'error' event
+      ^
+Error: listen EADDRINUSE: address already in use 127.0.0.1:47499
+Emitted 'error' event on Server instance at:
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '127.0.0.1',
+  port: 47499
+}
+Node.js v24.19.0
+profile + core on the phone
+  ✓ encrypted core database opened; Home shows the agenda
+personal device sync
+  ✓ linked by code with approval on the laptop; first sync done
+  ✓ laptop note arrived on the phone
+  ✓ phone note arrived on the laptop
+   laptop before reconnect: [('From the laptop', 'laptop edit while apart')] {'tracked': 5, 'pending': 5, 'conflicts': 0, 'deferred': 0, 'transfers': 0, 'transferBytes': 0, 'skippedBytes': 0}
+   laptop after reconnect: [('From the laptop', 'laptop edit while apart')] conflicts: [('Edited on two devices while apart. Compare and choose.', 'laptop edit while apart', 'phone edit while apart')]
+  ✓ offline edits on both kept as a conflict; "Keep both" converged on both devices
+   laptop devices: [{'fp': 'KyroAKdyUsSBzsrnEAYVe0', 'revoked': False}, {'fp': 'ty8Vn-5foIOqHILatsLr4y', 'revoked': True}]  phone fp: ty8Vn-5foIOqHILatsLr4y
+   laptop after phone sync: [('KyroAKdyUsSBzsrnEAYVe0', False, None), ('ty8Vn-5foIOqHILatsLr4y', True, 1791578194336)]
+  ✓ unlinked on the laptop → phone refused and says so
+Share to CLAN
+  ✓ shared link + text saved to the Inbox (offline, private)
+live CLAN
+  ✗ timed out: member connected
+  screen: ← Back | ← Back | Join CLAN | Joining as Sara Ahmed · edit | Joining as Sara Ahmed · edit | Six digit classroom code | Host address | Could not reach any CLAN. | Join | Join | Looking for CLANs on this Wi-Fi… Make sure you are on the sa | Home | ⌂ | Home | Study | ✎ | Study | Inbox, 2 items | ⇣ | Inbox · 2 | Diary | ❦ | Diary | Me | ☺ | Me

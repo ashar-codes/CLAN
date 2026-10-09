@@ -1,0 +1,13 @@
+  [4038 ms] devtools connected
+  [4039 ms] page file:///private/var/folders/qp/572t6s_90bs96q3h_p1mxl1h0000gn/T/clan-install-9uFNyc/Applications/CLAN.app/Contents/Resources/app.asar/dist/renderer/index.html
+  [4212 ms] api ready
+✓ installed 0.1.0, note written, 3 identity keys (safeStorage)
+  [3641 ms] devtools connected
+  [3641 ms] page file:///private/var/folders/qp/572t6s_90bs96q3h_p1mxl1h0000gn/T/clan-install-9uFNyc/Applications/CLAN.app/Contents/Resources/app.asar/dist/renderer/index.html
+  [3743 ms] api ready
+✓ updated in place to 0.1.1: data and identity keys kept
+  [4288 ms] devtools connected
+  [4288 ms] page file:///private/var/folders/qp/572t6s_90bs96q3h_p1mxl1h0000gn/T/clan-install-9uFNyc/Applications/CLAN.app/Contents/Resources/app.asar/dist/renderer/index.html
+  [4307 ms] api ready
+✓ rolled back to 0.1.0: data kept (same schema; a rollback across a migration is not supported)
+✓ uninstalled (app removed): profile kept — 23 entries

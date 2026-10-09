@@ -193,6 +193,25 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
 * **Exports** contain the student's own records only (no device keys, chats, AI keys or owner ids); Diary only when
   ticked. Files are written `0600`.
 
+## Beta release (Phase 14)
+* **Signing material:** the Android upload keystore is outside the repo (`~/.clan-signing`, 0600, PKCS#12) and its
+  password lives in the login keychain; release builds fail without it instead of falling back to the debug key.
+  Verified: a debug-signed update is refused by Android (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) and the data stays.
+* **Packaged desktop:** every test-only switch is ignored when packaged (downloads/export folders, peer upload throttle,
+  test AI provider and its status flag, mock Direct backend, test capture, dev URL). `CLASSROOM_USER_DATA` is still
+  honoured (a disposable profile for install tests; it only changes where the same user's own data lives).
+  `scripts/release-audit.sh` checks each package for keys, env files, source maps, tests, dev URLs and foreign
+  native binaries.
+* **Integrity:** `SHA256SUMS` for every installer; APK certificate fingerprint published in SETUP.md.
+* **Windows firewall:** program-scoped, local-subnet-only inbound rules (TCP CLAN, UDP discovery, UDP screen sharing),
+  removed on uninstall — unverified on Windows.
+* **macOS keychain:** CLAN's keys are wrapped by the login-keychain item "Classroom LAN Safe Storage". Ad-hoc builds have
+  a cdhash-only designated requirement that changes every build; on the build Mac an update between two ad-hoc builds
+  kept all identity keys (tested), but on other Macs macOS may ask for consent after an update and a denial means a new
+  identity (old key files are kept as `*.unreadable-*`, never exported). Developer ID signing gives a stable requirement.
+* **iOS:** the remote-push entitlement is removed (no push server exists); purpose strings say exactly when camera and
+  photos are used and that the microphone is never turned on.
+
 ## Known gaps (tracked)
 * A packaged desktop app still accepts Chromium's `--remote-debugging-port`: a process running as the same user can
   drive the UI (and the preload API) — the same reach it already has over the unencrypted desktop database.

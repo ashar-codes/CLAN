@@ -1,0 +1,10 @@
+load { 12.50 20.61 21.38 }
+     × the SFU enforces publishing; viewers receive live, changing frames; a host stop revokes publishing 20064ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 54 passed (55)
+   × Study Group: member presents → host wall shows live frames → switch source → stop → wall returns 56386ms
+   × Minimal experience still shows the presentation; nothing is captured without an explicit pick (server-side refusal: media.test.ts) 80112ms
+   × export → import, local feedback without private text, and recovery from a damaged database 79605ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  3 failed | 5 passed (8)
+load { 70.49 87.42 62.16 }

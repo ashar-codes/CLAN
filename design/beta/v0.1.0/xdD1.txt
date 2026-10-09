@@ -1,0 +1,25 @@
+profile + core on the phone
+  ✓ encrypted core database opened; Home shows the agenda
+personal device sync
+  ✓ linked by code with approval on the laptop; first sync done
+  ✓ laptop note arrived on the phone
+  ✓ phone note arrived on the laptop
+   laptop before reconnect: [('From the laptop', 'laptop edit while apart')] {'tracked': 5, 'pending': 5, 'conflicts': 0, 'deferred': 0, 'transfers': 0, 'transferBytes': 0, 'skippedBytes': 0}
+   laptop after reconnect: [('From the laptop', 'laptop edit while apart')] conflicts: [('Edited on two devices while apart. Compare and choose.', 'laptop edit while apart', 'phone edit while apart')]
+  ✓ offline edits on both kept as a conflict; "Keep both" converged on both devices
+   laptop devices: [{'fp': 'xELxNn5_dBASuQXtT40gyn', 'revoked': False}, {'fp': 'kZ2VP-KXP2iEjhcvOdQtgc', 'revoked': True}]  phone fp: kZ2VP-KXP2iEjhcvOdQtgc
+   laptop after phone sync: [('xELxNn5_dBASuQXtT40gyn', False, None), ('kZ2VP-KXP2iEjhcvOdQtgc', True, 1791575598590)]
+  ✓ unlinked on the laptop → phone refused and says so
+Share to CLAN
+  ✓ shared link + text saved to the Inbox (offline, private)
+live CLAN
+  ✓ joined over OPAQUE + pinned TLS
+  ✓ host message shown on the phone
+  ✓ phone message accepted by the host
+  ✓ host board op on the phone
+DEBUG-SIGNAL SIGTERM 2026-10-09T19:56:28.850Z
+DEBUG-END 2026-10-09T19:56:28.866Z Error
+  ✗ timed out: phone text on the host board
+  screen: Phone test group | Study group | The CLAN has ended. | OK | OK
+DEBUG-SIGNAL SIGTERM 2026-10-09T19:56:33.757Z
+DEBUG-END 2026-10-09T19:56:33.757Z Error

@@ -22,3 +22,7 @@ nodeLinker: hoisted
 allowBuilds:
   electron: true
   electron-winstaller: false
+# Packaging Windows x64 from macOS needs the win32 builds of native optional deps (e.g. @napi-rs/canvas for pdfjs).
+supportedArchitectures:
+  os: [current, win32]
+  cpu: [current, x64]

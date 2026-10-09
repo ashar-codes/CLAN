@@ -1,4 +1,24 @@
-# Closed-beta readiness (Phase 13, tag `clan-beta-hardening`)
+# Closed-beta readiness
+
+> **v0.1.0 closed beta (Phase 14, tag `clan-beta-v0.1.0`):** artifacts, checksums, setup guide and tester checklists are
+> in `release/beta-v0.1.0/` (installers are git-ignored; text files are committed). Per-artifact status
+> (BUILT / INSTALLED / TESTED / UNVERIFIED) is in `release/beta-v0.1.0/KNOWN_LIMITATIONS.md`. Resolved since Phase 13:
+> Android upload-key signing + versionCode, macOS BLE helper bundled (missing helpers now fail the build), Windows
+> installer built (unverified), DMG built. The sections below are the Phase 13 analysis, updated where marked.
+
+## v0.1.0 release blockers (Phase 14, in order)
+1. **Verification on an idle machine:** the final unit/E2E/cross-device runs were done while the build Mac was overloaded
+   and thermally throttled; timing-bound tests timed out (the Phase 13 tag failed the same way in an A/B run). Before
+   handing out installers: `pnpm test && pnpm test:e2e` and `python3 apps/mobile/e2e/android_cross_device.py` ×3 on an
+   idle machine (`design/beta/v0.1.0/README.md`).
+2. **Phone whiteboard text intermittently not reaching the host** in 3 emulator runs — cause not found.
+3. **Physical devices:** no phone, Windows PC or classroom Wi-Fi has run v0.1.0.
+4. **Windows installer unverified** (built on macOS; unsigned; firewall rules/DPAPI/Direct helper untested).
+5. **macOS unsigned/ad-hoc:** Gatekeeper "Open Anyway"; possible keychain consent after updates (deny → new identity).
+6. **iOS not built** (Xcode + Apple team required; handoff below).
+7. Back up `~/.clan-signing/clan-beta-upload.p12` and the "CLAN Android upload key" keychain password offline.
+
+## Phase 13 analysis (tag `clan-beta-hardening`)
 
 What has been **run**, what has **not**, and what blocks a closed beta per platform. Evidence is in
 [`design/beta/`](../design/beta). Nothing below is claimed for hardware or platforms it was not run on.
@@ -21,15 +41,15 @@ What has been **run**, what has **not**, and what blocks a closed beta per platf
 
 **macOS**
 3. Developer ID signing + notarization not configured. Unsigned (ad-hoc) builds are blocked by Gatekeeper on download, and the Keychain/safeStorage identity changes with every re-sign. That means re-approval as a new device, and AI keys can't be decrypted.
-4. `native/macos-ble/clan-ble` must be built before packaging (`electron-builder` skips it silently when absent → no Direct over BLE).
+4. ~~`clan-ble` silently omitted~~ — **resolved:** built and bundled; a missing helper now fails packaging.
 
 **Windows**
 5. Never built or run on Windows: NSIS installer, `CLAN.DirectHelper.exe`, LiveKit `win32` binary, firewall rules, `safeStorage` (DPAPI), mDNS and paths are all untested.
 
 **Android**
-6. Release APK is signed with the **debug keystore** (Expo prebuild default). Needs an upload key + Play App Signing. A
-   key change makes updates impossible (users would have to uninstall → phone data is lost, see Data below).
-7. `versionCode` is not set (defaults to 1). Every update must increase it.
+6. ~~Release APK signed with the debug keystore~~ — **resolved (Phase 14):** beta upload key outside the repo, builds fail
+   without it. Still open: Play App Signing if the app goes to Google Play; back up the key offline.
+7. ~~`versionCode` not set~~ — **resolved:** `expo.android.versionCode` = 1 for v0.1.0, +1 per build.
 8. Only the emulator: real Wi-Fi Direct / BLE / camera / notifications / low-memory behaviour unverified.
 
 **iOS**
@@ -88,3 +108,26 @@ the restore is manual — not automated.
 Me › Beta feedback writes a JSON file the student chooses and sends themselves. Diagnostics are opt-in, previewable
 ("Show exactly what's attached") and contain versions, platform, counts and error kinds only — never notes, Diary, chats,
 files, names, ids, credentials or log text (tested). Nothing is uploaded automatically; CLAN has no telemetry.
+
+## iOS handoff (Phase 14 audit; not built)
+
+Blocker on this machine: only Command Line Tools (`xcode-select -p` → `/Library/Developer/CommandLineTools`), no Xcode,
+no CocoaPods run, no Apple Developer team. `expo prebuild -p ios` succeeds and was audited; nothing has been compiled
+for iOS (only `PinnedTrust.swift` / `DirectBle.swift` type-check against the macOS SDK), so iOS compatibility is **not**
+claimed.
+
+Generated project (audited): targets `CLAN` (`app.classroomlan.student`, iOS 16.4) and `CLANShare` (share extension,
+`app.classroomlan.student.share`, iOS 15.1); both use App Group `group.app.classroomlan.student`; the app also has
+`com.apple.developer.networking.HotspotConfiguration`. Version 0.1.0 / build 1 on both (the extension follows the app).
+Fixed in Phase 14: vague camera/photo/microphone texts, remote-push entitlement removed, hard-coded extension version.
+
+Prerequisites (the person with the Apple account):
+1. Xcode (version required by Expo SDK 57 / RN 0.86) + `sudo xcode-select -s /Applications/Xcode.app`, CocoaPods.
+2. Apple Developer Program team. In Certificates, Identifiers & Profiles: App IDs `app.classroomlan.student`
+   (capabilities: App Groups, Hotspot Configuration) and `app.classroomlan.student.share` (App Groups); App Group
+   `group.app.classroomlan.student`.
+3. Set `expo.ios.appleTeamId` in `apps/mobile/app.json` (the share-extension plugin passes it to both targets).
+
+Build: `cd apps/mobile && npx expo prebuild -p ios && cd ios && pod install && open CLAN.xcworkspace` → Product ›
+Archive → Distribute → TestFlight. Then run the student checklist on a physical iPhone (Local Network prompt, share
+extension, SQLCipher, OPAQUE WebView join, screen-share viewing). Bump `expo.ios.buildNumber` for every upload.

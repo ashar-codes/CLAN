@@ -1,7 +1,7 @@
 // Local whiteboards (Personal / Course / Study Session) and export. CLAN boards are served by the hosting session over
 // its pinned WSS; this only handles boards that belong to the person on this device. Export is derived output: a PNG
 // rendered by the board itself (or that PNG laid out as a PDF page); the editable board is never replaced by it.
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { writeFile } from 'node:fs/promises';
 import { z } from 'zod';
 import type { ClanApp } from '@clan/core';
@@ -23,7 +23,7 @@ export function registerBoards(c: ClanApp) {
     const f = z.enum(['png', 'pdf']).parse(fmt), url = z.string().max(60_000_000).regex(/^data:image\/png;base64,/).parse(dataUrl);
     const name = `${z.string().max(120).parse(title).replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Board'}.${f}`;
     const w = BrowserWindow.getFocusedWindow() ?? undefined;
-    const r = process.env.CLAN_EXPORT_DIR ? { canceled: false, filePath: `${process.env.CLAN_EXPORT_DIR}/${name}` } // tests: no dialog
+    const r = !app.isPackaged && process.env.CLAN_EXPORT_DIR ? { canceled: false, filePath: `${process.env.CLAN_EXPORT_DIR}/${name}` } // tests: no dialog
       : w ? await dialog.showSaveDialog(w, { defaultPath: name }) : await dialog.showSaveDialog({ defaultPath: name });
     if (r.canceled || !r.filePath) return null;
     const png = Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');

@@ -159,3 +159,16 @@ Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi
 * **Tests:** 321 unit; desktop E2E 21 → 22 (+2 PERF-only skipped); new Android reliability suite; packaged macOS
   install/update/rollback check. See BETA_READINESS.md and design/beta/.
 
+
+## Closed Beta Release v0.1.0 (tag `clan-beta-v0.1.0`)
+* **Artifacts** (`release/beta-v0.1.0/`, installers git-ignored): macOS arm64 DMG (ad-hoc), Windows x64 NSIS installer
+  (built on macOS, unverified), Android arm64 APK (beta upload key, versionCode 1), SHA256SUMS, setup guide, release
+  notes, known limitations, student and teacher checklists. iOS: audited and documented, not built (no Xcode/team).
+* **Release fixes:** missing native helpers fail packaging; `clan-ble` bundled; Windows firewall rules for discovery and
+  screen sharing (UDP) and a per-machine elevated install so they can be added; per-platform native binaries only
+  (`supportedArchitectures` installs the win32 ones); a files-pattern bug that shipped the E2E suite inside the asar
+  was caught by the new release audit and fixed; Android release signing plugin (no debug-key fallback) + versionCode;
+  `SYSTEM_ALERT_WINDOW` blocked; iOS purpose strings, no push entitlement, extension version follows the app; packaged
+  desktop ignores all test switches; macOS declares `_clansync._tcp`.
+* **New checks:** Android install → upgrade (data, Diary, device identity, signed sync; other-key APK refused), macOS
+  packaged install → update → rollback with identity-key assertions, package audit script.

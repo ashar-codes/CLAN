@@ -136,3 +136,14 @@ Results and raw logs: [`design/beta/`](../design/beta); release readiness: [BETA
   `Board.tsx` to reproduce; it is not part of the app).
 * Run long suites with normal QoS (e.g. `launchctl submit`) on macOS: background-throttled shells make the emulator
   and Electron time out.
+
+## Beta release (Phase 14)
+* **Android install/upgrade:** `python3 apps/mobile/e2e/android_upgrade.py OLD.apk NEW.apk [OTHER_KEY.apk]` — clean
+  install, profile + note + Diary + device link, `install -r` to a higher versionCode, then checks data, the same device
+  identity and signed sync, and that an APK signed with another key is refused. Build NEW with
+  `CLAN_TEST_VERSION=0.1.1:2 NO_INSTALL=1 apps/mobile/scripts/android-dev.sh --prebuild --release`.
+* **macOS packaged install/update/rollback:** `node apps/desktop/scripts/install-check.ts OLD.app NEW.app` now also
+  asserts that the safeStorage-wrapped identity keys survive update and rollback (none renamed `*.unreadable-*`).
+* **Package audit:** `sh apps/desktop/scripts/release-audit.sh <resources dir> darwin|win32`.
+* **Helper guard:** packaging without `clan-ble` (macOS) or `CLAN.DirectHelper.exe` / `livekit-server.exe` (Windows)
+  fails with "Missing native helpers" (verified by hand on macOS).

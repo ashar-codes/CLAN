@@ -1,0 +1,23 @@
+start load { 15.42 35.26 45.17 }
+     × wrong code is throttled per source, then globally (each OPAQUE start counts as one guess) 106389ms
+     × Classroom: members must ask; the host approves; the approved member presents; the host stops it (server-side) 14229ms
+     × one presenter at a time; a host may stop them and switch 8258ms
+     × the SFU enforces publishing; viewers receive live, changing frames; a host stop revokes publishing 21908ms
+     × signalling goes through the pinned CLAN TLS server; without a valid media token the SFU refuses 20086ms
+     × a corrupted transfer is discarded and retried; low storage waits; large files are opt-in; CLAN files never sync 30222ms
+     × tokens do not cross classrooms 29493ms
+     × code guessing is throttled at the pairing endpoint with Retry-After 22447ms
+     × a fake BLE host (other code) cannot complete OPAQUE; with both nearby the real one is chosen 25027ms
+     × correct code joins; WSS hello; wrong code refused 21146ms
+     × fake classroom (spoofed discovery) cannot pair 29105ms
+     × tampered fileName fails verification 21245ms
+     × tampered size fails verification 22578ms
+     × only the two participants receive or can fetch it; the host device never notifies about it 33801ms
+     × cross-CLAN: another CLAN hosted by the same device (same database) is invisible; forged authors are impossible 23725ms
+     × streams a long recording (≈2 h of 1 s chunks) to disk in order, with flat memory 20103ms
+     × corrupt / wrong-chunk / lying / refusing / slow peers are penalised; the file is still correct 120500ms
+     × 100 peers acquire a 2 MB resource (8 chunks); all verify; teacher sends far less than 100 x size 101993ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  10 failed | 24 passed (34)
+      Tests  18 failed | 303 passed (321)
+mid load { 18.72 27.28 37.03 }

@@ -31,7 +31,8 @@ const withTarget = (config) => withXcodeProject(config, (c) => {
     if (!b || b.PRODUCT_NAME !== `"${NAME}"`) continue;
     Object.assign(b, {
       INFOPLIST_FILE: `${NAME}/Info.plist`, CODE_SIGN_ENTITLEMENTS: `${NAME}/${NAME}.entitlements`, PRODUCT_BUNDLE_IDENTIFIER: bundleId,
-      SWIFT_VERSION: '5.0', IPHONEOS_DEPLOYMENT_TARGET: '15.1', TARGETED_DEVICE_FAMILY: '"1,2"', MARKETING_VERSION: '0.1.0', CURRENT_PROJECT_VERSION: '1',
+      SWIFT_VERSION: '5.0', IPHONEOS_DEPLOYMENT_TARGET: '15.1', TARGETED_DEVICE_FAMILY: '"1,2"', MARKETING_VERSION: config.version, CURRENT_PROJECT_VERSION: config.ios?.buildNumber ?? '1', // must equal the app's
+      ...(config.ios?.appleTeamId ? { DEVELOPMENT_TEAM: config.ios.appleTeamId } : {}),
       SKIP_INSTALL: 'YES', CODE_SIGN_STYLE: 'Automatic', GENERATE_INFOPLIST_FILE: 'NO',
     });
   }

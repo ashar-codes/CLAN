@@ -1,0 +1,14 @@
+   × Minimal experience still shows the presentation; nothing is captured without an explicit pick (server-side refusal: media.test.ts) 37873ms
+   × Astra object actions, responsive layout, reduced motion and GPU fallback stay usable 38469ms
+   × Study Tape: session → record → markers → stop → play → jump → link → restart persists 24101ms
+   × export → import, local feedback without private text, and recovery from a damaged database 42917ms
+ FAIL  e2e/data.test.ts [ e2e/data.test.ts ]
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  e2e/astra-world.test.ts > Astra object actions, responsive layout, reduced motion and GPU fallback stay usable
+ FAIL  e2e/board-tape.test.ts > Study Tape: session → record → markers → stop → play → jump → link → restart persists
+AssertionError: expected 0 to be greater than 1
+ FAIL  e2e/data.test.ts > export → import, local feedback without private text, and recovery from a damaged database
+ FAIL  e2e/screen.test.ts > Minimal experience still shows the presentation; nothing is captured without an explicit pick (server-side refusal: media.test.ts)
+ Test Files  4 failed | 10 passed | 1 skipped (15)
+      Tests  4 failed | 18 passed | 2 skipped (24)
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @classroom/desktop@0.1.0 test:e2e: `vite build -c vite.main.config.ts && vite build -c vite.preload.config.ts && vite build && vitest run -c vitest.e2e.config.ts`

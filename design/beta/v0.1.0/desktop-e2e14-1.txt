@@ -1,0 +1,8 @@
+   × Classroom: student requests → host allows → student presents → host stops it 33790ms
+   × Astra object actions, responsive layout, reduced motion and GPU fallback stay usable 39955ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  e2e/astra-world.test.ts > Astra object actions, responsive layout, reduced motion and GPU fallback stay usable
+ FAIL  e2e/screen.test.ts > Classroom: student requests → host allows → student presents → host stops it
+ Test Files  2 failed | 12 passed | 1 skipped (15)
+      Tests  2 failed | 20 passed | 2 skipped (24)
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @classroom/desktop@0.1.0 test:e2e: `vite build -c vite.main.config.ts && vite build -c vite.preload.config.ts && vite build && vitest run -c vitest.e2e.config.ts`

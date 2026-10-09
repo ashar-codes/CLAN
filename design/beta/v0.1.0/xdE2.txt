@@ -1,0 +1,4 @@
+profile + core on the phone
+  screen at failure: CLAN isn't responding | Close app | Wait
+  ✗ not on screen: Student / roll number
+  screen: CLAN isn't responding | Close app | Wait

@@ -57,7 +57,7 @@ export class StudentFiles {
     if (!a) {
       const route = this.route(c);
       const host = new URL(route.url).hostname;
-      const limit = Number(process.env.CLASSROOM_PEER_UPLOAD_LIMIT ?? 0); // bytes/s; used by tests to slow a peer down
+      const limit = app.isPackaged ? 0 : Number(process.env.CLASSROOM_PEER_UPLOAD_LIMIT ?? 0); // bytes/s; used by tests to slow a peer down
       a = new PeerAgent({
         transport: route.transport, url: route.url, token: () => this.tokens.get(c.sessionId)!, sessionId: c.sessionId,
         teacherKey: route.binding.teacherPublicKey, device: this.trust.device(), host: host === '127.0.0.1' ? host : this.classroomInterface(host),
@@ -91,7 +91,7 @@ export class StudentFiles {
   }
 
   private destDir(c: Conn) {
-    const root = process.env.CLASSROOM_DOWNLOADS_DIR ?? join(app.getPath('downloads'), 'CLAN');
+    const root = (!app.isPackaged && process.env.CLASSROOM_DOWNLOADS_DIR) || join(app.getPath('downloads'), 'CLAN');
     return join(root, safeFileName(c.classTitle));
   }
   private completedPath() { return join(this.dataDir, 'downloads.json'); }

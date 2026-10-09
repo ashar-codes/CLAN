@@ -1,0 +1,8 @@
+clean install (versionCode 1)
+  ✓ linked (device QFeMQaa7…) and synced
+  ✓ upgraded in place (1 → 2); profile kept
+  ✓ notes kept
+  ✓ Diary kept (encrypted database opened with the same Keystore key)
+  ✓ same device identity, still linked, signed sync over the pinned certificate works both ways
+  ✓ an APK signed with another key is refused as an update; data untouched
+all passed

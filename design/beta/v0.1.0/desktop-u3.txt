@@ -1,0 +1,5 @@
+     × a corrupted transfer is discarded and retried; low storage waits; large files are opt-in; CLAN files never sync 30143ms
+     × the SFU enforces publishing; viewers receive live, changing frames; a host stop revokes publishing 21207ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  2 failed | 53 passed (55)
+   Duration  61.22s (tests 92%, import 5%, transform 3%)

@@ -1,0 +1,16 @@
+== win32
+✓ no keys, keystores or env files
+✓ no source maps
+✓ no test suites
+✓ no embedded private keys
+✓ no API key patterns
+✓ no dev server URL
+✓ native binaries: skia.win32-x64-msvc.node 
+== darwin
+✓ no keys, keystores or env files
+✓ no source maps
+✓ no test suites
+✓ no embedded private keys
+✓ no API key patterns
+✓ no dev server URL
+✓ native binaries: skia.darwin-arm64.node 

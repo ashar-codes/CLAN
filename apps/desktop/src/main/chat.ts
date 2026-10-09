@@ -84,7 +84,7 @@ export function registerChat(o: { clan: ClanApp; server: () => RunningServer | n
     const s = o.server();
     if (!s) throw new Error('No active CLAN.');
     const f = s.resources.openForDownload({ role: 'teacher' }, z.uuid().parse(id));
-    const dir = join(process.env.CLASSROOM_DOWNLOADS_DIR ?? join(app.getPath('downloads'), 'CLAN'), safeFileName(s.classroom.title));
+    const dir = join((!app.isPackaged && process.env.CLASSROOM_DOWNLOADS_DIR) || join(app.getPath('downloads'), 'CLAN'), safeFileName(s.classroom.title));
     await mkdir(dir, { recursive: true });
     const dest = await uniquePath(dir, f.name);
     await copyFile(f.path, dest);

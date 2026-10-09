@@ -2,8 +2,9 @@ appId: app.classroomlan.desktop
 productName: CLAN
 directories: { output: release }
 # Main/preload/renderer are fully bundled by Vite; no node_modules needed at runtime.
-files: [dist/**, package.json]
+files: [dist/**, package.json, '!**/*.map']
 npmRebuild: false
+beforePack: build/require-helpers.cjs
 # clan://capture?url=…|text=… (validated by parseIntake; links and text only, into the Inbox)
 protocols:
   - { name: CLAN, schemes: [clan] }
@@ -19,10 +20,13 @@ electronFuses:
   enableCookieEncryption: true
 mac:
   category: public.app-category.education
+  # Each package ships only its own native binaries (Windows x64 variants are installed for cross-packaging).
+  # (a list of only exclusions makes electron-builder add **/*, i.e. the whole app dir — keep the includes here)
+  files: [dist/**, package.json, '!**/*.map', '!**/node_modules/@napi-rs/canvas-win32-*/**', '!**/node_modules/@napi-rs/canvas-darwin-x64/**']
   target: [dmg, zip]
   extendInfo:
     NSLocalNetworkUsageDescription: CLAN finds people and CLANs on your local network. No internet is used.
-    NSBonjourServices: [_classroomlan._tcp]
+    NSBonjourServices: [_classroomlan._tcp, _clansync._tcp]
     NSBluetoothAlwaysUsageDescription: CLAN uses Bluetooth to find a nearby CLAN host when it runs its own network. Only pairing messages are exchanged.
   extraResources:
     - { from: ../../native/macos-ble/clan-ble, to: clan-ble }
@@ -30,12 +34,18 @@ mac:
     - { from: "../../native/livekit/bin/darwin-${arch}/livekit-server", to: livekit-server }
 win:
   target: [nsis]
+  files: [dist/**, package.json, '!**/*.map', '!**/node_modules/@napi-rs/canvas-darwin-*/**', '!**/node_modules/@napi-rs/canvas-win32-arm64-msvc/**']
   # Built on Windows: dotnet publish native/windows-direct -c Release (see docs/WINDOWS_DIRECT_MODE.md)
   extraResources:
     - { from: ../../native/windows-direct/bin/publish/CLAN.DirectHelper.exe, to: CLAN.DirectHelper.exe }
     - { from: "../../native/livekit/bin/win32-${arch}/livekit-server.exe", to: livekit-server.exe }
 nsis:
   include: build/installer.nsh
+  # Per-machine (elevated) so the firewall rules above can be added; user data in %APPDATA% is kept on uninstall.
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: false
+  deleteAppDataOnUninstall: false
 linux:
   target: [AppImage]
   extraResources:

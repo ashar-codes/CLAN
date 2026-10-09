@@ -1,0 +1,22 @@
+node:events:487
+      throw er; // Unhandled 'error' event
+      ^
+Error: listen EADDRINUSE: address already in use 127.0.0.1:47499
+Emitted 'error' event on Server instance at:
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '127.0.0.1',
+  port: 47499
+}
+Node.js v24.19.0
+profile + core on the phone
+  ✓ encrypted core database opened; Home shows the agenda
+personal device sync
+  ✓ linked by code with approval on the laptop; first sync done
+  ✓ laptop note arrived on the phone
+  ✓ phone note arrived on the laptop
+   laptop before reconnect: [('From the laptop', 'laptop edit while apart')] {'tracked': 5, 'pending': 5, 'conflicts': 0, 'deferred': 0, 'transfers': 0, 'transferBytes': 0, 'skippedBytes': 0}
+   laptop after reconnect: [('From the laptop', 'laptop edit while apart')] conflicts: [('Edited on two devices while apart. Compare and choose.', 'laptop edit while apart', 'phone edit while apart')]
+  ✗ not on screen: Keep both
+  screen: Sara's desk, Saturday, October 10 | Sara's desk | Saturday, October 10 | Sara Ahmed's CLANmate | Join a CLAN | Join a CLAN | Start studying | Start studying | Capture | Capture | Desk: Begin a study session | ▱ | Desk | Begin a study session | Backpack: Open Inbox | ▣ | Backpack | Open Inbox | Bookshelf: Courses and notes | ▥ | Bookshelf | Courses and notes | Journal: Private Diary | ▤ | Journal | Private Diary | Semester board: Tasks and deadlines | ▦ | Semester board | Tasks and deadlines | Guide: Ask CLAN | ✦ | Guide | Ask CLAN | Commons entrance: Find and join a CLAN | ⌂ | Commons entrance | Find and join a CLAN | Today | Nothing due today. | Synced with 1 of your device when on the same Wi-Fi. | Home | ⌂ | Home | Study | ✎ | Study | Inbox | ⇣ | Inbox | Diary | ❦ | Diary | Me | ☺ | Me

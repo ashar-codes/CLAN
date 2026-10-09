@@ -75,7 +75,7 @@ def main():
     procs = [subprocess.Popen(['node', 'tools/sim/sync-peer.ts'], stdout=subprocess.PIPE, text=True),
              subprocess.Popen(['node', 'tools/sim/class-peer.ts', '--host', HOST_IP], stdout=subprocess.PIPE, text=True)]
     try:
-        for p in procs: p.stdout.readline()
+        for p in procs: assert p.stdout.readline(), 'a test peer failed to start (port still in use by a previous run?)'
         cls = http(47499, '/state')
         adb('shell', 'settings', 'put', 'secure', 'stylus_handwriting_enabled', '0')
         adb('shell', 'pm', 'clear', PKG); adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(4)
@@ -135,8 +135,14 @@ def main():
         until(downloaded, 'file downloaded', 90); ok('host file downloaded and SHA-256 verified')
         os.remove(path)
         print('all passed')
-    finally:
+    except AssertionError:  # the screen as it was when the step failed, before the peers stop
+        open(os.path.join(os.path.dirname(__file__), '.tmp-failure.png'), 'wb').write(adb('exec-out', 'screencap', '-p'))
+        print('  screen at failure:', ' | '.join(filter(None, ((n.get('content-desc') or n.get('text') or '')[:60] for n in nodes())))[:1500]); raise
+    finally:  # wait: a peer still closing holds its ports, and the next run would silently talk to it
         for p in procs: p.terminate()
+        for p in procs:
+            try: p.wait(15)
+            except subprocess.TimeoutExpired: p.kill(); p.wait()
 
 if __name__ == '__main__':
     try: main()
