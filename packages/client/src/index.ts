@@ -8,7 +8,7 @@ export type JoinResult = JoinResponse & { url: string };
 
 /** Minimal WebSocket surface used by ClassroomConnection (browser WebSocket, `ws`, React Native). */
 export type WebSocketLike = {
-  readyState: number; send(data: string): void; close(code?: number, reason?: string): void;
+  readyState: number; send(data: string | ArrayBuffer | ArrayBufferView): void; close(code?: number, reason?: string): void;
   onopen: ((ev: unknown) => void) | null; onmessage: ((ev: { data: unknown }) => void) | null;
   onclose: ((ev: { code: number; reason: string }) => void) | null; onerror: ((ev: unknown) => void) | null;
 };

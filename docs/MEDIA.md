@@ -43,7 +43,7 @@
 | macOS | ✓ | ✓ | not offered | Screen Recording (System Settings → Privacy & Security); picker shows instructions when denied |
 | Windows | ✓ | ✓ | ✓ loopback (whole system) | none |
 | Linux | best effort, untested | best effort, untested | not offered | Wayland needs the PipeWire portal (untested) |
-| iOS / Android | — | — | — | presenting deferred |
+| iOS / Android | — | — | — | viewing only; presenting is a later feature |
 
 Microphone is never captured. Frames are never stored, thumbnailed for analytics or recorded; picker thumbnails exist only
 in memory while the picker is open.
@@ -54,12 +54,12 @@ The room wall is the media surface (`RoomSurface`: DEFAULT / SCREEN_SHARE; WHITE
 Controls: Fullscreen (and double-click), Fit / Actual size, Mute (when audio), quality indicator, Leave view, Escape.
 Presenter: bar with "You are presenting", Switch source, Stop. Minimal experience mode shows the surface without the room.
 
-**Mobile:** phones receive presentation state and say "Sara is presenting their screen… use a computer to watch".
-In-app viewing is **not built**. The path is `@livekit/react-native` + `@livekit/react-native-webrtc` (Expo plugin)
-implementing the same `MediaTransport` subscribe side. The blocker is signaling trust: LiveKit signaling is binary protobuf
-over WebSocket, and our pinned native socket (`modules/pinned-transport`) carries text frames only. It needs binary
-send/receive in Swift and Kotlin plus a `WebSocket` shim for the SDK. The platform WebSocket can't pin the per-CLAN CA, and
-falling back to trust-all is not allowed. Media itself (DTLS-SRTP over UDP) needs no change.
+**Mobile (viewing):** `apps/mobile/src/media` implements the subscribe side with `@livekit/react-native` and WebRTC.
+LiveKit's binary signaling runs through the pinned native socket, which carries binary frames in Kotlin and Swift. A
+`WebSocket` shim routes only registered CLAN hosts there and refuses unpinned `wss://<ip>`. Controls: fit, fullscreen
+(requests the sharp layer), quality dot, reconnecting, Leave view. Verified on the Android emulator watching a desktop
+presentation, including a network drop and resume; iOS is not built. Phones don't present; ReplayKit / MediaProjection
+are a later feature.
 
 ## Direct Mode
 

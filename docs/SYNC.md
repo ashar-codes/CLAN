@@ -90,8 +90,10 @@ whiteboards of CLANs, AI settings, keys and history, and other people's files.
   copy to recover from: start a new account.
 
 ## Limits
-* LAN only. The phone has the record contract (`apps/mobile/src/sync/records.ts`, tested against a desktop database) but
-  no transport or linking yet: linking needs an unpinned first TLS contact that its native module doesn't do.
+* LAN only. The phone runs the same engine as a sync client (MOBILE.md). It links with first-contact TLS, which pins
+  the first key seen and binds the proofs to it, and it can't approve other devices because phones accept no
+  connections. Verified on the Android emulator against the real engine.
+* An unlinked device starts over with a new key (`reset()`). A revoked key is never accepted again.
 * History is 16 hashes deep: a copy unseen for more than 16 versions counts as concurrent, not stale.
 * "Newest" means detection time, not keystroke time.
 * Diary is protected in transit and at rest the same way as other local data. It is not end-to-end encrypted separately.

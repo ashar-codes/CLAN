@@ -142,6 +142,18 @@ describe('sync', () => {
     expect(await sync(b, a)).toMatchObject({ pulled: 0, pushed: 0 });
   });
 
+  it('an edit made while a round is waiting on the network is never overwritten by the incoming version', async () => {
+    const { a, b } = pair();
+    const n = a.app.notes.create(a.me, { title: 'Essay', body: 'v1' });
+    await sync(b, a);
+    a.app.notes.update(a.me, n.id, { body: 'laptop edit' }); a.app.sync.refresh();
+    const tr = wire(b, a), pull = tr.pull;
+    tr.pull = async (since, limit) => { const r = await pull(since, limit); b.app.notes.update(b.me, n.id, { body: 'typed during the round' }); return r; }; // after b's scan
+    clock.t += 1000; await b.app.sync.syncWith(tr);
+    expect(b.app.notes.get(b.me, n.id)?.body).toBe('typed during the round');
+    expect(b.app.sync.conflicts()[0]).toMatchObject({ kind: 'note', local: { body: 'typed during the round' }, remote: { body: 'laptop edit' } });
+  });
+
   it('tasks: the newer edit wins deterministically, the other is kept and visible', async () => {
     const { a, b } = pair();
     const task = a.app.tasks.create(a.me, { title: 'Read ch.3' });
@@ -239,6 +251,25 @@ describe('sync', () => {
     const entry = { ...(un.payload as object), revokedAt: null, revokedBy: null };
     await b.app.sync.applyBatch(a.fp, [{ ...un, hash: 'x', payload: entry }]);
     expect(b.app.sync.devices().find((d) => d.fp === c.fp)?.revoked).toBe(true);
+  });
+
+  it('an unlinked device can start over with a new key and be linked again; its old key stays refused', async () => {
+    const { a, b } = pair();
+    const oldFp = b.fp;
+    a.app.sync.revoke(b.fp);
+    await expect(sync(b, a)).rejects.toThrow(/unlinked/);
+    b.app.sync.reset();
+    const { generateKeyPairSync, sign } = await import('node:crypto');
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const pub = Buffer.from(publicKey.export({ type: 'spki', format: 'der' }).subarray(-32)).toString('base64url');
+    const fp = b.app.sync.setup({ publicKey: pub, name: 'iPhone', platform: 'test', tlsCa: 'ca', tlsSpki: 'spki-iPhone' }, { publicKey: pub, sign: (x) => sign(null, x, privateKey).toString('base64url') });
+    expect(fp).not.toBe(oldFp);
+    const b2 = { ...b, fp, key: { privateKey, pub } };
+    link(a, b2);
+    a.app.notes.create(a.me, { title: 'after relink' });
+    await sync(b2, a);
+    expect(b.app.notes.mine(b.me).map((n) => n.title)).toContain('after relink');
+    expect(a.app.sync.devices().find((d) => d.fp === oldFp)?.revoked).toBe(true);
   });
 
   it('revocation mid-sync stops at the next request', async () => {

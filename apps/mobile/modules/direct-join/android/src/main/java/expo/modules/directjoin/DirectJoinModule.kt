@@ -1,6 +1,7 @@
 // CLAN Direct join (Android): BLE bootstrap central + joining the host Wi-Fi with the authenticated credential.
+// Compiled in the Android build; module load verified on the emulator (BLE/Wi-Fi joining needs real hardware).
 // Wi-Fi uses WifiNetworkSpecifier (Android 10+, system confirmation dialog); the app process is bound to that network so
-// the pinned HTTPS/WSS traffic goes over it. Older Android → manual fallback. NOT compiled here (no Android SDK).
+// the pinned HTTPS/WSS traffic goes over it. Older Android → manual fallback.
 package expo.modules.directjoin
 
 import android.annotation.SuppressLint
@@ -40,7 +41,8 @@ class DirectJoinModule : Module() {
 
     Function("bluetoothState") {
       val a = (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager?)?.adapter
-      when { a == null -> "unsupported"; !a.isEnabled -> "off"; else -> "on" }
+      val state: String = when { a == null -> "unsupported"; !a.isEnabled -> "off"; else -> "on" }
+      state
     }
 
     AsyncFunction("joinWifi") { ssid: String, passphrase: String, promise: Promise ->
@@ -59,6 +61,7 @@ class DirectJoinModule : Module() {
       }
       wifiCallback = cb
       cm.requestNetwork(req, cb, 45_000)
+      Unit // explicit: Expo reifies each lambda's result type
     }
 
     Function("leaveWifi") {
@@ -66,6 +69,7 @@ class DirectJoinModule : Module() {
       wifiCallback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
       wifiCallback = null
       cm.bindProcessToNetwork(null)
+      Unit
     }
 
     AsyncFunction("bleScan") { ms: Int, promise: Promise ->
@@ -80,6 +84,7 @@ class DirectJoinModule : Module() {
       try { scanner.startScan(listOf(filter), ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb) }
       catch (e: SecurityException) { return@AsyncFunction promise.reject("BLE", "Bluetooth permission denied.", e) }
       main.postDelayed({ runCatching { scanner.stopScan(cb) }; promise.resolve(found.keys.toList()) }, ms.coerceIn(500, 15_000).toLong())
+      Unit
     }
 
     AsyncFunction("bleConnect") { peer: String, promise: Promise ->
@@ -108,17 +113,19 @@ class DirectJoinModule : Module() {
         }
         override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) = emitFrame(conn, value)
       }, BluetoothDevice.TRANSPORT_LE)
+      Unit
     }
 
     Function("bleWrite") { conn: String, frameB64: String ->
       val (g, rx) = conns[conn] ?: return@Function false
       val bytes = Base64.decode(frameB64, Base64.DEFAULT)
       if (bytes.size > 180) return@Function false
-      if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(rx, bytes, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) == BluetoothStatusCodes.SUCCESS
+      val ok: Boolean = if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(rx, bytes, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) == BluetoothStatusCodes.SUCCESS
       else @Suppress("DEPRECATION") run { rx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE; rx.value = bytes; g.writeCharacteristic(rx) }
+      ok
     }
 
-    Function("bleClose") { conn: String -> conns.remove(conn)?.first?.let { it.disconnect(); it.close() } }
+    Function("bleClose") { conn: String -> conns.remove(conn)?.first?.let { it.disconnect(); it.close() }; Unit }
   }
 
   private fun emitFrame(conn: String, v: ByteArray) {

@@ -1,17 +1,13 @@
-// CLAN Direct join (Android). NOT compiled on the development machine (no Android SDK) — see docs/TESTING.md.
-apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
+// CLAN Direct join (Android). Compiled in the Android build (docs/TESTING.md).
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
 
 group = 'expo.modules.directjoin'
 version = '0.1.0'
 
-def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
-apply from: expoModulesCorePlugin
-applyKotlinExpoModulesCorePlugin()
-useCoreDependencies()
-useDefaultAndroidSdkVersions()
-useExpoPublishing()
-
 android {
+  defaultConfig { versionCode 1; versionName '0.1.0' }
   namespace "expo.modules.directjoin"
 }

@@ -131,3 +131,14 @@ Run `tools/sim/lan-bench.ts --mode classroom` on real Wi-Fi (single AP and multi
 * Phone: the shared record contract only (typecheck + a test against a desktop database). No phone transport or linking.
 * Tests 279 → 299; E2E 18 → 19 (two instances: link, sync, offline edits, resolve, unlink, refused).
   `pnpm benchmark:sync` results are in TESTING.md.
+
+## Mobile Completion (tag `clan-mobile-completion`)
+* **Same core on the phone:** `@clan/core` on SQLCipher with Node-API shims, so the phone uses the same modules and
+  the same sync engine. The old JSON model was migrated once.
+* **Android:** the first native build and run, on an emulator. All three local native modules compile and run (two
+  runtime bugs fixed).
+* **Native features:** personal sync and linking, Share to CLAN (Android intents; iOS extension generated, not
+  built), camera → Inbox, chat file sending and notifications, screen-share viewing (binary pinned WebSocket +
+  LiveKit), board text tool, outbox and personal boards, native date pickers.
+* **iOS:** blocked (no Xcode / Apple team). The trust code is tested on macOS.
+* **Tests:** 299 → 306. Desktop E2E: 19 passed, 2 PERF-only benchmarks skipped. One Android emulator E2E script.

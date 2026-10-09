@@ -13,28 +13,41 @@
     "build:bridge": "node scripts/build-opaque-bridge.mts"
   },
   "dependencies": {
+    "@clan/core": "workspace:*",
+    "@clan/design": "workspace:*",
     "@classroom/client": "workspace:*",
     "@classroom/protocol": "workspace:*",
+    "@config-plugins/react-native-webrtc": "^15.0.2",
+    "@livekit/react-native": "^3.0.0",
+    "@livekit/react-native-expo-plugin": "^1.0.3",
+    "@livekit/react-native-webrtc": "^144.2.0",
+    "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
+    "@react-native-community/datetimepicker": "9.1.0",
+    "buffer": "6.0.3",
     "expo": "~57.0.27",
     "expo-build-properties": "~57.0.22",
     "expo-crypto": "~57.0.3",
     "expo-dev-client": "~57.0.19",
     "expo-document-picker": "~57.0.3",
     "expo-file-system": "~57.0.7",
+    "expo-image-picker": "~57.0.20",
+    "expo-notifications": "~57.0.22",
     "expo-secure-store": "~57.0.4",
     "expo-sharing": "~57.0.22",
+    "expo-sqlite": "~57.0.4",
     "expo-system-ui": "~57.0.4",
+    "livekit-client": "2.22.3",
     "react": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
     "react-native-webview": "13.16.1",
-    "react-native-zeroconf": "^0.17.3",
-    "@clan/design": "workspace:*"
+    "react-native-zeroconf": "^0.17.3"
   },
   "devDependencies": {
+    "@serenity-kit/opaque": "1.1.0",
     "@types/react": "~19.2.18",
     "typescript": "^7.0.2",
-    "@serenity-kit/opaque": "1.1.0",
     "vite": "^8.3.2"
   }
 }

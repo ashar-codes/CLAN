@@ -66,3 +66,29 @@ interrupted/corrupted/large/low-space files.
 `sync-lan.test.ts` runs the same over real HTTPS servers. `e2e/sync.test.ts` runs two app instances.
 `pnpm benchmark:sync` (M-series MacBook, loopback): 1,000 notes + 5,000 saved + 10,000 reviews + 1 GB in 4 files took
 15.8 s for the first full sync; the change scan took 1.2 s; a no-change round 0.4 s; a one-edit round 0.35 s.
+
+### Mobile (MOBILE.md)
+* **Unit:** core shims vs Node (`apps/mobile/test/node-shims.test.ts`), share-intake validation, the phone→core import,
+  and the iOS trust code compiled with swiftc and run against a real server (including first contact).
+* **Android emulator** (Pixel profile, Android 16 arm64, release build): `python3 apps/mobile/e2e/android_cross_device.py`
+  against `tools/sim/sync-peer.ts` (headless laptop) and `tools/sim/class-peer.ts` (headless CLAN host).
+  Screen-share viewing was checked by hand against a desktop presenting its test pattern into class-peer.
+  * Start the emulator with
+    `launchctl submit -l clan.emu -- ~/Library/Android/sdk/emulator/emulator -avd clan_pixel -gpu host -memory 3072`.
+    From a background shell macOS throttles it until adb hangs.
+* **Measured on the emulator** (not a phone):
+
+  | Metric | Result |
+  |---|---|
+  | Cold start to first activity (release) | 687 ms |
+  | PSS idle / watching a screen share | 168 / 182 MB |
+  | CPU in the background (no polling) | 0.0–0.1 % |
+  | CPU watching a screen share | 4–11 % |
+  | Link + first sync of ~1,000 notes | 14 s |
+  | Drawing on a board of 41–81 strokes | p50 25 ms, p90 44 ms, 32 % janky frames |
+
+  Strokes are drawn as Views; a canvas renderer is the upgrade path. Battery, real-device memory and large mobile file
+  transfers were not measured.
+* **macOS throttling:** processes started from a background or automation shell get background QoS. Under memory
+  pressure that throttles the emulator and the E2E Electron apps until hooks and quits time out. Run them from a
+  normal terminal, or through `launchctl submit` as above.

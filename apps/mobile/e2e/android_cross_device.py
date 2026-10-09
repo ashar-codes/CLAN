@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Cross-device E2E on a running Android emulator with the CLAN release build installed (scripts/android-dev.sh --release).
+
+Starts two real peers on this computer — a "laptop" (tools/sim/sync-peer.ts: @clan/core + PersonalSync + LAN sync
+server) and a CLAN host (tools/sim/class-peer.ts: classroom server with core chat + whiteboard) — and drives the phone
+through accessibility labels (uiautomator) and real Android intents:
+  link by code → two-way sync → offline edits on both → conflict → keep both → unlink → refused,
+  Share-to-CLAN (SEND intent) → Inbox, join a CLAN (OPAQUE + pinned TLS) → chat both ways → live board both ways →
+  file download (SHA-256 verified) and phone → CLAN file send.
+Run from the repo root:  python3 apps/mobile/e2e/android_cross_device.py
+Emulator, not a physical device: real-hardware Wi-Fi, BLE, camera and performance are not covered here."""
+import json, os, re, subprocess, sys, time, urllib.request, xml.etree.ElementTree as ET
+
+ADB = os.path.expanduser(os.environ.get('ADB', '~/Library/Android/sdk/platform-tools/adb'))
+PKG = 'app.classroomlan.student'
+HOST_IP = os.environ.get('HOST_IP') or subprocess.run(['ipconfig', 'getifaddr', 'en0'], capture_output=True, text=True).stdout.strip()
+
+def adb(*a, timeout=25):
+    try: return subprocess.run([ADB, *a], capture_output=True, timeout=timeout).stdout
+    except subprocess.TimeoutExpired: return b''
+def nodes():
+    for _ in range(5):
+        adb('shell', 'rm', '-f', '/sdcard/ui.xml'); adb('shell', 'uiautomator', 'dump', '/sdcard/ui.xml')
+        x = adb('shell', 'cat', '/sdcard/ui.xml').decode('utf8', 'ignore')
+        if '<?xml' in x: return list(ET.fromstring(x[x.find('<?xml'):]).iter('node'))
+        time.sleep(1)
+    return []
+def center(n): b = list(map(int, re.findall(r'\d+', n.get('bounds')))); return (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
+def find(label, edit=False, tries=14, scroll=True):
+    for i in range(tries):
+        for n in nodes():
+            if edit and n.get('class') != 'android.widget.EditText': continue
+            for k in ('content-desc', 'text', 'resource-id'):
+                v = n.get(k) or ''
+                if v == label or (label.startswith('~') and label[1:] in v): return center(n)
+        if scroll and i % 2: adb('shell', 'input', 'swipe', '24', *(('1700', '24', '900') if i < tries // 2 else ('700', '24', '1900')), '300')  # at the edge: a board canvas would take the swipe  # down, then back up
+        time.sleep(0.6)
+    raise AssertionError(f'not on screen: {label}')
+def tap(label):
+    x, y = find(label)
+    for _ in range(3):  # keep clear of the status bar and the tab bar: an edge tap can miss
+        if 260 < y < 2100: break
+        adb('shell', 'input', 'swipe', '24', '1100' if y <= 260 else '1500', '24', '1500' if y <= 260 else '1100', '300'); time.sleep(0.4); x, y = find(label)
+    adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.7)
+def type_(label, text):
+    x, y = find(label, edit=True); adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.3)
+    adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END')
+    for _ in range(60): adb('shell', 'input', 'keyevent', 'KEYCODE_DEL')
+    adb('shell', 'input', 'text', text.replace(' ', '%s')); adb('shell', 'input', 'keyevent', '111'); time.sleep(0.3)
+def until(f, what, secs=40):
+    end = time.time() + secs
+    while time.time() < end:
+        try:
+            if f(): return
+        except Exception: pass
+        time.sleep(1)
+    raise AssertionError(f'timed out: {what}')
+def has(label): return bool(find(label, tries=2, scroll=False))
+def http(port, path, body=None):
+    req = urllib.request.Request(f'http://127.0.0.1:{port}{path}', data=json.dumps(body).encode() if body is not None else None, method='POST' if body is not None else 'GET')
+    return json.loads(urllib.request.urlopen(req, timeout=15).read())
+def ok(msg): print(f'  ✓ {msg}', flush=True)
+def phone_seen(): return max((d['lastSeen'] or 0) for d in http(47399, '/state')['devices'] if not d['current'])
+def sync_now():
+    """Tap Sync now and confirm the round reached the laptop (a tap during a re-layout can miss)."""
+    before = phone_seen()
+    for _ in range(3):
+        tap('Sync now'); end = time.time() + 12
+        while time.time() < end:
+            if phone_seen() > before: time.sleep(1.5); return
+            time.sleep(0.5)
+    raise AssertionError('Sync now did not reach the laptop')
+
+def main():
+    procs = [subprocess.Popen(['node', 'tools/sim/sync-peer.ts'], stdout=subprocess.PIPE, text=True),
+             subprocess.Popen(['node', 'tools/sim/class-peer.ts', '--host', HOST_IP], stdout=subprocess.PIPE, text=True)]
+    try:
+        for p in procs: p.stdout.readline()
+        cls = http(47499, '/state')
+        adb('shell', 'settings', 'put', 'secure', 'stylus_handwriting_enabled', '0')
+        adb('shell', 'pm', 'clear', PKG); adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(4)
+        print('profile + core on the phone')
+        type_('Full name', 'Sara Ahmed'); type_('Student / roll number', 'FA23-CS-007'); type_('Device name', 'Sara-Pixel'); tap('Save')
+        find('Join a CLAN'); ok('encrypted core database opened; Home shows the agenda')
+
+        print('personal device sync')
+        http(47399, '/note', {'title': 'From the laptop', 'body': 'v1'})
+        code = http(47399, '/link', {})['code']
+        tap('Me'); tap('Open My Devices'); type_('Link code', code); type_('Computer address (only if not found)', '10.0.2.2:47300'); tap('Link')
+        until(lambda: http(47399, '/state')['linkRequest'], 'link request on the laptop'); http(47399, '/approve', {})
+        until(lambda: has('~Last sync'), 'first sync'); ok('linked by code with approval on the laptop; first sync done')
+        tap('Done'); tap('Study'); tap('Notes'); find('From the laptop'); ok('laptop note arrived on the phone')
+        tap('New note'); type_('Title', 'From the phone'); type_('Note', 'phone note'); tap('Save')
+        tap('Me'); tap('Open My Devices'); sync_now()
+        until(lambda: any(n['title'] == 'From the phone' for n in http(47399, '/state')['notes']), 'phone note on laptop'); ok('phone note arrived on the laptop')
+        nid = next(n['id'] for n in http(47399, '/state')['notes'] if n['title'] == 'From the laptop')
+        tap('Paused'); until(lambda: find('Paused.'), 'no round in flight', 90)  # apart: no sync while both edit
+        tap('Done'); tap('Study'); tap('Notes'); tap('From the laptop'); type_('Note', 'phone edit while apart'); tap('Save')
+        http(47399, f'/note/{nid}', {'body': 'laptop edit while apart'})
+        st = http(47399, '/state'); print('   laptop before reconnect:', [(n['title'], n['body']) for n in st['notes'] if n['title'].startswith('From the laptop')], st['stats'])
+        tap('Me'); tap('Open My Devices'); tap('On'); time.sleep(1); sync_now()
+        st = http(47399, '/state'); print('   laptop after reconnect:', [(n['title'], n['body']) for n in st['notes'] if n['title'].startswith('From the laptop')], 'conflicts:', [(c['note'], c['local'].get('body') if c['local'] else None, c['remote'].get('body') if c['remote'] else None) for c in st['conflicts']])
+        tap('Keep both')
+        until(lambda: len([n for n in http(47399, '/state')['notes'] if n['title'].startswith('From the laptop')]) == 2, 'both versions on laptop')
+        ok('offline edits on both kept as a conflict; "Keep both" converged on both devices')
+        fp = next(d['fp'] for d in http(47399, '/state')['devices'] if not d['current'])
+        r = http(47399, f'/revoke/{fp}', {}); assert any(d['fp'] == fp and d['revoked'] for d in r['devices']), f'revoke not recorded: {r}'
+        print('   laptop devices:', r['devices'], ' phone fp:', fp)
+        tap('Sync now'); time.sleep(5); print('   laptop after phone sync:', [(d['fp'], d['revoked'], d['lastSeen']) for d in http(47399, '/state')['devices']])
+        until(lambda: find('~This phone was unlinked', tries=2), 'phone learns it was unlinked', 60); ok('unlinked on the laptop → phone refused and says so')
+        tap('Done')
+
+        print('Share to CLAN')
+        adb('shell', f"am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT 'Notes https://example.com/os' -n {PKG}/.MainActivity")
+        find('Share to CLAN'); tap('Save to my Inbox'); tap('Keep in Inbox'); find('~Inbox, '); ok('shared link + text saved to the Inbox (offline, private)')
+
+        print('live CLAN')
+        tap('Home'); tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')
+        for b in ('Don’t allow', 'Allow'):
+            try: tap(b)
+            except AssertionError: pass
+        until(lambda: any(m['status'] == 'approved' and m['connected'] for m in http(47499, '/state')['members']), 'member connected')
+        ok('joined over OPAQUE + pinned TLS')
+        http(47499, '/chat', {'body': 'Welcome from the host'}); find('Welcome from the host'); ok('host message shown on the phone')
+        type_('Message', 'Hello from the phone'); tap('Send'); find('Hello from the phone'); ok('phone message accepted by the host')
+        http(47499, '/wall', {'mode': 'WHITEBOARD'}); http(47499, '/draw', {'text': 'Host sticky'}); find('Host sticky'); ok('host board op on the phone')
+        tap('Text'); x, y = find('board-canvas', scroll=False); adb('shell', 'input', 'tap', str(x), str(y + 200)); type_('Text to place', 'Phone text'); x, y = find('Add', scroll=False); adb('shell', 'input', 'tap', str(x), str(y))  # no scroll swipe: it would land on the board
+        until(lambda: any(o['text'] == 'Phone text' for o in http(47499, '/state')['board']), 'phone text on the host board'); ok('phone board op on the host')
+        path = os.path.abspath('apps/mobile/e2e/.tmp-notes.bin'); open(path, 'wb').write(os.urandom(1_500_000))
+        http(47499, '/file', {'path': path, 'to': 'clan'})
+        def downloaded():
+            try: tap('Download')
+            except AssertionError: pass
+            return find('~Downloaded', tries=6)
+        until(downloaded, 'file downloaded', 90); ok('host file downloaded and SHA-256 verified')
+        os.remove(path)
+        print('all passed')
+    finally:
+        for p in procs: p.terminate()
+
+if __name__ == '__main__':
+    try: main()
+    except AssertionError as e:  # (the peers are already stopped here, so the screen may show them gone)
+        print(f'  ✗ {e}'); print('  screen:', ' | '.join(filter(None, ((n.get('content-desc') or n.get('text') or '')[:60] for n in nodes())))[:1500]); sys.exit(1)

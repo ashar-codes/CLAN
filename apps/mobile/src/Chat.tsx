@@ -1,13 +1,25 @@
 // Mobile chat: the same wire contracts as desktop (group + direct conversations, text, attachments), over the pinned
 // native transport. The Outbox is a file on the phone, so unsent messages survive an app restart and are re-sent with
-// the same ids (the host recognises repeats). NOT run on a device yet — typechecked only.
+// the same ids (the host recognises repeats). Files go only to the conversation that is open (the whole CLAN, or the one
+// person of a direct conversation); the host re-checks that scope on every send.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Notifications from 'expo-notifications';
 import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
 import { api, formatBytes } from '@classroom/client';
 import type { ChatMessageView, ChatThreadView, ClientMessage, ResourceView, ServerMessage } from '@classroom/protocol';
-import { download, type Conn, type FileState } from './transfers';
+import { download, shareFile, type Conn, type FileState } from './transfers';
+import { phoneClan, me as meP } from './core/clan';
+
+Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }) });
+/** A local notice for a message that arrives while you're not looking at that conversation (text only if short). */
+async function notify(title: string, body: string) {
+  const p = await Notifications.getPermissionsAsync();
+  if (!p.granted) return;
+  await Notifications.scheduleNotificationAsync({ content: { title, body: body.slice(0, 120) }, trigger: null });
+}
 
 type C = { text: string; muted: string; border: string; surface: string; accent: string; danger: string };
 type Send = Extract<ClientMessage, { t: 'chat.send' }>;
@@ -76,17 +88,38 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
       setMsgs((x) => ({ ...x, [m.thread.id]: merge(x[m.thread.id] ?? [], [m.message]) }));
       const reading = ref.current.active === m.thread.id;
       setThreads((ts) => [...ts.filter((t) => t.id !== m.thread.id), reading ? { ...m.thread, unread: 0 } : m.thread]);
-      if (m.message.author !== ref.current.me) send({ t: 'chat.cursor', threadId: m.thread.id, delivered: m.message.seq, ...(reading ? { read: m.message.seq } : {}) });
+      if (m.message.author !== ref.current.me) {
+        send({ t: 'chat.cursor', threadId: m.thread.id, delivered: m.message.seq, ...(reading ? { read: m.message.seq } : {}) });
+        if (!reading || AppState.currentState !== 'active') void notify(m.thread.kind === 'direct' ? m.message.authorName : `${m.message.authorName} · ${conn.classTitle}`, m.message.attachment?.kind === 'file' ? `sent ${m.message.attachment.name}` : m.message.body).catch(() => {});
+      }
     }
-  }, [refresh, send]);
-  return { me, host, threads, msgs, pending, active, setActive, open, openDirect, post, onServer, opening };
+  }, [refresh, send, conn.classTitle]);
+  useEffect(() => { void Notifications.requestPermissionsAsync().catch(() => {}); }, []);
+
+  /** Attach a file to the OPEN conversation only: the audience is fixed before the upload starts. */
+  const [sending, setSending] = useState<{ name: string; sent: number; size: number; error?: string } | null>(null);
+  const sendFile = useCallback(async (thread: ChatThreadView, file: { uri: string; name: string; size: number }) => {
+    const to = thread.kind === 'group' ? 'clan' : thread.with?.handle;
+    if (!to) return;
+    setSending({ name: file.name, sent: 0, size: file.size });
+    try {
+      const r = await shareFile(conn, file, to, randomUUID(), (sent, size) => setSending({ name: file.name, sent, size }));
+      post(thread.id, '', { attachment: { kind: 'file', resourceId: r.id } });
+      setSending(null);
+    } catch (e) { setSending({ name: file.name, sent: 0, size: file.size, error: (e as Error).message }); }
+  }, [conn, post]);
+  return { me, host, threads, msgs, pending, active, setActive, open, openDirect, post, onServer, opening, sendFile, sending };
 }
 export type MobileChat = ReturnType<typeof useMobileChat>;
 
 export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat; conn: Conn; people: { name: string; handle: string; host: boolean }[] }) {
-  const [text, setText] = useState('');
+  // Drafts belong to one conversation: switching conversations never carries typed text to another audience.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [fromInbox, setFromInbox] = useState(false);
   const [files, setFiles] = useState<Record<string, FileState>>({});
   const t = chat.threads.find((x) => x.id === chat.active);
+  const text = t ? drafts[t.id] ?? '' : '';
+  const setText = (v: string) => { if (t) setDrafts((d) => ({ ...d, [t.id]: v })); };
   const group = chat.threads.find((x) => x.kind === 'group');
   useEffect(() => { if (!chat.active && group) void chat.open(group.id).catch(() => {}); }, [group?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const others = people.filter((p) => p.handle && p.handle !== chat.me);
@@ -107,7 +140,7 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
           </Pressable>
         ))}
         {reach.filter((p) => !chat.threads.some((x) => x.with?.handle === p.handle)).map((p) => (
-          <Pressable key={p.handle} onPress={() => void chat.openDirect(p.handle)} accessibilityRole="button" style={[s.chip, { borderColor: c.border }]}><Text style={{ color: c.accent }}>Message {p.name}</Text></Pressable>
+          <Pressable key={p.handle} onPress={() => void chat.openDirect(p.handle)} accessibilityRole="button" style={[s.chip, { borderColor: c.border }]}><Text style={{ color: c.accent }}>Send to {p.name}</Text></Pressable>
         ))}
       </View>
       <Text style={{ color: c.muted, fontSize: 12 }}>{t?.kind === 'direct' ? 'Direct conversation · relayed and kept by the host' : 'Group conversation · kept by the host'}</Text>
@@ -129,8 +162,25 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
         {waiting.map((p) => <View key={p.m.id} style={[s.msg, s.own, { borderColor: c.border, opacity: 0.6 }]}><Text style={{ color: c.text }}>{p.m.body}</Text><Text style={{ color: p.failed ? c.danger : c.muted, fontSize: 11 }}>{p.failed ? `Not sent — ${p.failed}` : 'Sending…'}</Text></View>)}
       </View>
       {chat.opening && <Text style={{ color: c.muted }} accessibilityLiveRegion="polite">Opening a conversation…</Text>}
+      {t && fromInbox && (
+        <View style={{ gap: 4 }} accessibilityLabel="Send from your Inbox">
+          <Text style={{ color: c.muted, fontSize: 12 }}>From your Inbox → {t.kind === 'group' ? 'everyone in this CLAN' : t.with?.name}</Text>
+          {phoneClan().capture.inbox(meP()).filter((i) => i.module !== 'files').slice(0, 10).map((i) => (
+            <Pressable key={i.id} accessibilityRole="button" style={[s.chip, { borderColor: c.border }]} onPress={() => {
+              const saved = i.module === 'saved' ? phoneClan().saved.get(meP(), i.entityId) : null, note = i.module === 'notes' ? phoneClan().notes.get(meP(), i.entityId) : null;
+              if (saved) chat.post(t.id, '', { attachment: { kind: 'link', url: saved.url, title: saved.title } }); else if (note) chat.post(t.id, note.body.slice(0, 4000) || note.title);
+              setFromInbox(false);
+            }}><Text style={{ color: c.text }} numberOfLines={1}>{i.kind === 'link' ? '↗ ' : '❝ '}{i.title}</Text></Pressable>
+          ))}
+        </View>
+      )}
+      {chat.sending && <Text style={{ color: chat.sending.error ? c.danger : c.muted }} accessibilityLiveRegion="polite">{chat.sending.error ? `${chat.sending.name}: ${chat.sending.error}` : `Sending ${chat.sending.name} · ${formatBytes(chat.sending.sent)} of ${formatBytes(chat.sending.size)}`}</Text>}
       {t && !chat.opening && (
         <View style={s.row}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t.kind === 'group' ? 'Send a file to everyone' : `Send a file to ${t.with?.name}`} disabled={!!chat.sending && !chat.sending.error}
+            onPress={async () => { const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }); const a = !r.canceled && r.assets[0]; if (a && a.size) void chat.sendFile(t, { uri: a.uri, name: a.name, size: a.size }); }}
+            style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>📎</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Send something from your Inbox" onPress={() => setFromInbox(!fromInbox)} style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>⇣</Text></Pressable>
           <TextInput style={[s.input, { color: c.text, borderColor: c.border }]} value={text} onChangeText={setText} maxLength={4000} placeholder="Message" placeholderTextColor={c.muted} accessibilityLabel="Message" multiline />
           <Pressable accessibilityRole="button" disabled={!text.trim()} onPress={() => { chat.post(t.id, text.trim()); setText(''); }} style={[s.chip, { borderColor: c.accent, opacity: text.trim() ? 1 : 0.5 }]}><Text style={{ color: c.accent, fontWeight: '700' }}>Send</Text></Pressable>
         </View>

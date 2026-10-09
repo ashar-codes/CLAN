@@ -157,6 +157,26 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
   other members' messages or other users' files. Rows owned by another user are refused; Diary is opt-in.
 * Limit: revocation can't wipe a device that is already compromised or offline. Its local copy stays.
 
+## Mobile (MOBILE.md)
+* **Storage:** core's database is SQLCipher with a Keychain/Keystore key. Device and sync keys and the AI key are in
+  secure storage (`*_THIS_DEVICE_ONLY`) and never in the database. AI keys are keyed by provider address and sent only
+  there.
+* **TLS:** classroom and sync traffic trusts only the pinned CA and SPKI (TLS 1.3). First contact exists only for
+  linking (proofs bind the key seen). Binary WebSocket frames use the same pinned client. Insecure schemes are refused.
+* **Shared files and URIs:** only `content://` streams granted with the share intent are read. Items are capped, file
+  names reduced, and everything is re-validated in JS (`share/items.ts`, tested). Nothing is posted automatically, and
+  only `file://` copies inside the sandbox are captured.
+* **Chat:** no composer while a conversation opens, and drafts are per conversation (a fixed bug: text carried over to
+  another audience). The audience of a file is fixed before upload, and the host re-checks the scope on every send.
+* **CLAN authority:** the phone files into a CLAN only where it is an active member (core check). Linking a device
+  grants no CLAN rights. A revoked phone is refused and learns it on its next request.
+* **Deep links:** `clan://share?id=` accepts only a UUID; `clan://capture` keeps the strict parser.
+* **Media and permissions:** RECORD_AUDIO is blocked in the Android manifest and the microphone is never captured.
+  The camera is asked each time and photos are taken without EXIF. Location/BLE is asked only when the host wasn't
+  found or typed in.
+* **Release builds:** no development fallbacks (no trust-all, no plaintext keystore). The dev client is only in debug
+  builds.
+
 ## Known gaps (tracked)
 * **Mobile is implemented but not device-verified.** The bridge page has been run in Chromium (Electron) and the iOS trust
   code on Apple's Security framework (macOS); the Swift/Kotlin modules have not been compiled for iOS/Android here.

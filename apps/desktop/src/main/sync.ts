@@ -26,7 +26,9 @@ export async function registerSync(c: ClanApp, keystore: Keystore, deviceName: (
   s.setup({ publicKey: signer.publicKey, name: name(), platform: process.platform, tlsCa: tls.certificate, tlsSpki: tls.spkiSha256 }, signer);
 
   const changed = () => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed'); };
-  const server = await startSyncServer({ host: s, tls, objectPath: (sha) => c.files.personalObject(c.me, sha), onChange: changed });
+  /** Synced data arrived (screens reload their lists; status-only rounds don't, so forms being typed into stay put). */
+  const arrived = () => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:data'); changed(); };
+  const server = await startSyncServer({ host: s, tls, objectPath: (sha) => c.files.personalObject(c.me, sha), onChange: arrived });
   const endpoints = () => candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${server.port}`).slice(0, 8);
 
   // ---- discovery: an hourly-rotating account tag (no names or ids on the network) ----
@@ -47,14 +49,16 @@ export async function registerSync(c: ClanApp, keystore: Keystore, deviceName: (
   setInterval(() => void advertise(), 3_600_000).unref();
 
   // ---- schedule: one round at a time; each linked device is tried at its known endpoints, the pin decides who it is ----
-  let running: Promise<unknown> | null = null, lastError: string | null = null;
+  let running: Promise<unknown> | null = null, again: Promise<unknown> | null = null, lastError: string | null = null;
   const transport = (d: ReturnType<typeof s.devices>[number], ep: string) => lanSyncTransport({ peer: d.fp, base: `https://${ep}`, tlsCa: d.tlsCa, tlsSpki: d.tlsSpki, auth: (m, p, b) => s.authHeaders(m, p, b), timeoutMs: 20_000 });
-  const syncAll = () => running ??= (async () => {
+  // A request during a round gets one more round right after it (the running one may predate the change being synced).
+  const syncAll = (): Promise<unknown> => running ? (again ??= running.then(() => { again = null; return syncAll(); })) : syncRound();
+  const syncRound = () => running = (async () => {
     if (s.selfRevoked() || s.settings().paused) return;
     const lan = [...seen.entries()].filter(([, t]) => Date.now() - t < 10 * 60_000).map(([ep]) => ep);
-    for (const d of s.devices().filter((x) => !x.current && !x.revoked)) {
+    for (const d of s.devices().filter((x) => !x.current && !x.revoked && x.tlsSpki !== 'none')) { // phones don't accept connections
       for (const ep of [...new Set([...d.endpoints, ...lan])]) {
-        try { const r = await s.syncWith(transport(d, ep)); s.setEndpoints(d.fp, [ep, ...d.endpoints.filter((e) => e !== ep)]); lastError = null; if (r.pulled || r.objects) changed(); break; }
+        try { const r = await s.syncWith(transport(d, ep)); s.setEndpoints(d.fp, [ep, ...d.endpoints.filter((e) => e !== ep)]); lastError = null; if (r.pulled || r.objects) arrived(); break; }
         catch (e) { lastError = (e as Error).message; if ((e as { code?: string }).code === 'revoked') { changed(); return; } }
       }
     }

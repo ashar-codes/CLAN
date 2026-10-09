@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
 import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type DirectPackage, type ClassroomInfo, type ClientMessage, type MemberStatus, type PresentationView, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { ChatSection, useMobileChat } from './Chat';
-import { InboxCard } from './Inbox';
 import { MobileBoard, useMobileBoard } from './board/Board';
-import { StudyScreen } from './study/Study';
-import { recordAssignments } from './study/store';
+import { me as meP, openPhoneClan, phoneClan } from './core/clan';
+import { keyFingerprint } from '@classroom/protocol';
+import { migrateOldPhoneData } from './core/migrate';
+import { setupPhoneSync, startSyncSchedule } from './sync/phone';
+import { bump, ThemeRoot } from './ui/kit';
+import { Shell } from './Shell';
+import { PresentationCard } from './media/Watch';
+import { IntakeScreen, useIncomingShare } from './share/Intake';
 import { browse } from './discovery';
 import { deviceSigner, loadProfile, saveProfile, type OwnProfile } from './storage';
 import { opaqueClient, pinnedNativeTransport, type PinnedNativeTransport } from './native';
@@ -30,26 +36,40 @@ export default function App() {
   const [profile, setProfile] = useState<OwnProfile | null>(null);
   const [editing, setEditing] = useState(false);
   const [joined, setJoined] = useState<PairedJoin | null>(null);
-  const [studying, setStudying] = useState(false);
+  const [ready, setReady] = useState<string | null>(null);
+  const [share, clearShare] = useIncomingShare();
 
   useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); }); }, []);
+  // CLAN core (encrypted database) opens once the profile exists; then personal sync runs while the app is in front.
+  useEffect(() => {
+    if (!profile?.fullName || editing) return;
+    let stop = () => {};
+    openPhoneClan(profile.fullName).then(async (c) => {
+      await setupPhoneSync(profile.deviceName ?? 'Phone');
+      await migrateOldPhoneData().catch(() => {});
+      c.sync.onApplied(() => bump());
+      stop = startSyncSchedule();
+      setReady('ok');
+    }, (e) => setReady(`CLAN could not open its data: ${(e as Error).message}`));
+    return () => stop();
+  }, [profile?.fullName, editing]);
   if (!profile) return null;
 
   return (
-    <SafeAreaView style={[s.fill, { backgroundColor: c.bg }]}>
+    <SafeAreaProvider><SafeAreaView style={[s.fill, { backgroundColor: c.bg }]} edges={['top', 'bottom', 'left', 'right']}>
       <OpaqueBridgeHost />
       <KeyboardAvoidingView style={s.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ThemeRoot>
         {editing ? (
           <ProfileForm c={c} initial={profile} onSaved={(p) => { setProfile(p); setEditing(false); }} />
-        ) : studying ? (
-          <StudyScreen c={c} onBack={() => setStudying(false)} />
         ) : joined ? (
           <InClass c={c} joined={joined} onLeave={() => setJoined(null)} />
-        ) : (
-          <JoinScreen c={c} profile={profile as StudentProfile} onJoined={setJoined} onEdit={() => setEditing(true)} onStudy={() => setStudying(true)} />
-        )}
+        ) : ready === 'ok' ? (
+          <Shell onEditProfile={() => setEditing(true)} intake={share ? <IntakeScreen share={share} onDone={clearShare} /> : undefined} join={<JoinScreen c={c} profile={profile as StudentProfile} onJoined={setJoined} onEdit={() => setEditing(true)} />} />
+        ) : ready ? <Text style={{ color: c.danger, padding: 20 }}>{ready}</Text> : <ActivityIndicator style={{ marginTop: 80 }} size="large" />}
+        </ThemeRoot>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </SafeAreaView></SafeAreaProvider>
   );
 }
 
@@ -78,8 +98,9 @@ function ProfileForm({ c, initial, onSaved }: { c: C; initial: OwnProfile; onSav
   );
 }
 
-function JoinScreen({ c, profile, onJoined, onEdit, onStudy }: { c: C; profile: StudentProfile; onJoined(j: PairedJoin): void; onEdit(): void; onStudy(): void }) {
+function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentProfile; onJoined(j: PairedJoin): void; onEdit(): void }) {
   const [code, setCode] = useState('');
+  const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [found, setFound] = useState<Candidate[]>([]);
@@ -99,12 +120,15 @@ function JoinScreen({ c, profile, onJoined, onEdit, onStudy }: { c: C; profile: 
     setBusy(true); setError(''); setManual(null);
     try {
       let candidates = foundRef.current;
+      // a typed host address (as the host's screen shows it) when this Wi-Fi blocks discovery
+      if (/^\d+\.\d+\.\d+\.\d+:\d{2,5}$/.test(address.trim())) candidates = [{ url: `http://${address.trim()}` }, ...candidates];
       if (qr) {
         if (!associator) throw Object.assign(new TransferError('direct_manual', 'Join the CLAN network in Settings, then try again.'), { direct: qr });
         await associator(qr);
         candidates = [{ url: `http://${qr.host}:${qr.bootstrapPort}`, sid: qr.sessionId }];
       }
-      const carriers = qr ? [] : (await bleAllowed()) ? await bleCarriers() : [];
+      // Bluetooth (and Android's location prompt it needs) only when the host wasn't found or typed in
+      const carriers = qr || candidates.length ? [] : (await bleAllowed()) ? await bleCarriers() : [];
       for (let i = 0; i < 12 && candidates.length === 0 && carriers.length === 0; i++) { await new Promise((r) => setTimeout(r, 250)); candidates = foundRef.current; }
       // Same secure flow as desktop: OPAQUE (official WASM in the isolated WebView) -> MACed binding -> pinned native TLS.
       onJoined(await pairAndJoin({ candidates, carriers, associate: associator, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
@@ -125,6 +149,7 @@ function JoinScreen({ c, profile, onJoined, onEdit, onStudy }: { c: C; profile: 
         keyboardType="number-pad" maxLength={6} placeholder="000000" placeholderTextColor={c.border} autoFocus
         accessibilityLabel="Six digit classroom code" onSubmitEditing={() => code.length === 6 && join()}
       />
+      <TextInput style={[s.input, { color: c.text, borderColor: c.border, backgroundColor: c.surface }]} value={address} onChangeText={setAddress} placeholder="Host address (only if not found)" placeholderTextColor={c.muted} autoCapitalize="none" keyboardType="numbers-and-punctuation" accessibilityLabel="Host address" />
       {!!error && <Text style={{ color: c.danger }}>{error}</Text>}
       {qr && <Text style={{ color: c.muted }}>Network from QR ready ({qr.ssid}). Enter the code to join.</Text>}
       {manual && (
@@ -135,8 +160,6 @@ function JoinScreen({ c, profile, onJoined, onEdit, onStudy }: { c: C; profile: 
         </View>
       )}
       <Button c={c} primary label={busy ? 'Joining…' : 'Join'} disabled={code.length !== 6 || busy} onPress={join} />
-      <Button c={c} label="My study: courses, tasks, exams, cards" onPress={onStudy} />
-      <InboxCard c={c} />
       <Text style={{ color: c.muted, marginTop: 24 }}>
         {found.length ? `Nearby: ${found.map((f) => f.title).join(', ')}` : 'Looking for CLANs on this Wi-Fi… Make sure you are on the same network as the host. Internet is not needed.'}
       </Text>
@@ -158,11 +181,22 @@ function RoomHeader({ c, title, host, files, type }: { c: C; title: string; host
   );
 }
 
+/** This phone's core learns which CLAN it joined (as the desktop does); a Classroom gets its linked Course. */
+function recordJoined(j: PairedJoin, info: ClassroomInfo) {
+  try {
+    const c = phoneClan();
+    c.clans.recordJoined({ id: info.clanId ?? info.sessionId, type: info.clanType, name: info.title, hostDeviceId: keyFingerprint(j.binding.teacherPublicKey), hostName: info.hostName ?? `${info.title} host`, expiresAt: info.expiresAt ?? null, me: c.me });
+    if (info.clanType === 'CLASSROOM') c.courses.linkClassrooms(meP());
+  } catch { /* the class works without it */ }
+}
+
 function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
   const [joined, setJoined] = useState(first);
   const [status, setStatus] = useState<MemberStatus>(joined.status);
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
   const [quality, setQuality] = useState<Quality>('disconnected');
+  const [wasUp, setWasUp] = useState(false); // "Reconnecting…" only after the connection has been up once
+  useEffect(() => { if (quality !== 'disconnected') setWasUp(true); }, [quality]);
   const [closed, setClosed] = useState(false);
   const [resources, setResources] = useState<ResourceView[]>([]);
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
@@ -182,11 +216,11 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
         if (m.t === 'hello') boardRef.current?.connected();
         chatRef.current.onServer(m);
         if (m.t === 'members') setPeople(m.members);
-        if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); }
+        if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); recordJoined(joined, m.classroom); }
         if (m.t === 'class.state') setInfo(m.classroom);
         if (m.t === 'member.status') setStatus(m.status);
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
-        if (m.t === 'assignments') { setAssignments(m.assignments as StudentAssignmentView[]); if (joined.classroom.clanType === 'CLASSROOM') recordAssignments(joined.classroom.clanId ?? joined.classroom.sessionId, joined.classroom.title, m.assignments as StudentAssignmentView[]); }
+        if (m.t === 'assignments') { setAssignments(m.assignments as StudentAssignmentView[]); try { phoneClan().assignments.seen(meP(), joined.classroom.clanId ?? joined.classroom.sessionId, m.assignments); } catch { /* projection only; never blocks the class */ } }
         if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
         if (m.t === 'presentation') setPresenting(m.state);
       },
@@ -226,18 +260,12 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
         <>
           <View style={[s.pill, { borderColor: c.border }]}>
             <View style={[s.dot, { backgroundColor: quality === 'disconnected' ? c.danger : quality === 'poor' ? c.warn : c.ok }]} />
-            <Text style={{ color: c.text }}>{QUALITY[quality]}</Text>
+            <Text style={{ color: c.text }}>{quality === 'disconnected' && !wasUp ? 'Connecting…' : QUALITY[quality]}</Text>
           </View>
           <RoomHeader c={c} title={info.title} host={info.hostName} files={resources.length} type={L.type} />
-          {presenting && (
-            // ponytail: phones show who is presenting but can't view yet — LiveKit signaling is binary and the pinned native socket is text-only (docs/MEDIA.md).
-            <View accessibilityLiveRegion="polite" style={[s.pill, { borderColor: c.border }]}>
-              <Text style={{ color: c.text }}>{`${presenting.presenterName} is presenting their ${presenting.source}${presenting.state === 'reconnecting' ? ' (reconnecting…)' : ''}. Viewing on phones is coming soon — use a computer to watch.`}</Text>
-            </View>
-          )}
+          {presenting && <PresentationCard c={c} presenting={presenting} conn={{ url: joined.url, token: joined.token, transport: joined.transport as PinnedNativeTransport }} />}
           {board.view?.wall === 'WHITEBOARD' && !presenting && <MobileBoard c={c} board={board} title={`${info.title} board`} />}
           <ChatSection c={c} chat={chat} conn={conn} people={people} />
-          <InboxCard c={c} onSend={(it) => { const g = chat.threads.find((t) => t.kind === 'group'); if (g) chat.post(g.id, it.kind === 'text' ? it.text : '', it.kind === 'url' ? { attachment: { kind: 'link', url: it.url, ...(it.title ? { title: it.title } : {}) } } : {}); }} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
         </>

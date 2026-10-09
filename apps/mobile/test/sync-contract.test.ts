@@ -22,4 +22,13 @@ describe('phone contract', () => {
     expect(a.app.study.recent(a.me).map((x) => x.goal)).toEqual(['optics']);
     expect(phoneChanges(st, new Map(recs.map((r) => [`${r.kind}:${r.id}`, r.hash])), { now: clock.t, device: phone.fp })).toEqual([]);
   });
+  it('importLocal moves the old phone study.json (incl. decks, cards and reviews) into core on the phone', () => {
+    const phone = device('Phone');
+    const st = { ...EMPTY, decks: [{ id: 'd-1', name: 'Optics', courseId: null, examId: null }], cards: [{ id: 'k-9', deckId: 'd-1', front: 'f', back: 'b', dueAt: 0, interval: 0, ease: 2.5, reps: 0, lapses: 0 }],
+      reviews: [{ cardId: 'k-9', at: clock.t, grade: 'good' as const, intervalAfter: 1 }, { cardId: 'k-9', at: clock.t + 1, grade: 'good' as const, intervalAfter: 6 }] };
+    expect(phone.app.sync.importLocal(phoneChanges(st, new Map(), { now: clock.t, device: phone.fp }))).toBe(3);
+    expect(phone.app.flashcards.card(phone.me, 'k-9')).toMatchObject({ reps: 2, interval: 6 });
+    expect(phone.app.sync.importLocal(phoneChanges(st, new Map(), { now: clock.t, device: phone.fp }))).toBe(3); // idempotent
+    expect(phone.app.flashcards.history(phone.me, 'k-9')).toHaveLength(2);
+  });
 });

@@ -23,7 +23,7 @@
 * Session tokens are in memory: restarting the student app means re-entering the code (an already-approved device is
   let back in without re-approval).
 * If two classrooms on one LAN ever share a code (1-in-a-million per pair), the student joins whichever answers first.
-* Mobile and Windows builds have not been executed on real devices/OS from this machine.
+* Android has run on an emulator only (no physical phone); iOS has not been built (no Xcode / Apple team here); Windows builds have not been run on Windows.
 * Peer assistance does not add Wi-Fi capacity on a single access point (airtime is shared); it offloads the teacher machine.
   Real-Wi-Fi measurements are still pending (`lan-bench --mode classroom`).
 * On loopback, peer-assisted distribution is slower than teacher-only (the teacher is effectively infinitely fast there); the

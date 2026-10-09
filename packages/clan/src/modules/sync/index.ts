@@ -7,10 +7,11 @@ import { mkdir, open, rm, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
-  DeviceEntry, contentHash, LINK_ALPHABET, LINK_TTL_MS, LinkGrant, LinkHello, REQUEST_SKEW_MS, SyncRecord, deviceStatement, formatLinkCode, hlc, hlcParts, linkTranscript, normalizeLinkCode, requestStatement,
+  b64u, DeviceEntry, contentHash, LINK_ALPHABET, LINK_TTL_MS, LinkGrant, LinkHello, REQUEST_SKEW_MS, SyncRecord, deviceStatement, formatLinkCode, hlc, hlcParts, linkTranscript, normalizeLinkCode, requestStatement,
   type SyncBatch, type SyncTransport,
 } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
+import { sha256File } from '../../core/resources.ts';
 import { SyncConflict, SyncDefer, type SyncProvider } from '../../core/syncrows.ts';
 import type { Identity } from '../../core/identity.ts';
 
@@ -43,16 +44,17 @@ export type Signer = { fp: string; publicKey: string; sign(bytes: Uint8Array): s
 export type DeviceView = { fp: string; name: string; platform: string; current: boolean; revoked: boolean; addedAt: number; lastSeen: number | null; lastSync: number | null; error: string | null; endpoints: string[]; tlsCa: string; tlsSpki: string; publicKey: string };
 export type ConflictView = { id: string; kind: string; entityId: string; policy: string; note: string; local: unknown; remote: unknown; fromDevice: string; createdAt: number; canKeepBoth: boolean };
 type Meta = { kind: string; id: string; version: string; hash: string; history: string[]; deleted: boolean; seq: number };
-type Link = { sessionId: string; key: Buffer; nonceA: string; expiresAt: number; tries: number; hello: (LinkHello & { serverSpki: string }) | null; state: 'waiting' | 'pending' | 'approved' | 'rejected'; grant: unknown; proofA: string | null };
+type Link = { sessionId: string; key: Uint8Array; nonceA: string; expiresAt: number; tries: number; hello: (LinkHello & { serverSpki: string }) | null; state: 'waiting' | 'pending' | 'approved' | 'rejected'; grant: unknown; proofA: string | null };
 export class SyncAuthError extends Error { readonly code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
 
-const fpOf = (publicKey: string) => createHash('sha256').update(Buffer.from(publicKey, 'base64url')).digest('base64url').slice(0, 22);
-const ED25519_SPKI_PREFIX = '302a300506032b6570032100';
-const edKey = (raw: string) => createPublicKey({ key: Buffer.concat([Buffer.from(ED25519_SPKI_PREFIX, 'hex'), Buffer.from(raw, 'base64url')]), format: 'der', type: 'spki' });
-export const verifyEd25519 = (publicKey: string, bytes: Uint8Array, sig: string) => { try { return edVerify(null, bytes, edKey(publicKey), Buffer.from(sig, 'base64url')); } catch { return false; } };
+// Portable (Node and the phone's shims): Uint8Array + base64url from the protocol, no Buffer.
+const fpOf = (publicKey: string) => b64u.encode(createHash('sha256').update(b64u.decode(publicKey)).digest()).slice(0, 22);
+const ED25519_SPKI_PREFIX = Uint8Array.of(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00);
+const edKey = (raw: string) => { const k = b64u.decode(raw), der = new Uint8Array(12 + k.length); der.set(ED25519_SPKI_PREFIX); der.set(k, 12); return createPublicKey({ key: der as never, format: 'der', type: 'spki' }); };
+export const verifyEd25519 = (publicKey: string, bytes: Uint8Array, sig: string) => { try { return edVerify(null, bytes, edKey(publicKey), b64u.decode(sig)); } catch { return false; } };
 const linkKey = (code: string) => createHash('sha256').update(`clan-sync-link-key/v1|${code}`).digest();
 export const linkProof = (code: string, transcript: string) => createHmac('sha256', linkKey(code)).update(transcript).digest('base64url');
-const eq = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
+const eq = (a: string, b: string) => { const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b); return x.length === y.length && timingSafeEqual(x, y); };
 const isFk = (e: unknown) => /FOREIGN KEY constraint failed/.test(String((e as Error)?.message));
 const HISTORY = 16;
 
@@ -87,6 +89,13 @@ export class PersonalSync {
       }
     });
     return fp;
+  }
+  /** Starts over after this device was unlinked: forgets the account, registry, versions and transfers (local data
+   *  stays). The host must then call setup() with a NEW device key — a revoked key can never be linked again. */
+  reset() {
+    tx(this.db, () => { for (const t of ['sync_account', 'sync_self', 'sync_devices', 'sync_meta', 'sync_conflicts', 'sync_deferred', 'sync_transfers', 'sync_clock']) this.db.prepare(`DELETE FROM ${t}`).run(); });
+    this.signer = null; this.scanned = -1; this.link = null;
+    this.setSettings({ paused: false }); // the pause came from being unlinked; Diary/file choices stay
   }
   account() { return this.db.prepare('SELECT account_id accountId, discovery_secret discoverySecret, created_at createdAt FROM sync_account').get() as { accountId: string; discoverySecret: string; createdAt: number } | undefined; }
   self(): SelfDevice { const r = this.db.prepare('SELECT fp, public_key publicKey, name, platform, tls_ca tlsCa, tls_spki tlsSpki FROM sync_self').get() as SelfDevice | undefined; if (!r) throw new Error('Sync is not set up.'); return r; }
@@ -222,7 +231,13 @@ export class PersonalSync {
     const p = this.providers.get(rec.kind), owner = this.identity.localUser();
     if (!p || !this.enabled(p)) return false; // unknown (newer app) or turned off here
     this.tick(rec.version);
-    const m = this.meta(rec.kind, rec.id);
+    let m = this.meta(rec.kind, rec.id);
+    // A local edit made after this round's change scan (rounds await the network) must not look "unchanged": record it
+    // now, so the incoming version is compared with what is really here instead of fast-forwarding over it.
+    if (m && p.policy !== 'union') {
+      const live = p.one(owner, rec.id);
+      if (live === null ? !m.deleted : m.deleted || contentHash(live) !== m.hash) { this.touchMeta(rec.kind, rec.id, live, live === null); m = this.meta(rec.kind, rec.id); }
+    }
     if (m && m.hash === rec.hash) return false; // already have it (idempotent)
     if (!m && p.policy !== 'union') { // first sight here, but this device may already hold its own version (same day, profile)
       const local = p.one(owner, rec.id);
@@ -306,6 +321,17 @@ export class PersonalSync {
     return true;
   }
 
+  /** One-time import of records produced on THIS device by an older format (the phone's pre-core study data): each is
+   *  applied by its module's provider as local data, then detected as a normal local change. Returns how many applied. */
+  importLocal(raw: unknown[]) {
+    const owner = this.identity.localUser(); let n = 0;
+    for (const r of raw.map((x) => SyncRecord.parse(x))) {
+      const p = this.providers.get(r.kind); if (!p) continue;
+      try { tx(this.db, () => p.apply(owner, r.id, r.payload, { merge: false })); n++; } catch { /* skip what can't apply (e.g. a dangling reference) */ }
+    }
+    return n;
+  }
+
   // ---------------- conflicts ----------------
   conflicts(open = true): ConflictView[] {
     return (this.db.prepare(`SELECT c.*, d.entry FROM sync_conflicts c LEFT JOIN sync_devices d ON d.fp = c.from_fp WHERE ${open ? 'c.resolved_at IS NULL' : '1'} ORDER BY c.created_at DESC LIMIT 200`).all() as { id: string; kind: string; entity_id: string; policy: string; note: string; local: string; remote: string; from_fp: string; created_at: number; entry: string | null }[])
@@ -362,9 +388,7 @@ export class PersonalSync {
         continue;
       }
       await fh.close();
-      const h = createHash('sha256'); const rf = await open(part, 'r');
-      for await (const c of rf.createReadStream()) h.update(c as Buffer);
-      if (h.digest('hex') !== r.sha256 || received !== r.size) { await rm(part, { force: true }); this.db.prepare("UPDATE sync_transfers SET state = 'failed', received = 0, error = 'Checksum mismatch; will retry', updated_at = ? WHERE sha256 = ?").run(this.now(), r.sha256); continue; }
+      if ((await sha256File(part)).sha256 !== r.sha256 || received !== r.size) { await rm(part, { force: true }); this.db.prepare("UPDATE sync_transfers SET state = 'failed', received = 0, error = 'Checksum mismatch; will retry', updated_at = ? WHERE sha256 = ?").run(this.now(), r.sha256); continue; }
       await this.ingest(part, r.mime);
       this.db.prepare('DELETE FROM sync_transfers WHERE sha256 = ?').run(r.sha256);
       for (const w of JSON.parse(r.waiting) as SyncRecord[]) this.applyRecord(t.peer, w);
@@ -410,7 +434,7 @@ export class PersonalSync {
   /** Verifies a signed request from a linked device (on top of pinned TLS). Returns the caller's fingerprint. */
   verifyRequest(h: { auth: string | undefined; sig: string | undefined }, method: string, path: string, bodySha: string) {
     let a: { fp: string; ts: number; nonce: string; bodySha: string };
-    try { a = z.object({ fp: z.string().max(64), ts: z.number().int(), nonce: z.string().min(16).max(64), bodySha: z.string().max(64) }).parse(JSON.parse(Buffer.from(h.auth ?? '', 'base64url').toString())); } catch { throw new SyncAuthError('bad_auth', 'Missing or malformed authentication.'); }
+    try { a = z.object({ fp: z.string().max(64), ts: z.number().int(), nonce: z.string().min(16).max(64), bodySha: z.string().max(64) }).parse(JSON.parse(new TextDecoder().decode(b64u.decode(h.auth ?? '')))); } catch { throw new SyncAuthError('bad_auth', 'Missing or malformed authentication.'); }
     const d = this.db.prepare('SELECT entry, revoked FROM sync_devices WHERE fp = ?').get(a.fp) as { entry: string; revoked: number } | undefined;
     if (!d || a.fp === this.selfFp()) throw new SyncAuthError('unknown_device', 'This device is not linked to the account.');
     if (d.revoked) throw new SyncAuthError('revoked', 'This device was unlinked.');
@@ -428,7 +452,7 @@ export class PersonalSync {
   authHeaders(method: string, path: string, body: string) {
     if (!this.signer) throw new Error('Sync is not set up.');
     const bodySha = createHash('sha256').update(body).digest('base64url'), ts = this.now(), nonce = randomBytes(18).toString('base64url');
-    const auth = Buffer.from(JSON.stringify({ fp: this.signer.fp, ts, nonce, bodySha })).toString('base64url');
+    const auth = b64u.encode(new TextEncoder().encode(JSON.stringify({ fp: this.signer.fp, ts, nonce, bodySha })));
     return { 'x-clan-sync': auth, 'x-clan-sync-sig': this.signer.sign(requestStatement({ method, path, ts, nonce, bodySha, fp: this.signer.fp })) };
   }
   bodySha(body: string | Uint8Array) { return createHash('sha256').update(body).digest('base64url'); }

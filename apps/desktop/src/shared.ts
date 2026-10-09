@@ -290,6 +290,8 @@ export type SyncApi = {
   resolve(id: string, choice: 'mine' | 'theirs' | 'both'): Promise<void>;
   setSettings(p: Partial<SyncSettings>): Promise<SyncSettings>;
   onChanged(cb: () => void): () => void;
+  /** Synced data arrived from another device. */
+  onData(cb: () => void): () => void;
 };
 
 /** API exposed by the preload as window.classroom. */

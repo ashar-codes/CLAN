@@ -35,6 +35,15 @@ public class PinnedTransportModule: Module {
     return r
   }
 
+  private func install(_ id: String, _ trust: PinnedTrust) {
+    trust.emit = { [weak self] name, body in self?.sendEvent(name, body) }
+    let cfg = URLSessionConfiguration.ephemeral // no cookies, cache or credential storage
+    cfg.tlsMinimumSupportedProtocolVersion = .TLSv13
+    cfg.waitsForConnectivity = false
+    let session = URLSession(configuration: cfg, delegate: trust, delegateQueue: nil)
+    lock.lock(); conns[id] = Conn(session: session, trust: trust); lock.unlock()
+  }
+
   public func definition() -> ModuleDefinition {
     Name("PinnedTransport")
     Events("progress", "wsOpen", "wsMessage", "wsClose")
@@ -43,14 +52,12 @@ public class PinnedTransportModule: Module {
       guard let der = Data(base64Encoded: caDerB64), let ca = SecCertificateCreateWithData(nil, der as CFData) else {
         throw Exception(name: "BadCertificate", description: "Invalid classroom CA")
       }
-      let trust = PinnedTrust(anchor: ca, pin: pinB64)
-      trust.emit = { [weak self] name, body in self?.sendEvent(name, body) }
-      let cfg = URLSessionConfiguration.ephemeral // no cookies, cache or credential storage
-      cfg.tlsMinimumSupportedProtocolVersion = .TLSv13
-      cfg.waitsForConnectivity = false
-      let session = URLSession(configuration: cfg, delegate: trust, delegateQueue: nil)
-      self.lock.lock(); self.conns[id] = Conn(session: session, trust: trust); self.lock.unlock()
+      self.install(id, PinnedTrust(anchor: ca, pin: pinB64))
     }
+
+    // Personal-device linking only: first contact pins the first leaf key seen (JS reads it with seenPin).
+    Function("configureFirstContact") { (id: String) in self.install(id, PinnedTrust(firstContact: ())) }
+    Function("seenPin") { (id: String) -> String? in try self.conn(id).trust.seenPin }
 
     Function("release") { (id: String) in
       self.lock.lock(); let c = self.conns.removeValue(forKey: id); self.lock.unlock()
@@ -117,13 +124,14 @@ public class PinnedTransportModule: Module {
     Function("wsOpen") { (id: String, wsId: String, url: String) in
       let c = try self.conn(id)
       let task = c.session.webSocketTask(with: try self.request(url, "GET", [:]))
-      task.maximumMessageSize = 1 << 20
+      task.maximumMessageSize = 4 << 20 // media signalling frames can exceed 1 MB
       c.trust.wsIds[task.taskIdentifier] = wsId
       self.lock.lock(); self.sockets[wsId] = task; self.lock.unlock()
       func receive() {
         task.receive { [weak self] result in
           switch result {
           case .success(.string(let s)): self?.sendEvent("wsMessage", ["id": wsId, "data": s]); receive()
+          case .success(.data(let d)): self?.sendEvent("wsMessage", ["id": wsId, "binary": d.base64EncodedString()]); receive()
           case .success: receive()
           case .failure: self?.sendEvent("wsClose", ["id": wsId, "code": 1006, "reason": ""])
           }
@@ -136,6 +144,12 @@ public class PinnedTransportModule: Module {
     AsyncFunction("wsSend") { (wsId: String, text: String) in
       self.lock.lock(); let t = self.sockets[wsId]; self.lock.unlock()
       try await t?.send(.string(text))
+    }
+
+    AsyncFunction("wsSendBinary") { (wsId: String, b64: String) in
+      guard let d = Data(base64Encoded: b64) else { return }
+      self.lock.lock(); let t = self.sockets[wsId]; self.lock.unlock()
+      try await t?.send(.data(d))
     }
 
     Function("wsClose") { (wsId: String, code: Int, reason: String) in

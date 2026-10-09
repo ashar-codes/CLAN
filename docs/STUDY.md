@@ -65,9 +65,8 @@ minute.
 marks, counts). No summaries, generated cards, quizzes, plans or RAG exist.
 
 ## Mobile
-The phone has its own Study screen (Today, Courses, Tasks, Exams, Cards, Session) over a local JSON document
-(`apps/mobile/src/study`) using the same shared algorithms. Phone data stays on the phone (desktop devices sync with each other, see SYNC.md; the phone has only the record contract); a joined
-Classroom's assignments are projected the same way. Typecheck + model unit test only; **device runtime UNVERIFIED**.
+The phone runs the same core modules (MOBILE.md): Courses, Notes, Tasks, Exams, Reminders, Cards, Session, Boards and Ask
+CLAN, with native date pickers, synced with your computers (SYNC.md). Verified on the Android emulator; iOS not built.
 
 ## Study Tapes and boards
 A Study Session can start a recording (RECORDING.md) and a Course has Recordings and a Board (WHITEBOARD.md); both are
@@ -75,4 +74,4 @@ linked by reference, never copied.
 
 ## Known limits
 Study data syncs between a person's desktop devices (SYNC.md), not yet with the phone. Presence never broadcasts Focus or study state (only your own beacon shows
-it). Dates on the phone are typed (no picker). Lectures are not auto-created from class sessions.
+it). Lectures are not auto-created from class sessions.

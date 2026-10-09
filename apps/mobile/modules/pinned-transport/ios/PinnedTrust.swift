@@ -12,29 +12,38 @@ private let p256SpkiPrefix: [UInt8] = [0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a,
                                        0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00]
 
 final class PinnedTrust: NSObject, URLSessionDataDelegate, URLSessionWebSocketDelegate {
-  let anchor: SecCertificate
-  let pin: String
+  /** nil = first contact (personal-device linking): no anchor yet; the first leaf key seen is pinned for the rest of
+   *  this connection, and the link proofs bind to it (see docs/SYNC.md). Never used for classroom or sync traffic. */
+  let anchor: SecCertificate?
+  private(set) var pin: String?
+  private let lock = NSLock()
   var wsIds: [Int: String] = [:]
   /** Event sink (the Expo module); kept as a closure so this file compiles without ExpoModulesCore. */
   var emit: (String, [String: Any]) -> Void = { _, _ in }
 
   init(anchor: SecCertificate, pin: String) { self.anchor = anchor; self.pin = pin }
+  init(firstContact: Void) { self.anchor = nil; self.pin = nil }
+  var seenPin: String? { lock.lock(); defer { lock.unlock() }; return pin }
 
   func evaluate(_ trust: SecTrust) -> Bool {
     SecTrustSetPolicies(trust, SecPolicyCreateBasicX509())
-    SecTrustSetAnchorCertificates(trust, [anchor] as CFArray)
-    SecTrustSetAnchorCertificatesOnly(trust, true)
-    var error: CFError?
-    guard SecTrustEvaluateWithError(trust, &error),
-          let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+    if let anchor = anchor {
+      SecTrustSetAnchorCertificates(trust, [anchor] as CFArray)
+      SecTrustSetAnchorCertificatesOnly(trust, true)
+      var error: CFError?
+      guard SecTrustEvaluateWithError(trust, &error) else { return false }
+    }
+    guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
           let leaf = chain.first,
           let key = SecCertificateCopyKey(leaf),
           let attrs = SecKeyCopyAttributes(key) as? [CFString: Any],
           (attrs[kSecAttrKeyType] as? String) == (kSecAttrKeyTypeECSECPrimeRandom as String),
           (attrs[kSecAttrKeySizeInBits] as? Int) == 256,
           let raw = SecKeyCopyExternalRepresentation(key, nil) as Data? else { return false }
-    let digest = SHA256.hash(data: Data(p256SpkiPrefix) + raw)
-    return Data(digest).base64EncodedString() == pin
+    let seen = Data(SHA256.hash(data: Data(p256SpkiPrefix) + raw)).base64EncodedString()
+    lock.lock(); defer { lock.unlock() }
+    if anchor == nil && pin == nil { pin = seen; return true } // first contact: remember this key
+    return seen == pin
   }
 
   func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,

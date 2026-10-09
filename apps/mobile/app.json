@@ -11,7 +11,8 @@
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "CLAN finds and connects to nearby CLANs on this Wi-Fi network. No internet is used.",
         "NSBonjourServices": [
-          "_classroomlan._tcp"
+          "_classroomlan._tcp",
+          "_clansync._tcp"
         ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
@@ -35,9 +36,55 @@
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.CHANGE_NETWORK_STATE",
         "android.permission.CHANGE_WIFI_STATE"
+      ],
+      "intentFilters": [
+        {
+          "action": "SEND",
+          "category": [
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "mimeType": "text/plain"
+            },
+            {
+              "mimeType": "image/*"
+            },
+            {
+              "mimeType": "application/pdf"
+            },
+            {
+              "mimeType": "*/*"
+            }
+          ]
+        },
+        {
+          "action": "SEND_MULTIPLE",
+          "category": [
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "mimeType": "image/*"
+            },
+            {
+              "mimeType": "*/*"
+            }
+          ]
+        }
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true,
+          "useSQLCipher": true
+        }
+      ],
       "expo-secure-store",
       [
         "expo-build-properties",
@@ -47,7 +94,11 @@
           }
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "@react-native-community/datetimepicker",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
+      "./plugins/withShareExtension.js"
     ],
     "scheme": "clan"
   }

@@ -158,8 +158,10 @@ function Notes() {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [draft, setDraft] = useState({ title: '', body: '' });
-  useEffect(() => { if (sel) setDraft({ title: sel.title, body: sel.body }); }, [sel]);
-  useEffect(() => { if (target.noteId && notes) { const n = notes.find((x) => x.id === target.noteId); if (n) setSel(n); } }, [target.noteId, notes]);
+  // The draft is set when a note is picked — never from an effect, so typing right after picking (or a list reload
+  // while editing) can't merge into a stale draft or reset what's being typed.
+  const pick = (n: Note) => { setSel(n); setDraft({ title: n.title, body: n.body }); };
+  useEffect(() => { if (target.noteId && notes) { const n = notes.find((x) => x.id === target.noteId); if (n && sel?.id !== n.id) pick(n); } }, [target.noteId, notes]); // eslint-disable-line react-hooks/exhaustive-deps
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   /** Note actions: the AI result is a preview; the student picks Insert / Append / New note (or closes = discard). Save stays explicit. */
   const noteAI = (action: 'explain' | 'simplify' | 'summarize' | 'questions' | 'flashcards', title: string) => {
@@ -172,7 +174,7 @@ function Notes() {
         setDraft((d) => ({ ...d, body: how === 'append' ? `${d.body.replace(/\s+$/, '')}\n\n${text}` : `${d.body.slice(0, at)}${text}${d.body.slice(at)}` }));
       } });
   };
-  const create = async () => { const n = await api.clan.createNote({ title: 'Untitled' }); reload(); setSel(n); };
+  const create = async () => { const n = await api.clan.createNote({ title: 'Untitled' }); reload(); pick(n); };
   const save = async () => { if (sel) { setSel(await api.clan.updateNote(sel.id, draft)); reload(); } };
   return (
     <div className="study-grid">
@@ -181,11 +183,11 @@ function Notes() {
         {hits && hits.length > 0 && <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: `About “${q}”`, action: 'ask', scope: { kind: 'search', hits: hits.map((h) => ({ module: h.module, entityId: h.entityId })) }, question: q, ask: true })}>Ask CLAN about these results</button>}
         {hits && <div className="card">{hits.length ? hits.map((h) => h.module === 'recordings' ? <button key={h.module + h.entityId} className="line link-row" onClick={() => { const [tapeId, at] = h.entityId.split(':'); go({ tab: 'tapes', tapeId, tapeAt: at ? Number(at) : undefined }); }}><span>{h.title}<br /><small className="muted">{h.snippet}</small></span><span className="muted">Study Tape</span></button> : <div key={h.module + h.entityId} className="line"><span>{h.title}<br /><small className="muted">{h.snippet}</small></span><span className="muted">{h.module}</span></div>) : <p className="muted">No results.</p>}</div>}
         <button className="primary" onClick={create}>New note</button>
-        {notes?.map((n) => <button key={n.id} className={`line link-row ${sel?.id === n.id ? 'on' : ''}`} onClick={() => setSel(n)}>{n.title}<span className="muted">{n.sharedWith.length ? 'shared' : 'private'}</span></button>)}
+        {notes?.map((n) => <button key={n.id} className={`line link-row ${sel?.id === n.id ? 'on' : ''}`} onClick={() => pick(n)}>{n.title}<span className="muted">{n.sharedWith.length ? 'shared' : 'private'}</span></button>)}
       </aside>
       {sel ? (
         <section className="card stack paper-sheet">
-          <input className="note-title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} aria-label="Title" />
+          <input className="note-title" value={draft.title} onChange={(e) => { const title = e.target.value; setDraft((d) => ({ ...d, title })); }} aria-label="Title" />
           <div className="row tight note-ai" role="group" aria-label="CLAN note actions">
             <button className="small ai-link" onClick={() => noteAI('explain', 'Explain')}>Explain selection</button>
             <button className="small ai-link" onClick={() => noteAI('simplify', 'Simplify')}>Simplify</button>
@@ -196,7 +198,7 @@ function Notes() {
               <option value="">Compare with course material…</option>{courses?.map((c) => <option key={c.id} value={`${c.id}:`}>{c.name}</option>)}
             </select>
           </div>
-          <textarea ref={bodyRef} className="note-body" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} aria-label="Note" />
+          <textarea ref={bodyRef} className="note-body" value={draft.body} onChange={(e) => { const body = e.target.value; setDraft((d) => ({ ...d, body })); }} aria-label="Note" />
           <div className="row">
             <button className="primary" onClick={save}>Save</button>
             <select value="" onChange={async (e) => { const clanId = e.target.value; await api.clan.shareNote(sel.id, clanId, true); reload(); setSel({ ...sel, sharedWith: [...sel.sharedWith, clanId] }); }} aria-label="Share to CLAN">

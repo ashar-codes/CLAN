@@ -23,6 +23,8 @@ describe.skipIf(!swiftc || process.platform !== 'darwin')('iOS pinned trust (Pin
       expect(await run(s.tls.certificate, other.spkiSha256)).toMatch(/^rejected/);
       expect(await run(other.certificate, s.tls.spkiSha256)).toMatch(/^rejected/);
       expect(await run(other.certificate, other.spkiSha256)).toMatch(/^rejected/);
+      // first contact (device linking): no anchor, reports the leaf key it saw so the link proofs can bind to it
+      expect((await promisify(execFile)(bin, [`${s.url}/api/resources`, 'first-contact'])).stdout.trim()).toBe(`ok 401 ${s.tls.spkiSha256}`);
     } finally { await s.close(); }
   }, 120_000);
 });

@@ -9,3 +9,6 @@ apps/mobile/android/
 *.db-*
 .DS_Store
 coverage/
+apps/mobile/modules/*/android/build/
+apps/mobile/modules/*/android/.cxx/
+apps/mobile/e2e/.tmp-*

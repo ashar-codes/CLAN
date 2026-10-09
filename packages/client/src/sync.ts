@@ -1,13 +1,14 @@
 // Personal device sync, client side (Node / Electron main): the LAN SyncTransport to a linked device (pinned to that
 // device's sync certificate, every request signed), and the joiner's half of linking.
 import { request } from 'node:https';
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { TLSSocket } from 'node:tls';
-import { linkTranscript, SyncBatch, type LinkGrant, type LinkHello, type SyncRecord, type SyncTransport } from '@classroom/protocol';
+import { SyncBatch, type LinkHello, type SyncRecord, type SyncTransport } from '@classroom/protocol';
+import { joinWithCode as join, SyncHttpError } from './link.ts';
+export { SyncHttpError } from './link.ts';
 import { pinnedTransport, spkiSha256OfDer } from './node.ts';
 
 export type SyncAuth = (method: string, path: string, body: string) => Record<string, string>;
-export class SyncHttpError extends Error { readonly code: string; readonly status: number; constructor(status: number, code: string, m: string) { super(m); this.status = status; this.code = code; } }
 
 /** A SyncTransport to one linked device at `base` (https://addr:port), trusting only its registered certificate. */
 export function lanSyncTransport(o: { peer: string; base: string; tlsCa: string; tlsSpki: string; auth: SyncAuth; timeoutMs?: number }): SyncTransport {
@@ -46,35 +47,6 @@ function postSeeing(base: string, path: string, body: unknown): Promise<{ status
   });
 }
 
-const linkKey = (code: string) => createHash('sha256').update(`clan-sync-link-key/v1|${code}`).digest();
-const hmac = (code: string, s: string) => createHmac('sha256', linkKey(code)).update(s).digest('base64url');
-
-/**
- * Joiner: with the code typed from the trusted device, prove knowledge of it bound to that device's TLS key and to our
- * device key, wait for the student to approve there, then verify the approver's proof before accepting the grant.
- */
-export async function joinWithCode(o: { base: string; code: string; device: LinkHello['device']; sign(bytes: Uint8Array): string; signal?: AbortSignal; pollMs?: number }): Promise<{ grant: LinkGrant; serverSpki: string }> {
-  const start = await postSeeing(o.base, '/link/start', {});
-  if (start.status !== 200) throw new SyncHttpError(start.status, (start.json as { error?: string }).error ?? 'error', (start.json as { message?: string }).message ?? 'No link is open on that device.');
-  const { sessionId, nonceA } = start.json as { sessionId: string; nonceA: string };
-  const nonceB = randomBytes(18).toString('base64url'), spki = start.spki;
-  const tr = linkTranscript('joiner', { sessionId, serverSpki: spki, joinerKey: o.device.publicKey, nonceA, nonceB });
-  const hello = await postSeeing(o.base, '/link/hello', { sessionId, nonceB, proof: hmac(o.code, tr), sig: o.sign(new TextEncoder().encode(tr)), device: o.device } satisfies LinkHello);
-  if (hello.spki !== spki) throw new Error('The other device changed during linking.');
-  if (hello.status !== 200) throw new SyncHttpError(hello.status, (hello.json as { error?: string }).error ?? 'error', (hello.json as { message?: string }).message ?? 'Linking failed.');
-  for (;;) {
-    if (o.signal?.aborted) throw new Error('Cancelled.');
-    await new Promise((r) => setTimeout(r, o.pollMs ?? 1000));
-    const st = await postSeeing(o.base, '/link/status', { sessionId, nonceB });
-    if (st.spki !== spki) throw new Error('The other device changed during linking.');
-    const s = st.json as { status: string; proof?: string; grant?: LinkGrant };
-    if (st.status !== 200) throw new SyncHttpError(st.status, 'no_link', 'The link was closed on the other device.');
-    if (s.status === 'rejected') throw new SyncHttpError(403, 'rejected', 'The link was declined on the other device.');
-    if (s.status !== 'approved') continue;
-    const expected = hmac(o.code, linkTranscript('approver', { sessionId, serverSpki: spki, joinerKey: o.device.publicKey, nonceA, nonceB }));
-    if (s.proof !== expected) throw new Error('The other device could not prove it showed this code.');
-    const approver = s.grant!.devices.find((d) => d.fp === s.grant!.approver.fp);
-    if (!approver || approver.tlsSpki !== spki) throw new Error('The approving device is not the one we talked to.');
-    return { grant: s.grant!, serverSpki: spki };
-  }
-}
+/** Desktop joiner: `joinWithCode` over node:https (first contact unpinned; proofs bind to the SPKI seen). */
+export const joinWithCode = (o: { base: string; code: string; device: LinkHello['device']; sign(bytes: Uint8Array): string; signal?: AbortSignal; pollMs?: number }) =>
+  join({ ...o, post: (path, body) => postSeeing(o.base, path, body), random: (n) => new Uint8Array(randomBytes(n)) });

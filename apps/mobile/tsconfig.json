@@ -1,5 +1,33 @@
 {
   "extends": "expo/tsconfig.base",
-  "compilerOptions": { "strict": true, "allowImportingTsExtensions": true, "noEmit": true },
-  "include": ["*.ts", "*.tsx", "src"]
+  "compilerOptions": {
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "paths": {
+      "node:crypto": [
+        "./src/node/crypto.ts"
+      ],
+      "node:fs": [
+        "./src/node/fs.ts"
+      ],
+      "node:fs/promises": [
+        "./src/node/fs.ts"
+      ],
+      "node:path": [
+        "./src/node/path.ts"
+      ],
+      "node:sqlite": [
+        "./src/node/sqlite-types.ts"
+      ],
+      "pdfjs-dist/legacy/build/pdf.mjs": [
+        "./src/node/pdf.ts"
+      ]
+    }
+  },
+  "include": [
+    "*.ts",
+    "*.tsx",
+    "src"
+  ]
 }

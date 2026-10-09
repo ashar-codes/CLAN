@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { nextOccurrence, readiness, sm2, NEW_CARD } from '@classroom/protocol';
+import { nextOccurrence, readiness, sm2, MAX_INTERVAL_DAYS, NEW_CARD } from '@classroom/protocol';
 import type { DeliveredNotice } from '../src/index.ts';
 import { file, setup, tmp, user } from './helpers.ts';
 
 const DAY = 86_400_000;
 
 describe('study algorithms', () => {
+  it('SM-2 intervals stay bounded under many Easy reviews (no overflow, a real date)', () => {
+    let s = { ...NEW_CARD, dueAt: 0 };
+    for (let i = 0; i < 500; i++) s = sm2(s, 'easy', Date.UTC(2026, 0, 1));
+    expect(s.interval).toBe(MAX_INTERVAL_DAYS);
+    expect(Number.isSafeInteger(s.dueAt)).toBe(true);
+    expect(new Date(s.dueAt).getUTCFullYear()).toBe(2125);
+  });
   it('SM-2: 1, 6, then ×EF; Again restarts and shows again in 10 min; EF floor 1.3', () => {
     let s = sm2(NEW_CARD, 'good', 0);
     expect(s.interval).toBe(1);

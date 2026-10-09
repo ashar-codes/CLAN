@@ -1,5 +1,5 @@
-// Mobile student transfers. NOT validated on a device, and NOT reachable in this build (no mobile pairing yet —
-// see native.ts). All network I/O goes through the pinned native transport; Expo is used only for local files.
+// Mobile student transfers: downloads (resume, peer-assisted, verified), submissions and chat file sends. Exercised on
+// the Android emulator. All network I/O goes through the pinned native transport; Expo is used only for local files.
 import { Directory, File, Paths } from 'expo-file-system';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -9,7 +9,7 @@ import {
 } from '@classroom/client';
 import {
   b64u, bitfield, safeFileName, UPLOAD_CONTENT_TYPE, verifyManifest, verifyReceipt,
-  type ManifestPayload, type PeerCapability, type PeerCapabilities, type Receipt, type ResourceView, type SignedManifest, type TransferState,
+  type ManifestPayload, type PeerCapability, type PeerCapabilities, type Receipt, type ResourceView, type ShareUploadStatus, type SignedManifest, type TransferState,
 } from '@classroom/protocol';
 import { pinnedNativeTransport, type PinnedNativeTransport } from './native';
 
@@ -241,4 +241,28 @@ export function receipts(c: Conn): StoredReceipt[] {
   return d.list().filter((x): x is File => x instanceof File && x.name.endsWith('.json'))
     .map((f) => readJson<Receipt | null>(f, null)).filter((r): r is Receipt => !!r?.payload && r.payload.sessionId === c.sessionId)
     .map((r) => check(r, c.teacherPublicKey)).sort((a, b) => b.receipt.payload.submittedAt - a.receipt.payload.submittedAt);
+}
+
+/**
+ * Sends a file into the CLAN (`to: 'clan'`) or to ONE CLANmate (their chat handle), resumable over the pinned
+ * transport — the same protocol the desktop uses. The host scopes the resource to that audience; a file sent to one
+ * person can never be posted to the whole CLAN (the host checks every send).
+ */
+export async function shareFile(c: Conn, file: { uri: string; name: string; size: number }, to: string, idempotencyKey: string,
+  onProgress: (sent: number, size: number) => void): Promise<ResourceView> {
+  const init = { fileName: file.name.slice(0, 255), size: file.size, sha256: sha256File(file.uri), idempotencyKey, to };
+  let st = await api<ShareUploadStatus>(c.transport, c.url, c.token, '/api/shares', { method: 'POST', body: JSON.stringify(init) });
+  for (let attempt = 0; !st.resource; attempt++) {
+    if (st.state === 'failed') throw new TransferError('failed', st.error ?? 'Sending failed.');
+    try {
+      const res = await c.transport.uploadFromFile(`${c.url}/api/shares/${st.uploadId}`,
+        { authorization: `Bearer ${c.token}`, 'content-type': UPLOAD_CONTENT_TYPE, 'upload-offset': String(st.offset) }, file.uri, st.offset, (s) => onProgress(s, file.size));
+      const body = JSON.parse(res.body || '{}');
+      if (res.status >= 200 && res.status < 300) { st = body; continue; }
+      if (res.status !== 409 && res.status !== 429) throw new TransferError(body.code ?? 'http_' + res.status, body.message ?? `Sending failed (${res.status})`, res.status);
+    } catch (e) { if (e instanceof TransferError || attempt >= 10) throw e; }
+    await new Promise((r) => setTimeout(r, Math.min(5000, 500 * 2 ** attempt)));
+    st = await api<ShareUploadStatus>(c.transport, c.url, c.token, `/api/shares/${encodeURIComponent(st.uploadId)}`);
+  }
+  return st.resource;
 }

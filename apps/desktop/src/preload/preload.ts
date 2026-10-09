@@ -54,7 +54,7 @@ const api: DesktopApi = {
   sync: {
     status: inv('sync:status'), startLink: inv('sync:startLink'), cancelLink: inv('sync:cancelLink'), approve: inv('sync:approve'), reject: inv('sync:reject'), join: inv('sync:join'),
     now: inv('sync:now'), unlink: inv('sync:unlink'), conflicts: inv('sync:conflicts'), resolve: inv('sync:resolve'), setSettings: inv('sync:setSettings'),
-    onChanged: (cb) => listen('sync:changed', () => cb()),
+    onChanged: (cb) => listen('sync:changed', () => cb()), onData: (cb) => listen('sync:data', () => cb()),
   } as DesktopApi['sync'],
   board: {
     list: inv('board:list'), create: inv('board:create'), read: inv('board:read'), edit: inv('board:edit'), rename: inv('board:rename'), remove: inv('board:remove'), export: inv('board:export'),

@@ -359,7 +359,7 @@ app.whenReady().then(() => {
   registerAI(clan, aiCreds);
   registerBoards(clan);
   registerTapes(clan);
-  void registerSync(clan, keystore, () => loadProfile().deviceName).catch((e) => logError('sync', e));
+  void registerSync(clan, keystore, () => loadProfile().deviceName).then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

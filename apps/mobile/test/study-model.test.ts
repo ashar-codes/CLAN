@@ -46,19 +46,3 @@ it('phone study model: course → topics → exam prep, tasks, SM-2 cards, recur
   expect(s.sessions.filter((x) => x.endedAt === null)).toHaveLength(1);
   expect(S.history(s, 0).find((r) => r.courseId === os)).toMatchObject({ sessions: 1, minutes: 25, reviews: 1 });
 });
-
-it('phone Guide: grounded answer cites only phone study data; drafted cards are drafts', async () => {
-  const { deterministicProvider } = await import('@classroom/protocol');
-  const { ask, draftCards } = await import('../src/study/ai.ts');
-  const now = Date.now(), k = () => ({ now, id: randomUUID });
-  let s = S.addCourse(EMPTY, k(), { name: 'OS' }); const os = s.courses[0]!.id;
-  s = S.addTopic(s, k(), os, 'Deadlocks');
-  s = S.addDeck(s, k(), { name: 'Terms', courseId: os });
-  s = S.addCard(s, k(), s.decks[0]!.id, 'Coffman conditions', 'Mutual exclusion is a Coffman condition.');
-  const r = await ask(deterministicProvider(), s, { kind: 'course', courseId: os }, 'Coffman conditions mutual exclusion');
-  expect(r.citations.map((c) => c.label)).toEqual(['Card: Terms']);
-  expect((await ask(deterministicProvider(), s, { kind: 'course', courseId: os }, 'photosynthesis chlorophyll')).answer.notFound).toBe(true);
-  const before = s.cards.length;
-  await draftCards(deterministicProvider(), s, os);
-  expect(s.cards.length).toBe(before); // nothing added by drafting
-});

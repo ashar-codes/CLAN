@@ -1,6 +1,6 @@
 // Phone study data as personal-sync change records: the same wire shapes the desktop modules apply (see docs/SYNC.md).
-// Contract only — the phone has no sync transport yet (linking needs a native TLS step that isn't built), so nothing
-// here sends anything. Owner columns never travel; each device applies records as its own local user.
+// Since the phone runs @clan/core itself, this is used once: to move the phone's pre-core study.json into core
+// (`sync.importLocal`). Owner columns never travel; each device applies records as its own local user.
 import { contentHash, hlc, type SyncRecord } from '@classroom/protocol';
 import type { StudyState } from '../study/model';
 
@@ -20,6 +20,10 @@ export function phoneWire(s: StudyState): Wire[] {
       recurrence: r.recurrence, anchor_at: r.anchorAt, snoozed_until: r.snoozedUntil, dismissed_at: null } })),
     ...s.sessions.filter((x) => x.endedAt !== null).map((x) => ({ kind: 'study-session', id: x.id, payload: { course_id: x.courseId, topic_id: null, goal: x.goal, planned_at: null, planned_minutes: x.plannedMinutes,
       status: 'ended', focus: b(x.focus), started_at: x.startedAt, ended_at: x.endedAt, reflection: x.reflection, created_at: x.startedAt } })),
+    ...s.decks.map((d) => ({ kind: 'deck', id: d.id, payload: { name: d.name, course_id: d.courseId, topic_id: null, exam_id: d.examId, created_at: 0,
+      '~flashcards_cards': s.cards.filter((k) => k.deckId === d.id).map((k) => ({ id: k.id, deck_id: d.id, front: k.front, back: k.back, note: '', ref_module: null, ref_id: null, created_at: 0 })) } })),
+    // phone reviews had no ids: card + time identifies one. The schedule is recomputed from reviews on arrival.
+    ...s.reviews.map((r) => ({ kind: 'review', id: `${r.cardId}:${r.at}`, payload: { card_id: r.cardId, at: r.at, grade: r.grade, interval_before: 0, interval_after: r.intervalAfter, ease_after: 2.5, due_after: r.at } })),
   ];
 }
 

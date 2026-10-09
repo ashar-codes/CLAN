@@ -5,6 +5,8 @@ export function useLoad<T>(f: () => Promise<T>) {
   const [err, setErr] = useState('');
   const reload = useCallback(() => { f().then(setV, (e) => setErr(errText(e))); }, [f]);
   useEffect(reload, [reload]);
+  // data synced from your other devices appears without navigating away and back
+  useEffect(() => (window as unknown as { classroom?: { sync?: { onData?(cb: () => void): () => void } } }).classroom?.sync?.onData?.(reload), [reload]);
   return [v, reload, err] as const;
 }
 export { errText };

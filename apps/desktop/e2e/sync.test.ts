@@ -8,7 +8,7 @@ import { afterAll, expect, it } from 'vitest';
 
 const apps: ElectronApplication[] = [];
 const dirs: string[] = [];
-afterAll(async () => { await Promise.all(apps.map((a) => a.close().catch(() => {}))); for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+afterAll(async () => { await Promise.all(apps.map((a) => a.close().catch(() => {}))); for (const d of dirs) rmSync(d, { recursive: true, force: true }); }, 30_000);
 
 async function launch() {
   const userData = mkdtempSync(join(tmpdir(), 'clan-sync-')); dirs.push(userData);

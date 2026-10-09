@@ -24,6 +24,8 @@ export const NEW_CARD: CardState = { interval: 0, ease: 2.5, reps: 0, lapses: 0 
 /** Button → SM-2 quality (0–5): Again 2 (fail), Hard 3, Good 4, Easy 5. */
 export const QUALITY: Record<Grade, number> = { again: 2, hard: 3, good: 4, easy: 5 };
 const DAY = 86_400_000;
+/** Longest interval (100 years, as in Anki): repeated Easy reviews otherwise grow ×EF without bound and overflow. */
+export const MAX_INTERVAL_DAYS = 36_500;
 
 /**
  * One review. Exactly SM-2: q < 3 → repetitions restart (interval 1 day); otherwise interval 1, then 6, then
@@ -35,7 +37,7 @@ export function sm2(s: CardState, g: Grade, now: number): CardState & { dueAt: n
   const ease = Math.max(1.3, s.ease + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)));
   if (q < 3) return { interval: 1, ease, reps: 0, lapses: s.lapses + 1, dueAt: now + 10 * 60_000 };
   const reps = s.reps + 1;
-  const interval = reps === 1 ? 1 : reps === 2 ? 6 : Math.round(s.interval * ease);
+  const interval = Math.min(MAX_INTERVAL_DAYS, reps === 1 ? 1 : reps === 2 ? 6 : Math.round(s.interval * ease));
   return { interval, ease, reps, lapses: s.lapses, dueAt: now + interval * DAY };
 }
 

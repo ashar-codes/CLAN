@@ -1,22 +1,18 @@
-// CLAN pinned transport (Android). NOT compiled on the development machine (no Android SDK) — see docs/TESTING.md.
-apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
+// CLAN pinned transport (Android). Compiled in the Android build and run on the emulator (docs/TESTING.md).
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
 
 group = 'expo.modules.pinnedtransport'
 version = '0.1.0'
 
-def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
-apply from: expoModulesCorePlugin
-applyKotlinExpoModulesCorePlugin()
-useCoreDependencies()
-useDefaultAndroidSdkVersions()
-useExpoPublishing()
-
 android {
+  defaultConfig { versionCode 1; versionName '0.1.0' }
   namespace "expo.modules.pinnedtransport"
 }
 
 dependencies {
   // OkHttp is already part of React Native on Android.
-  implementation "com.squareup.okhttp3:okhttp"
+  implementation "com.squareup.okhttp3:okhttp:4.9.2" // the version React Native 0.86 ships
 }

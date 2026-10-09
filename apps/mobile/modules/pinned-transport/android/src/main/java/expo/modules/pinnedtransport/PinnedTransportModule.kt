@@ -1,4 +1,4 @@
-// CLAN pinned transport (Android). NOT compiled or run on the development machine — see docs/TESTING.md.
+// CLAN pinned transport (Android). Compiled in the Android build and exercised on the emulator (docs/TESTING.md).
 //
 // Trust rule (the only one): the server chain must validate against a trust store containing ONLY the per-class CA
 // from the OPAQUE-authenticated binding (no system or user CAs), AND the leaf SubjectPublicKeyInfo SHA-256 must equal
@@ -24,6 +24,8 @@ import okhttp3.TlsVersion
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.BufferedSink
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -63,10 +65,37 @@ class PinnedTrustManager(private val ca: X509Certificate, private val pin: Strin
   override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf(ca)
 }
 
+/** Personal-device linking only: no anchor yet, so the FIRST leaf key seen is pinned for the rest of this connection
+ *  (the link proofs are bound to it — docs/SYNC.md). Never used for classroom or sync traffic. */
+class FirstContactTrustManager : X509TrustManager {
+  @Volatile var seen: String? = null
+  override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException("client certificates are not used")
+  override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+    if (chain.isEmpty()) throw CertificateException("no certificate")
+    chain[0].checkValidity()
+    val spki = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(chain[0].publicKey.encoded), Base64.NO_WRAP)
+    synchronized(this) { if (seen == null) seen = spki else if (seen != spki) throw CertificateException("the other device's key changed") }
+  }
+  override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+}
+
 class PinnedTransportModule : Module() {
+  private val firstContact = ConcurrentHashMap<String, FirstContactTrustManager>()
   private val clients = ConcurrentHashMap<String, OkHttpClient>()
   private val calls = ConcurrentHashMap<String, Call>()
   private val sockets = ConcurrentHashMap<String, WebSocket>()
+
+  private fun install(id: String, tm: X509TrustManager) {
+    val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
+    val tls13 = ConnectionSpec.Builder(ConnectionSpec.RESTRICTED_TLS).tlsVersions(TlsVersion.TLS_1_3).build()
+    clients[id] = OkHttpClient.Builder()
+      .sslSocketFactory(ctx.socketFactory, tm)
+      .hostnameVerifier { _, _ -> true } // identity = CA + SPKI pin (or first-contact pin), enforced by `tm`
+      .connectionSpecs(listOf(tls13))
+      .readTimeout(60, TimeUnit.SECONDS)
+      .retryOnConnectionFailure(false)
+      .build()
+  }
 
   private fun client(id: String) = clients[id] ?: throw CodedException("NotConfigured", "Unknown pinned connection", null)
 
@@ -85,19 +114,13 @@ class PinnedTransportModule : Module() {
     Function("configure") { id: String, caDerB64: String, pinB64: String ->
       val ca = CertificateFactory.getInstance("X.509")
         .generateCertificate(ByteArrayInputStream(Base64.decode(caDerB64, Base64.DEFAULT))) as X509Certificate
-      val tm = PinnedTrustManager(ca, pinB64)
-      val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
-      val tls13 = ConnectionSpec.Builder(ConnectionSpec.RESTRICTED_TLS).tlsVersions(TlsVersion.TLS_1_3).build()
-      clients[id] = OkHttpClient.Builder()
-        .sslSocketFactory(ctx.socketFactory, tm)
-        .hostnameVerifier { _, _ -> true } // identity = session CA + SPKI pin, enforced by `tm`
-        .connectionSpecs(listOf(tls13))
-        .readTimeout(60, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(false)
-        .build()
+      install(id, PinnedTrustManager(ca, pinB64))
     }
 
-    Function("release") { id: String -> clients.remove(id)?.dispatcher?.cancelAll() }
+    Function("configureFirstContact") { id: String -> val tm = FirstContactTrustManager(); firstContact[id] = tm; install(id, tm); Unit }
+    Function("seenPin") { id: String -> val pin: String? = firstContact[id]?.seen; pin }
+
+    Function("release") { id: String -> firstContact.remove(id); clients.remove(id)?.dispatcher?.cancelAll(); Unit }
 
     AsyncFunction("request") { id: String, method: String, url: String, headers: Map<String, String>, body: String?, promise: Promise ->
       val rb = body?.toRequestBody((headers["content-type"] ?: "application/json").toMediaTypeOrNull())
@@ -173,18 +196,20 @@ class PinnedTransportModule : Module() {
       })
     }
 
-    Function("cancel") { reqId: String -> calls.remove(reqId)?.cancel() }
+    Function("cancel") { reqId: String -> calls.remove(reqId)?.cancel(); Unit }
 
     Function("wsOpen") { id: String, wsId: String, url: String ->
       sockets[wsId] = client(id).newWebSocket(secureRequest(url, emptyMap()).build(), object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) = sendEvent("wsOpen", mapOf("id" to wsId))
         override fun onMessage(webSocket: WebSocket, text: String) = sendEvent("wsMessage", mapOf("id" to wsId, "data" to text))
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) = sendEvent("wsMessage", mapOf("id" to wsId, "binary" to bytes.base64()))
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { sockets.remove(wsId); sendEvent("wsClose", mapOf("id" to wsId, "code" to code, "reason" to reason)) }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { sockets.remove(wsId); sendEvent("wsClose", mapOf("id" to wsId, "code" to 1006, "reason" to "")) }
       })
     }
 
-    Function("wsSend") { wsId: String, text: String -> sockets[wsId]?.send(text) ?: false }
-    Function("wsClose") { wsId: String, code: Int, reason: String -> sockets.remove(wsId)?.close(code, reason) }
+    Function("wsSend") { wsId: String, text: String -> val ok: Boolean = sockets[wsId]?.send(text) ?: false; ok }
+    Function("wsSendBinary") { wsId: String, b64: String -> val ok: Boolean = sockets[wsId]?.send(Base64.decode(b64, Base64.NO_WRAP).toByteString()) ?: false; ok }
+    Function("wsClose") { wsId: String, code: Int, reason: String -> sockets.remove(wsId)?.close(code, reason); Unit }
   }
 }
