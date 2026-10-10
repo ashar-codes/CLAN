@@ -42,11 +42,13 @@ def tap(label):
         if 260 < y < 2100: break
         adb('shell', 'input', 'swipe', '24', '1100' if y <= 260 else '1500', '24', '1500' if y <= 260 else '1100', '300'); time.sleep(0.4); x, y = find(label)
     adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.7)
-def type_(label, text):
+def type_(label, text, dismiss=True):
     x, y = find(label, edit=True); adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.3)
     adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END')
-    for _ in range(60): adb('shell', 'input', 'keyevent', 'KEYCODE_DEL')
-    adb('shell', 'input', 'text', text.replace(' ', '%s')); adb('shell', 'input', 'keyevent', '111'); time.sleep(0.3)
+    adb('shell', 'input', 'keyevent', '--delay', '10', *(['KEYCODE_DEL'] * 60))
+    adb('shell', 'input', 'text', text.replace(' ', '%s'))
+    if dismiss: adb('shell', 'input', 'keyevent', '111')
+    time.sleep(0.3)
 def until(f, what, secs=40):
     end = time.time() + secs
     while time.time() < end:
@@ -56,6 +58,9 @@ def until(f, what, secs=40):
         time.sleep(1)
     raise AssertionError(f'timed out: {what}')
 def has(label): return bool(find(label, tries=2, scroll=False))
+def board_object_visible(text):
+    # The board has a native accessibility overlay. Ignore the editable input itself.
+    return any(n.get('content-desc') == text and n.get('class') != 'android.widget.EditText' for n in nodes())
 def http(port, path, body=None):
     req = urllib.request.Request(f'http://127.0.0.1:{port}{path}', data=json.dumps(body).encode() if body is not None else None, method='POST' if body is not None else 'GET')
     return json.loads(urllib.request.urlopen(req, timeout=15).read())
@@ -124,8 +129,14 @@ def main():
         http(47499, '/chat', {'body': 'Welcome from the host'}); find('Welcome from the host'); ok('host message shown on the phone')
         type_('Message', 'Hello from the phone'); tap('Send'); find('Hello from the phone'); ok('phone message accepted by the host')
         http(47499, '/wall', {'mode': 'WHITEBOARD'}); http(47499, '/draw', {'text': 'Host sticky'}); find('Host sticky'); ok('host board op on the phone')
-        tap('Text'); x, y = find('board-canvas', scroll=False); adb('shell', 'input', 'tap', str(x), str(y + 200)); type_('Text to place', 'Phone text'); x, y = find('Add', scroll=False); adb('shell', 'input', 'tap', str(x), str(y))  # no scroll swipe: it would land on the board
-        until(lambda: any(o['text'] == 'Phone text' for o in http(47499, '/state')['board']), 'phone text on the host board'); ok('phone board op on the host')
+        board_text = 'Phone text ' + os.urandom(4).hex()  # disposable correlation tag, no personal data
+        tap('Text'); x, y = find('board-canvas', scroll=False); adb('shell', 'input', 'tap', str(x), str(y + 200)); type_('Text to place', board_text, dismiss=False)
+        x, y = find('Add', scroll=False); adb('shell', 'input', 'tap', str(x), str(y))  # one tap with keyboard open
+        until(lambda: board_object_visible(board_text), 'phone text locally committed', 15)
+        until(lambda: any(o['text'] == board_text for o in http(47499, '/state')['board']), 'phone text on the host board')
+        board_row = next(o for o in http(47499, '/state')['board'] if o['text'] == board_text)
+        print('   board trace:', board_text[-8:], 'stored op:', board_row['op'], flush=True)
+        ok('phone board op on the host')
         path = os.path.abspath('apps/mobile/e2e/.tmp-notes.bin'); open(path, 'wb').write(os.urandom(1_500_000))
         http(47499, '/file', {'path': path, 'to': 'clan'})
         def downloaded():

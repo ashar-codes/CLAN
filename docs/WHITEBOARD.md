@@ -46,8 +46,11 @@ In-app board open (10k objects): 371 ms. Rendering is on change only, culled to 
 Renderer heap could not be measured precisely (Chromium reports a quantised value). Strokes are 24-point test strokes.
 
 ## Mobile
-Same reducer over the phone's class connection; Views-based renderer, one-finger tools, two-finger pan + pinch zoom,
-pen / highlighter / eraser / select / sticky / undo, stylus force as pressure. Typecheck only; device runtime UNVERIFIED.
+Same reducer over the phone's class connection; demand-rendered canvas layers, one-finger tools, two-finger pan + pinch
+zoom, pen / highlighter / eraser / select / sticky / undo, stylus force as pressure. Pending operations retain their
+original IDs and retry until `wb.ack` or echoed `wb.op`; reconnection replays them after state sync. Host `wb.nack`
+removes rejected IDs and requests authoritative state. Android emulator coverage is recorded in the beta evidence;
+physical-device behavior remains unverified.
 
 ## Limits
 No image thumbnails on cards (cards show name/type); no PDF page snapshots; pages beyond 0 exist in the model but have no UI;

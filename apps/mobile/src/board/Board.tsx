@@ -4,8 +4,9 @@
 // is used as pressure where reported. Drawn on two demand-rendered canvas layers in the installed WebView engine.
 // Edits made while disconnected wait in an outbox and are re-sent (same op ids) after the board re-syncs.
 import { CanvasLayer } from './CanvasLayer';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { PanResponder, Pressable, Text, TextInput, View, type GestureResponderEvent } from 'react-native';
+import { PendingOps } from './PendingOps';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Modal, PanResponder, Pressable, Text, TextInput, View, type GestureResponderEvent } from 'react-native';
 import { applyOp, emptyBoard, hit, inverse, simplify, visible, type ClientMessage, type ServerMessage, type WbBoardView, type WbObject, type WbObjectData, type WbOp } from '@classroom/protocol';
 
 type C = { text: string; muted: string; border: string; surface: string; accent: string; danger: string };
@@ -21,25 +22,28 @@ export function useMobileBoard(send: (m: ClientMessage) => void, me: string) {
   const [error, setError] = useState('');
   const synced = useRef(false);
   const undo = useRef<WbOp[][]>([]);
-  const outbox = useRef(new Map<string, WbOp>()); // own ops the host hasn't echoed yet
+  const pending = useRef<PendingOps | null>(null);
+  pending.current ??= new PendingOps((op) => send({ t: 'wb.ops', ops: [op] }));
+  useEffect(() => () => pending.current?.close(), []);
   const bump = () => setV((x) => x + 1);
-  const confirmed = (ops: { op: WbOp }[]) => { for (const l of ops) outbox.current.delete(l.op.id); };
+  const confirmed = (ops: { op: WbOp }[]) => pending.current!.confirm(ops.map((l) => l.op.id));
   const onServer = useCallback((m: WbMsg) => {
     if (m.t === 'wb.state') {
       if (m.snapshot) s.current = emptyBoard();
       for (const l of m.ops) applyOp(s.current, l.author, l.op, l.seq);
       confirmed(m.ops); setView(m.board); bump();
-      for (const op of outbox.current.values()) { applyOp(s.current, me, op); send({ t: 'wb.ops', ops: [op] }); } // reconnected: re-send what didn't arrive
+      for (const op of pending.current!.values()) applyOp(s.current, me, op);
+      pending.current!.resend(); // reconnected: re-send what the host has not acknowledged
     }
     else if (m.t === 'wb.op') { for (const l of m.ops) applyOp(s.current, l.author, l.op, l.seq); confirmed(m.ops); bump(); }
+    else if (m.t === 'wb.ack') pending.current!.confirm(m.ids); // host committed, even if its echo is delayed
     else if (m.t === 'wb.wall') { setView(m.board); if (!synced.current) { synced.current = true; send({ t: 'wb.sync', since: s.current.seq }); } }
-    else if (m.t === 'wb.nack') { setError(m.message); send({ t: 'wb.sync', since: 0 }); }
+    else if (m.t === 'wb.nack') { pending.current!.confirm(m.ids); setError(m.message); send({ t: 'wb.sync', since: 0 }); }
   }, [send]);
   const commit = useCallback((ops: WbOp[]) => {
     undo.current.push(ops.map((op) => inverse(s.current.objects.get(op.obj) && { ...s.current.objects.get(op.obj)! }, op, 0, '')).filter(Boolean).reverse() as WbOp[]);
-    for (const op of ops) { applyOp(s.current, me, op); outbox.current.set(op.id, op); }
+    for (const op of ops) { applyOp(s.current, me, op); pending.current!.enqueue(op); }
     bump();
-    for (const op of ops) send({ t: 'wb.ops', ops: [op] }); // one per message keeps each well under the host's limit
   }, [me, send]);
   const clock = () => s.current.clock + 1;
   const op = {
@@ -47,7 +51,7 @@ export function useMobileBoard(send: (m: ClientMessage) => void, me: string) {
     patch: (obj: string, data: Partial<WbObjectData>): WbOp => ({ t: 'patch', id: randomId(), obj, clock: clock(), data: data as never }),
     del: (obj: string): WbOp => ({ t: 'del', id: randomId(), obj, clock: clock() }),
   };
-  const doUndo = () => { const step = undo.current.pop(); if (step) { const ops = step.map((o) => ({ ...o, id: randomId(), clock: clock() })); for (const o of ops) { applyOp(s.current, me, o); outbox.current.set(o.id, o); } bump(); for (const o of ops) send({ t: 'wb.ops', ops: [o] }); } };
+  const doUndo = () => { const step = undo.current.pop(); if (step) { const ops = step.map((o) => ({ ...o, id: randomId(), clock: clock() })); for (const o of ops) { applyOp(s.current, me, o); pending.current!.enqueue(o); } bump(); } };
   return { s, v, view, error, setError, onServer, commit, op, undo: doUndo, connected: () => { synced.current = false; } };
 }
 
@@ -138,12 +142,23 @@ export function MobileBoard({ c, board, title }: { c: C; board: BoardModel; titl
         <CanvasLayer objects={objs} vp={vp} selected={sel} erased={[...(g.current?.erased ?? [])]} moving={moving} draft={preview} />
         {objs.filter((o) => (o.text || o.ref) && !g.current?.erased.has(o.id)).map((o) => <View key={o.id} accessible accessibilityLabel={o.text ?? o.ref?.title} pointerEvents="none" style={{ position: 'absolute', left: (o.x - vp.x) * vp.z, top: (o.y - vp.y) * vp.z, width: Math.max(24, o.w * vp.z), height: Math.max(24, o.h * vp.z) }} />)}
       </View>
-      {sticky && <View style={{ flexDirection: 'row', gap: 6 }}>
-        <TextInput autoFocus value={sticky.text} onChangeText={(t) => setSticky({ ...sticky, text: t })} placeholder={sticky.kind === 'text' ? 'Text' : 'Sticky note'} accessibilityLabel={sticky.kind === 'text' ? 'Text to place' : 'Sticky note text'} style={{ flex: 1, borderWidth: 1, borderColor: c.border, borderRadius: 10, minHeight: 44, paddingHorizontal: 8, color: c.text }} />
-        <Pressable accessibilityRole="button" onPress={() => { if (sticky.text.trim()) board.commit([board.op.put(sticky.kind === 'text'
-          ? { kind: 'text', page: 0, x: sticky.x, y: sticky.y, w: 0, h: 0, color: '#17233b', width: 20, z: Date.now() % 1e9, text: sticky.text.slice(0, 4000) }
-          : { kind: 'sticky', page: 0, x: sticky.x, y: sticky.y, w: 170, h: 120, color: '#17233b', fill: '#fde68a', width: 1, z: Date.now() % 1e9, text: sticky.text.slice(0, 4000) })]); setSticky(null); }} style={{ justifyContent: 'center', paddingHorizontal: 12 }}><Text style={{ color: c.accent }}>Add</Text></Pressable>
-      </View>}
+      <Modal visible={!!sticky} transparent animationType="fade" onRequestClose={() => setSticky(null)}>
+        {sticky && <View style={{ flex: 1, paddingTop: 72, paddingHorizontal: 20, backgroundColor: '#17233b88' }}>
+          <View style={{ padding: 16, gap: 12, backgroundColor: c.surface, borderRadius: 16, borderWidth: 1, borderColor: c.border }}>
+            <Text style={{ color: c.text, fontSize: 18, fontWeight: '600' }}>{sticky.kind === 'text' ? 'Place text' : 'Place sticky note'}</Text>
+            <TextInput autoFocus value={sticky.text} onChangeText={(text) => setSticky((current) => current && { ...current, text })} placeholder={sticky.kind === 'text' ? 'Text' : 'Sticky note'} accessibilityLabel={sticky.kind === 'text' ? 'Text to place' : 'Sticky note text'} style={{ borderWidth: 1, borderColor: c.border, borderRadius: 10, minHeight: 48, paddingHorizontal: 10, color: c.text }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+              <Pressable accessibilityRole="button" onPress={() => setSticky(null)} style={{ minHeight: 48, justifyContent: 'center', paddingHorizontal: 12 }}><Text style={{ color: c.muted }}>Cancel</Text></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: !sticky.text.trim() }} disabled={!sticky.text.trim()} onPress={() => {
+                board.commit([board.op.put(sticky.kind === 'text'
+                  ? { kind: 'text', page: 0, x: sticky.x, y: sticky.y, w: 0, h: 0, color: '#17233b', width: 20, z: Date.now() % 1e9, text: sticky.text.slice(0, 4000) }
+                  : { kind: 'sticky', page: 0, x: sticky.x, y: sticky.y, w: 170, h: 120, color: '#17233b', fill: '#fde68a', width: 1, z: Date.now() % 1e9, text: sticky.text.slice(0, 4000) })]);
+                setSticky(null);
+              }} style={{ minHeight: 48, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 10, backgroundColor: c.accent }}><Text style={{ color: '#fff', fontWeight: '600' }}>Add</Text></Pressable>
+            </View>
+          </View>
+        </View>}
+      </Modal>
     </View>
   );
 }

@@ -249,7 +249,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
     : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
 
   return (
-    <ScrollView contentContainerStyle={s.page}>
+    <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
       <Text style={[s.h1, { color: c.text }]}>{info.title}</Text>
       <Text style={{ color: c.muted }}>{L.type}</Text>
       {over ? (

@@ -340,6 +340,7 @@ function createWindow() {
   const dev = app.isPackaged ? undefined : process.env.CLASSROOM_DEV_URL; // a packaged app only ever loads its own files
   if (dev) win.loadURL(dev);
   else win.loadFile(join(here, '../renderer/index.html'));
+  return win;
 }
 
 registerMediaScheme(); // privileged scheme must be declared before ready
@@ -372,8 +373,10 @@ app.whenReady().then(() => {
   // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).
   const backup = () => { try { backupDb(db(), backupsDir(), { keep: 3 }); } catch (e) { logError('backup', e); } };
   setTimeout(backup, 5_000).unref(); setInterval(backup, 24 * 3600_000).unref();
-  createWindow();
-  if (dbRecovered) void dialog.showMessageBox({ type: 'warning', title: 'CLAN restored your data', message: dbRecovered.from ? 'Your data file was damaged, so CLAN restored its most recent automatic backup.' : 'Your data file was damaged and no healthy backup was found, so CLAN started fresh.', detail: `The damaged file was kept at:\n${dbRecovered.keptAt}\n\nIf you use other linked devices, they will sync your study data back.` });
+  const win = createWindow();
+  if (dbRecovered) win.webContents.once('did-finish-load', () => setTimeout(() => {
+    if (!win.isDestroyed()) void dialog.showMessageBox(win, { type: 'warning', title: 'CLAN restored your data', message: dbRecovered!.from ? 'Your data file was damaged, so CLAN restored its most recent automatic backup.' : 'Your data file was damaged and no healthy backup was found, so CLAN started fresh.', detail: `The damaged file was kept at:\n${dbRecovered!.keptAt}\n\nIf you use other linked devices, they will sync your study data back.` });
+  }, 1000)); // let the restored window appear before its modal explanation
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

@@ -64,7 +64,10 @@ it('export → import, local feedback without private text, and recovery from a 
   const backups = join(a.userData, 'backups');
   await me(a.page); await a.page.getByRole('button', { name: 'Back up now' }).click(); await a.page.getByRole('status').filter({ hasText: 'Backed up.' }).waitFor();
   expect(existsSync(backups) && readdirSync(backups).length).toBeGreaterThan(0);
-  a.app.process().kill('SIGKILL');
+  // Wait for the killed instance to release Electron's single-instance lock before relaunching.
+  const killed = a.app.process();
+  await new Promise<void>((resolve) => { killed.once('exit', () => resolve()); killed.kill('SIGKILL'); });
+  apps.splice(apps.indexOf(a.app), 1); // Playwright cannot close a process already killed by this crash test.
   const dbPath = join(a.userData, 'teacher.db');
   for (const ext of ['-wal', '-shm']) rmSync(dbPath + ext, { force: true });
   const fd = openSync(dbPath, 'r+'), size = statSync(dbPath).size;

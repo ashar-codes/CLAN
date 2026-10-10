@@ -30,6 +30,7 @@ export class FsChunkStore implements ChunkStore {
   private opening: Promise<FileHandle> | null = null;
   private servingPath: string | null = null;
   private readFh: FileHandle | null = null;
+  private readOpening: Promise<FileHandle> | null = null;
   private paths: ReturnType<typeof partPaths>;
   private m: ManifestPayload;
   private saving: Promise<void> = Promise.resolve();
@@ -89,7 +90,13 @@ export class FsChunkStore implements ChunkStore {
   async read(i: number): Promise<Uint8Array | null> {
     if (!this.isDone(i)) return null;
     let fh: FileHandle;
-    try { fh = (!this.servingPath && this.fh) || (this.readFh ??= await open(this.servingPath ?? this.paths.part, 'r')); } catch { return null; }
+    try {
+      if (!this.servingPath && this.fh) fh = this.fh;
+      else {
+        this.readOpening ??= open(this.servingPath ?? this.paths.part, 'r');
+        fh = this.readFh ??= await this.readOpening;
+      }
+    } catch { this.readOpening = null; return null; }
     const len = Math.min(this.m.chunkSize, this.m.size - i * this.m.chunkSize);
     const buf = Buffer.alloc(len);
     await fh.read(buf, 0, len, i * this.m.chunkSize);
@@ -108,7 +115,7 @@ export class FsChunkStore implements ChunkStore {
     return this.saving;
   }
 
-  async close() { if (this.readFh) { await this.readFh.close().catch(() => {}); this.readFh = null; } if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = null; await this.persist(); } await this.saving; if (this.opening) await (await this.opening).close(); this.fh = null; this.opening = null; }
+  async close() { if (this.readOpening) { const fh = await this.readOpening.catch(() => null); await fh?.close().catch(() => {}); this.readFh = null; this.readOpening = null; } if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = null; await this.persist(); } await this.saving; if (this.opening) await (await this.opening).close(); this.fh = null; this.opening = null; }
 
   /** All chunks verified: check the whole-file SHA-256, then atomically move into place. */
   async finalize(destDir: string): Promise<string> {
@@ -376,6 +383,7 @@ export class PeerAgent implements ResourceTransport {
   /** Deterministic per-device start chunk, so early downloaders fetch different chunks from the teacher and can trade. */
   private readonly spread: number;
   private readers: { close(): Promise<void> }[] = [];
+  private stores = new Set<FsChunkStore>();
 
   constructor(o: AgentOptions) {
     this.o = o;
@@ -449,7 +457,7 @@ export class PeerAgent implements ResourceTransport {
       transport: this.o.transport, url: this.o.url, token: this.o.token(), resource, destDir: this.o.destDir,
       peerAssist: opts.peerAssist, peers: this.peerContext(), signal: opts.signal, startOffset: opts.startOffset ?? this.spread,
       cachedSources: opts.cachedSources, cachedManifest: opts.cachedManifest, chunkTimeoutMs: opts.chunkTimeoutMs, stallTimeoutMs: opts.stallTimeoutMs, onSources: opts.onSources, smallFileBytes: opts.smallFileBytes,
-      onStore: (store, manifest) => this.offer(manifest, { read: (i) => store.read(i), have: () => doneBitfield(store) }),
+      onStore: (store, manifest) => { this.stores.add(store); this.offer(manifest, { read: (i) => store.read(i), have: () => doneBitfield(store) }); },
       onProgress: (p) => { opts.onProgress?.(p); if (p.state === 'downloading') this.announce(resource.id); },
     });
     // Seed whatever we completed, including files that came by teacher streaming (when we are allowed to seed).
@@ -468,6 +476,8 @@ export class PeerAgent implements ResourceTransport {
     if (this.statsTimer) clearInterval(this.statsTimer);
     await this.server?.close();
     this.server = null;
+    await Promise.all([...this.stores].map((store) => store.close()));
+    this.stores.clear();
     await Promise.all(this.readers.splice(0).map((r) => r.close().catch(() => {})));
   }
 }

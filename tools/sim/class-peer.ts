@@ -11,7 +11,7 @@ import { createServer } from 'node:http';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { openClan } from '../../packages/clan/src/index.ts';
 import { candidateInterfaces, openDb, startClassroomServer } from '@classroom/server';
@@ -46,7 +46,7 @@ createServer((req, res) => {
         const g = threads.find((x) => x.kind === 'group');
         return json(res, { code: s.classroom.code, bootstrap: s.bootstrapUrl.replace(/^http:\/\//, ''), members: s.classroom.roster().map((m) => ({ id: m.id, name: m.fullName, status: m.status, connected: m.connected })),
           messages: g ? clan.chat.localPage(p, g.id, {}).map((m) => ({ who: m.authorName, body: m.body, attachment: m.attachment })) : [],
-          board: (() => { const bd = clan.whiteboard.boardFor(clanId); const st = clan.whiteboard.state(bd.id); return [...st.objects.values()].filter((o) => !o.deleted).map((o) => ({ kind: o.kind, text: o.text ?? null })); })(),
+          board: (() => { const bd = clan.whiteboard.boardFor(clanId); const st = clan.whiteboard.state(bd.id); return [...st.objects.values()].filter((o) => !o.deleted).map((o) => ({ kind: o.kind, text: o.text ?? null, op: createHash('sha256').update(o.v.op).digest('hex').slice(0, 12) })); })(),
           files: s.resources.listForTeacher().map((r) => ({ name: r.name, size: r.size })) });
       }
       if (u === '/chat') { send({ t: 'chat.send', id: randomUUID(), thread: { kind: 'group' }, body: b.body }); return json(res, { ok: true }); }

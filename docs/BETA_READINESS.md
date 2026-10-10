@@ -1,5 +1,10 @@
 # Closed-beta readiness
 
+> **Phase 14.1 RC1:** see the [candidate manifest and gate matrix](../release/beta-v0.1.0-rc1/README.md),
+> [whiteboard investigation](WHITEBOARD_RELIABILITY_RC1.md) and [hardware procedures](RC1_HARDWARE_GATES.md).
+> This RC passes the available software gates; hardware and signing backup gates still block distribution.
+> The historical Phase 13/14 assessment below is retained as a record of the previous candidate.
+
 > **v0.1.0 closed beta (Phase 14, tag `clan-beta-v0.1.0`):** artifacts, checksums, setup guide and tester checklists are
 > in `release/beta-v0.1.0/` (installers are git-ignored; text files are committed). Per-artifact status
 > (BUILT / INSTALLED / TESTED / UNVERIFIED) is in `release/beta-v0.1.0/KNOWN_LIMITATIONS.md`. Resolved since Phase 13:

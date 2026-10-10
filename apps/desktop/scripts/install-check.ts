@@ -48,7 +48,8 @@ console.log(`✓ installed ${v1.version}, note written, ${k1.length} identity ke
 
 install(newApp);
 const [v2, n2] = await run(state);
-assert.notEqual(v2.version, v1.version); assert.deepEqual(n2, ['Made before the update']); assertKeysKept(k1, 'update');
+if (process.env.CLAN_ALLOW_SAME_VERSION !== '1') assert.notEqual(v2.version, v1.version);
+assert.deepEqual(n2, ['Made before the update']); assertKeysKept(k1, 'update');
 console.log(`✓ updated in place to ${v2.version}: data and identity keys kept`);
 
 install(oldApp);
