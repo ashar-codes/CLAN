@@ -346,6 +346,7 @@ export * from './intake.ts';
 export * from './study.ts';
 export * from './ai.ts';
 export * from './whiteboard.ts';
+export * from './link.ts';
 export * from './sync.ts';
 export * from './hosting.ts';
 export * from './checkpoint-rows.ts';
