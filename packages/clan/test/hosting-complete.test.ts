@@ -81,7 +81,7 @@ describe('hand-over data completeness', () => {
     const before = logs(src);
     expect(await handOver(src, ownerKey, dst, deskKey, clan.id)).toMatchObject({ epoch: 1, writable: true });
     expect(logs(dst)).toEqual(before);
-    const q = (sql: string, ...p: unknown[]) => dst.db.prepare(sql).all(...p);
+    const q = (sql: string, ...p: string[]) => dst.db.prepare(sql).all(...p);
     expect(q('SELECT title FROM assignments')).toEqual([{ title: 'Lab report' }]);
     const sub = dst.db.prepare('SELECT stored_path, sha256, receipt FROM submissions').get() as { stored_path: string; sha256: string; receipt: string };
     expect(readFileSync(join(dst.storageDir, ...sub.stored_path.split('/')))).toEqual(report);
