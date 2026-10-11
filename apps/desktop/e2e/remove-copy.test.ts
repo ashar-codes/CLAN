@@ -30,8 +30,13 @@ it('member copy removal confirms scope, clears reconnect/cache across restart an
   await member.page.getByRole('button', { name: 'Remove CLAN copy from this device', exact: true }).click();
   await member.page.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(await member.page.evaluate(() => window.classroom.clan.list().then((xs) => xs.length))).toBe(1);
-  await member.page.getByRole('button', { name: 'Remove CLAN copy from this device', exact: true }).click(); await member.page.getByRole('button', { name: 'Confirm remove', exact: true }).click();
-  await member.page.getByRole('status').filter({ hasText: 'CLAN cleanup finished' }).waitFor();
+  await member.page.evaluate((id) => window.classroom.clan.leaveLocal(id), id);
+  await member.page.getByRole('button', { name: '← CLANs', exact: true }).click();
+  await member.page.getByRole('region', { name: 'Stored CLAN copies' }).waitFor();
+  expect(await member.page.evaluate(() => window.classroom.clan.list())).toEqual([]);
+  member.page.once('dialog', (dialog) => dialog.accept());
+  await member.page.getByRole('button', { name: 'Remove copy', exact: true }).click();
+  await member.page.getByRole('status').filter({ hasText: 'Cleanup finished' }).waitFor();
   expect(await member.page.evaluate(() => window.classroom.lastSession())).toBeNull();
   expect(await member.page.evaluate((id) => window.classroom.chat.local(id), id)).toEqual([]);
   expect(await host.page.evaluate(() => window.classroom.clan.list().then((xs) => xs.length))).toBe(1);

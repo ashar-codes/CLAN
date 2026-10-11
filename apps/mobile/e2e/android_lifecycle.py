@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native archive/restore and member leave on a disposable Android emulator.
+"""Native archive/restore, member leave and scoped removal on a disposable Android emulator.
 Clears ONLY the installed test app's profile; never run with a personal emulator/profile.
 Refuses physical devices. Run after installing the Phase 14.2 release APK, from repo root.
 """
@@ -31,7 +31,16 @@ def main():
         try: find('Archive Phone test group', tries=6)
         except AssertionError: pass
         else: raise AssertionError('left membership reappeared after restart')
-        join(); ok('rejoined through existing OPAQUE and host approval policy')
+        tap('Remove copy of Phone test group'); tap('CANCEL'); find('Remove copy of Phone test group'); ok('stored copy remains after cancellation, even after leave')
+        tap('Remove copy of Phone test group'); tap('REMOVE'); find('~Cleanup finished'); ok('native scoped cleanup completed')
+        tap('Study'); tap('Notes'); find('Personal kept after leave'); ok('private note retained after removal')
+        adb('shell', 'am', 'force-stop', PKG); adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(3)
+        tap('Home')
+        try: find('Remove copy of Phone test group', tries=6)
+        except AssertionError: pass
+        else: raise AssertionError('removed copy reappeared after restart')
+        assert http(47499, '/state')['code'] == cls['code'], 'remote host no longer available'
+        join(); ok('removed member copy can rejoin only through existing OPAQUE and host approval policy')
     finally:
         host.terminate(); host.wait(timeout=30)
 

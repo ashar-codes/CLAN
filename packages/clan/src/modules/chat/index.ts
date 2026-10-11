@@ -55,8 +55,10 @@ const toThread = (r: TRow): Thread => ({ id: r.id, clanId: r.clan_id, kind: r.ki
 
 export class Chat {
   private db: Db; private bus: EventBus; private perms: Permissions; private now: () => number; private localUser: () => string;
-  constructor(db: Db, bus: EventBus, perms: Permissions, now = () => Date.now(), localUser: () => string = () => '') {
+  private clanAvailable: (clanId: string) => boolean;
+  constructor(db: Db, bus: EventBus, perms: Permissions, now = () => Date.now(), localUser: () => string = () => '', clanAvailable: (clanId: string) => boolean = () => true) {
     this.db = db; this.bus = bus; this.perms = perms; this.now = now; this.localUser = localUser;
+    this.clanAvailable = clanAvailable;
   }
 
   // ---- threads ----
@@ -90,7 +92,7 @@ export class Chat {
   setName(clanId: string, handle: string, name: string) {
     this.db.prepare('INSERT INTO chat_names (clan_id, handle, name) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET name = excluded.name').run(clanId, handle, name.slice(0, 80));
   }
-  setMe(clanId: string, handle: string) { this.db.prepare('INSERT INTO chat_me (clan_id, handle) VALUES (?, ?) ON CONFLICT DO UPDATE SET handle = excluded.handle').run(clanId, handle); }
+  setMe(clanId: string, handle: string) { this.assertAvailable(clanId); this.db.prepare('INSERT INTO chat_me (clan_id, handle) VALUES (?, ?) ON CONFLICT DO UPDATE SET handle = excluded.handle').run(clanId, handle); }
   me(clanId: string) { return (this.db.prepare('SELECT handle h FROM chat_me WHERE clan_id = ?').get(clanId) as { h: string } | undefined)?.h ?? null; }
 
   /** Threads `handle` can read in this CLAN, newest activity first (the group conversation always exists). */
@@ -200,6 +202,7 @@ export class Chat {
   // ---- member device: cache of what the host delivered ----
   /** Idempotent: stores (or updates) messages by id. Returns the ids that were new on this device. */
   ingest(t: ChatThreadView, me: string, messages: ChatMessageView[]): string[] {
+    this.assertAvailable(t.clanId); // delayed socket/history responses must not recreate a removed cache
     return tx(this.db, () => {
       this.setMe(t.clanId, me);
       if (t.with) this.setName(t.clanId, t.with.handle, t.with.name);
@@ -233,12 +236,14 @@ export class Chat {
 
   // ---- Outbox (sender device) ----
   queue(clanId: string, payload: { id: string } & Record<string, unknown>) {
+    this.assertAvailable(clanId);
     this.db.prepare('INSERT OR IGNORE INTO chat_outbox (id, clan_id, payload, created_at) VALUES (?, ?, ?, ?)').run(payload.id, clanId, JSON.stringify(payload), this.now());
   }
   outbox(clanId: string): Record<string, unknown>[] {
     return (this.db.prepare('SELECT payload FROM chat_outbox WHERE clan_id = ? ORDER BY created_at LIMIT 500').all(clanId) as { payload: string }[]).map((r) => JSON.parse(r.payload));
   }
   sent(id: string) { this.db.prepare('DELETE FROM chat_outbox WHERE id = ?').run(id); }
+  private assertAvailable(clanId: string) { if (!this.clanAvailable(clanId)) throw new ChatError(403, 'clan_removed', 'This CLAN copy is removed or awaiting cleanup.'); }
 
   // ---- local reading (this device's person) ----
   /** Conversations this device's person can read in a CLAN they belong to (offline view; host and member devices alike). */

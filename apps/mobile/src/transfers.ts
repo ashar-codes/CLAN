@@ -1,6 +1,7 @@
 // Mobile student transfers: downloads (resume, peer-assisted, verified), submissions and chat file sends. Exercised on
 // the Android emulator. All network I/O goes through the pinned native transport; Expo is used only for local files.
 import { Directory, File, Paths } from 'expo-file-system';
+import { randomUUID } from 'expo-crypto';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import {
@@ -26,6 +27,7 @@ const root = () => new Directory(Paths.document, 'Classroom LAN');
 const classDir = (c: Conn) => new Directory(root(), safeFileName(c.classTitle));
 const partialDir = (c: Conn) => new Directory(classDir(c), '.partial');
 const indexFile = () => new File(root(), 'downloads.json');
+const copyOwnersFile = () => new File(root(), 'download-copies.json');
 const receiptsDir = () => new Directory(root(), 'receipts');
 const pendingFile = () => new File(root(), 'pending-uploads.json');
 
@@ -60,7 +62,24 @@ function uniqueFile(dir: Directory, name: string): File {
   }
 }
 
-const active = new Map<string, { sessionId: string; ctl: AbortController }>();
+const active = new Map<string, { sessionId: string; ctl: AbortController; done: Promise<void>; finish: () => void }>();
+type CopyOwners = Record<string, { sessionId: string; resourceId: string; classTitle: string }>;
+const writeCopyOwners = (copies: CopyOwners) => {
+  ensure(root()); const temporary = new File(root(), `download-copies-${randomUUID()}.tmp`);
+  const temporaryUri = temporary.uri;
+  try { temporary.write(JSON.stringify(copies)); temporary.moveSync(copyOwnersFile(), { overwrite: true }); }
+  finally { const leftover = new File(temporaryUri); if (leftover.exists) leftover.delete(); }
+};
+const ownDownload = (c: Conn, r: ResourceView) => {
+  if (!/^[0-9a-f-]{36}$/.test(c.sessionId) || !/^[0-9a-f-]{36}$/.test(r.id)) throw new Error('Invalid download scope.');
+  const copies: CopyOwners = copyOwnersFile().exists ? JSON.parse(copyOwnersFile().textSync()) : {};
+  if (!copies || Array.isArray(copies) || typeof copies !== 'object') throw new Error('Download ownership index is unreadable.');
+  copies[key(c, r.id)] = { sessionId: c.sessionId, resourceId: r.id, classTitle: c.classTitle }; writeCopyOwners(copies);
+};
+const startActive = (sessionId: string, ctl: AbortController) => {
+  let finish!: () => void; const done = new Promise<void>((resolve) => { finish = resolve; });
+  return { sessionId, ctl, done, finish };
+};
 
 export function fileStates(c: Conn, resources: ResourceView[]): FileState[] {
   const idx = readJson<Index>(indexFile(), {});
@@ -107,7 +126,7 @@ class ExpoChunkStore implements ChunkStore {
   finalize(c: Conn, name: string) {
     if (sha256File(this.part.uri) !== this.m.sha256) { this.part.delete(); this.meta.delete(); throw new TransferError('hash_mismatch', 'The assembled file failed verification and was discarded.'); }
     const dest = uniqueFile(classDir(c), name);
-    this.part.move(dest);
+    this.part.moveSync(dest);
     this.meta.delete();
     return dest;
   }
@@ -151,9 +170,10 @@ async function swarmDownload(c: Conn, r: ResourceView, onState: (s: FileState) =
 /** Resumable download: `.partial/<id>.part` + meta, Range from the bytes on disk, SHA-256 verify, then move. */
 export async function download(c: Conn, r: ResourceView, onState: (s: FileState) => void): Promise<void> {
   if (active.has(r.id) || !r.sha256) return;
+  try { ownDownload(c, r); } catch (e) { onState({ resourceId: r.id, state: 'failed', bytes: 0, size: r.size, error: (e as Error).message }); return; }
   if (c.peerAssist && c.device && MOBILE_PEER_CAPABILITIES.canDownload && r.size > SMALL_FILE_BYTES) {
     const ctl = new AbortController();
-    active.set(r.id, { sessionId: c.sessionId, ctl });
+    const running = startActive(c.sessionId, ctl); active.set(r.id, running);
     try {
       const { dest } = await swarmDownload(c, r, onState, ctl.signal);
       const idx = readJson<Index>(indexFile(), {});
@@ -162,7 +182,7 @@ export async function download(c: Conn, r: ResourceView, onState: (s: FileState)
       onState({ resourceId: r.id, state: 'completed', bytes: r.size, size: r.size, uri: dest.uri });
     } catch (e) {
       onState({ resourceId: r.id, state: ctl.signal.aborted ? 'paused' : 'failed', bytes: 0, size: r.size, error: ctl.signal.aborted ? undefined : (e as Error).message });
-    } finally { active.delete(r.id); }
+    } finally { active.delete(r.id); running.finish(); }
     return;
   }
   const report = (state: TransferState, bytes: number, extra: Partial<FileState> = {}) => onState({ resourceId: r.id, state, bytes, size: r.size, ...extra });
@@ -173,7 +193,7 @@ export async function download(c: Conn, r: ResourceView, onState: (s: FileState)
   if (!part.exists) part.create();
   const have = part.size ?? 0;
   const ctl = new AbortController();
-  active.set(r.id, { sessionId: c.sessionId, ctl });
+  const running = startActive(c.sessionId, ctl); active.set(r.id, running);
   report('downloading', have, { resumedFrom: have || undefined });
   try {
     const headers: Record<string, string> = { authorization: `Bearer ${c.token}`, ...(have ? { range: `bytes=${have}-`, 'if-range': `"${r.sha256}"` } : {}) };
@@ -185,7 +205,7 @@ export async function download(c: Conn, r: ResourceView, onState: (s: FileState)
       throw new TransferError('hash_mismatch', 'The download was damaged (checksum mismatch) and was discarded.');
     }
     const dest = uniqueFile(classDir(c), r.name);
-    part.move(dest);
+    part.moveSync(dest);
     meta.delete();
     const idx = readJson<Index>(indexFile(), {});
     idx[key(c, r.id)] = { uri: dest.uri, sha256: r.sha256 };
@@ -196,11 +216,47 @@ export async function download(c: Conn, r: ResourceView, onState: (s: FileState)
     else report('failed', part.exists ? part.size ?? 0 : 0, { error: (e as Error).message });
   } finally {
     active.delete(r.id);
+    running.finish();
   }
 }
 
 export function pause(r: ResourceView) { active.get(r.id)?.ctl.abort(); }
 export function pauseSession(sessionId: string) { for (const job of active.values()) if (job.sessionId === sessionId) job.ctl.abort(); }
+
+/** Scoped lifecycle cleanup; externally exported or student-edited files and unknown legacy partials remain. */
+export async function removeSessionCopies(sessionIds: string[]) {
+  const ids = new Set(sessionIds);
+  const running = [...active.values()].filter((job) => ids.has(job.sessionId));
+  for (const job of running) job.ctl.abort();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { await Promise.race([Promise.all(running.map((job) => job.done)), new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('A download is still stopping; cleanup remains pending. Retry shortly.')), 5000); })]); }
+  finally { clearTimeout(timer); }
+  const index: Index = indexFile().exists ? JSON.parse(indexFile().textSync()) : {};
+  if (!index || Array.isArray(index) || typeof index !== 'object' || Object.values(index).some((entry) => !entry || typeof entry.uri !== 'string' || typeof entry.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(entry.sha256))) throw new Error('Download index is unreadable; cleanup remains pending.');
+  const copies: CopyOwners = copyOwnersFile().exists ? JSON.parse(copyOwnersFile().textSync()) : {};
+  if (!copies || Array.isArray(copies) || typeof copies !== 'object' || Object.values(copies).some((owner) => !owner || typeof owner.classTitle !== 'string' || typeof owner.sessionId !== 'string' || typeof owner.resourceId !== 'string')) throw new Error('Download ownership index is unreadable; cleanup remains pending.');
+  let retained = 0, removed = 0;
+  const prefix = root().uri.replace(/\/+$/, '') + '/';
+  for (const [id, entry] of Object.entries(index)) {
+    if (!ids.has(id.split(':')[0]!)) continue;
+    const file = new File(entry.uri);
+    const elsewhere = Object.entries(index).some(([other, e]) => !ids.has(other.split(':')[0]!) && e.uri === entry.uri);
+    if (!file.uri.startsWith(prefix) || elsewhere || (file.exists && sha256File(file.uri) !== entry.sha256)) { retained++; continue; }
+    if (file.exists) file.delete(); delete index[id]; removed++;
+  }
+  writeJson(indexFile(), index);
+  for (const [id, owner] of Object.entries(copies)) {
+    if (!ids.has(owner.sessionId)) continue;
+    if (id !== `${owner.sessionId}:${owner.resourceId}` || !/^[0-9a-f-]{36}$/.test(owner.resourceId)) throw new Error('Invalid partial download scope.');
+    const elsewhere = Object.values(copies).some((other) => !ids.has(other.sessionId) && other.resourceId === owner.resourceId && other.classTitle === owner.classTitle);
+    if (elsewhere) { retained++; continue; }
+    const directory = partialDir({ classTitle: owner.classTitle } as Conn);
+    for (const name of [`${owner.resourceId}.part`, `${owner.resourceId}.json`]) { const file = new File(directory, name); if (file.exists) file.delete(); }
+    delete copies[id];
+  }
+  writeCopyOwners(copies);
+  return { removed, retained };
+}
 
 /** Stable idempotency key per intended submission, persisted before upload starts. */
 export function idempotencyKeyFor(k: string, newKey: () => string): string {

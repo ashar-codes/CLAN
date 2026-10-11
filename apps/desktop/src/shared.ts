@@ -140,6 +140,7 @@ export type ClanApi = {
   joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null; hostName?: string | null }): Promise<void>;
   list(): Promise<Clan[]>;
   archived(): Promise<Clan[]>;
+  storedCopies(): Promise<(Clan & { mine: boolean })[]>;
   archiveLocal(id: string, on: boolean): Promise<void>;
   pendingCleanup(): Promise<{ id: string; kind: 'remove' | 'delete'; name: string }[]>;
   cleanup(id: string, kind: 'remove' | 'delete'): Promise<{ retained: number }>;

@@ -91,6 +91,12 @@ export class Clans implements MembershipQuery {
     return (this.db.prepare('SELECT clan_id clanId, user_id userId, role, status, joined_at joinedAt FROM clans_memberships WHERE clan_id = ? ORDER BY joined_at').all(clanId) as Membership[])
       .map((m) => ({ ...m, displayName: this.identity.displayName(m.userId) }));
   }
+  /** Local metadata for cleanup after leave/expiry. This never restores permission to read the CLAN's content. */
+  storedCopies(userId: string): (Clan & { mine: boolean })[] {
+    return (this.db.prepare(`SELECT c.*, m.role FROM clans_clans c JOIN clans_memberships m ON m.clan_id = c.id
+      WHERE m.user_id = ? AND NOT EXISTS (SELECT 1 FROM clans_cleanup x WHERE x.clan_id = c.id) ORDER BY c.created_at DESC`).all(userId) as (Raw & { role: Role })[])
+      .map((r) => ({ ...toClan(r), mine: r.role === 'owner' }));
+  }
 
   addMember(clanId: string, userId: string, role: Role = 'member', joinedAt = this.now()) {
     if (this.cleanup(clanId)) throw new Error('This CLAN copy is removed or awaiting cleanup.');

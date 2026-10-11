@@ -4,11 +4,12 @@ import { useState, type ReactNode } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
 import { dataNotice, phoneClan, me } from './core/clan';
 import { syncNow } from './sync/phone';
+import { cleanupClanCopy } from './clan-lifecycle';
 import { StudyScreen, type MobileStudyTab } from './screens/Study';
 import { InboxScreen } from './screens/Inbox';
 import { DiaryScreen } from './screens/Diary';
 import { DevicesScreen } from './screens/Devices';
-import { act, Btn, Card, Field, Mate, Muted, RoomBand, Row, Screen, useC, useData, when } from './ui/kit';
+import { act, bump, Btn, Card, Field, Mate, Muted, RoomBand, Row, Screen, useC, useData, when } from './ui/kit';
 
 type Tab = 'home' | 'study' | 'inbox' | 'diary' | 'me';
 const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study', '✎'], ['inbox', 'Inbox', '⇣'], ['diary', 'Diary', '❦'], ['me', 'Me', '☺']];
@@ -82,19 +83,36 @@ function Home({ onJoin, go, onStudy }: { onJoin(): void; go(t: Tab): void; onStu
 }
 
 function LocalClans() {
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null), [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
   const active = useData(() => phoneClan().clans.list(phoneClan().me)) ?? [];
   const archived = useData(() => phoneClan().clans.list(phoneClan().me, { archived: true })) ?? [];
-  if (!active.length && !archived.length) return null;
+  const copies = useData(() => phoneClan().clans.storedCopies(phoneClan().me)) ?? [];
+  const pending = useData(() => phoneClan().clans.pendingCleanup(phoneClan().me)) ?? [];
+  if (!copies.length && !pending.length && !notice && !err) return null;
   const change = (id: string, on: boolean) => setErr(act(() => phoneClan().clans.setLocalArchive(id, phoneClan().me, on)));
+  const run = async (id: string, kind: 'remove' | 'delete') => {
+    setBusy(id); setErr(null); setNotice('');
+    try { const result = await cleanupClanCopy(id, kind); setNotice(`Cleanup finished. ${result.retained} modified or shared copies retained.`); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(null); bump(); }
+  };
+  const remove = (clan: (typeof copies)[number]) => Alert.alert(clan.mine ? 'Delete CLAN from this phone?' : 'Remove CLAN copy?',
+    (clan.mine ? 'This phone may hold the only copy. CLAN history and hosting authority will be removed. Other devices keep their copies. ' : 'Remove local CLAN history and leave membership. Remote revocation cannot be confirmed here. ') +
+    'Personal study data, Course files, exports and edited files stay. Older downloads without ownership records may remain. Failed cleanup stays unavailable and can be retried.',
+    [{ text: 'Cancel', style: 'cancel' }, { text: clan.mine ? 'Delete' : 'Remove', style: 'destructive', onPress: () => void run(clan.id, clan.mine ? 'delete' : 'remove') }]);
+  const visible = new Set([...active, ...archived].map((clan) => clan.id));
   return <Card title="My CLANs">
-    <Muted small>Membership and stored files remain available when archived on this phone. Live rooms require an online authorized host.</Muted>
-    {active.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn label={`Archive ${clan.name}`} onPress={() => Alert.alert('Archive on this phone?', 'Hide this CLAN from My CLANs. Files and membership remain available; restore it below.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive', onPress: () => change(clan.id, true) }])} />
-      {!phoneClan().clans.members(clan.id).some((member) => member.userId === phoneClan().me && member.role === 'owner') && <Btn label={`Leave ${clan.name}`} onPress={() => Alert.alert('Leave on this phone?', 'Personal data and stored copies stay. This offline action cannot confirm host revocation. Joining again follows the host’s current approval policy.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: () => setErr(act(() => phoneClan().clans.leave(clan.id, phoneClan().me))) }])} />}
+    <Muted small>Membership and stored files remain when archived. Live rooms require an online authorized host.</Muted>
+    {active.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn disabled={!!busy} label={`Archive ${clan.name}`} onPress={() => Alert.alert('Archive on this phone?', 'Hide this CLAN from My CLANs. Files and membership remain; restore it below.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive', onPress: () => change(clan.id, true) }])} />
+      {!phoneClan().clans.members(clan.id).some((member) => member.userId === phoneClan().me && member.role === 'owner') && <Btn disabled={!!busy} label={`Leave ${clan.name}`} onPress={() => Alert.alert('Leave on this phone?', 'Personal data and stored copies stay. This offline action cannot confirm host revocation. Joining again follows the host’s current approval policy.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: () => setErr(act(() => phoneClan().clans.leave(clan.id, phoneClan().me))) }])} />}
     </View>)}
-    {archived.length > 0 && <Muted>Archived on this phone</Muted>}
-    {archived.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn label={`Restore ${clan.name}`} onPress={() => change(clan.id, false)} /></View>)}
-    {err && <Muted>{err}</Muted>}
+    {!!archived.length && <Muted>Archived on this phone</Muted>}
+    {archived.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn disabled={!!busy} label={`Restore ${clan.name}`} onPress={() => change(clan.id, false)} /></View>)}
+    {!!copies.length && <Muted>Stored copies on this phone</Muted>}
+    {copies.map((clan) => <View key={clan.id}>{!visible.has(clan.id) && <Muted>{clan.name} · left or ended</Muted>}<Btn disabled={!!busy} danger label={`${clan.mine ? 'Delete' : 'Remove copy of'} ${clan.name}`} onPress={() => remove(clan)} /></View>)}
+    {pending.map((item) => <View key={item.clanId}><Muted>{phoneClan().clans.get(item.clanId)?.name ?? 'CLAN'} · cleanup pending</Muted><Btn disabled={!!busy} label="Retry cleanup" onPress={() => void run(item.clanId, item.kind)} /></View>)}
+    {!!busy && <Muted>Removing local copy…</Muted>}{!!notice && <Muted>{notice}</Muted>}{err && <Muted>{err}</Muted>}
   </Card>;
 }
 

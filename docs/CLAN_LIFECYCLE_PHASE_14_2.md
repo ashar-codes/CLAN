@@ -42,9 +42,9 @@ as confirmation explains. No class-title folder deletion or guessed scope is per
 
 Desktop native E2Es cover owner cancellation, changed-file failure/retry, restart/rehost fencing, original source and
 private note retention; member cancellation, owner-action refusal, restart/cache/reconnect removal and intact remote
-host authority. Mobile controls/native cleanup checks remain unfinished.
+host authority. Mobile controls are implemented; native cleanup verification is unfinished (see evidence below).
 
-## Core foundation and remaining mobile work
+## Core foundation and mobile coordination
 
 The core cleanup foundation is implemented. Appended migrations
 records authorized remove/delete intent, candidate object IDs and completion separately. Pending intent fences reads,
@@ -72,3 +72,25 @@ The implementation also rechecks file-sharing membership at publication after as
 Controllers coordinate lifecycle through domain interfaces. Visual components receive state and invoke authorized
 actions; they do not delete database rows or choose arbitrary filesystem paths. Failed cleanup must be resumable and
 must not re-enable deleted authority. These gates must be covered before exposing destructive controls.
+
+
+### Mobile implementation and current verification
+
+Home exposes authorized confirmation, remove/delete, and pending retry. Own-membership metadata makes stored copies
+removable after leave/expiry without restoring content permissions; desktop has the same post-leave controls. The mobile
+controller records intent first, purges scoped projections, discards only this CLAN Outbox, aborts/waits exact-session
+downloads, removes verified app-private indexed copies and owned partials, collects unreferenced managed objects, then
+marks completion. Personal/other-session/shared/modified/exported/unknown legacy bytes remain. Corrupt indexes fail
+closed; Outbox/ownership updates use temporary files and synchronous moves. Download completion now waits for the
+actual file move. Whiteboard pending delivery lives only in the unmounted live controller; protocol/model unchanged.
+Delayed chat cache writes are fenced by cleanup intent. Native owner deletion is not hardware verified; native hosting
+is not implemented and must be stopped/fenced by its future controller before any owner cleanup is allowed.
+
+PASS: typecheck; 27 targeted chat/lifecycle/contracts tests; two updated real Electron E2Es including post-leave
+stored-copy removal. Native APK build/install PASS. Android cleanup run 1 **FAIL**: last-copy removal hid the success
+message because the empty card returned null. Fixed by retaining the notice; rerun **INTERRUPTED**, exit 130, when
+machine free storage fell below 1 GB. Archive/restart/restore, authenticated leave and personal retention passed before
+interruption. Fixed native completion/restart/rejoin and Android Raise Hand/sharing controls remain **NOT TESTED**.
+Logs: `/tmp/clan-142-native-cleanup.log`, `/tmp/clan-142-native-cleanup2.log`; no timeout increases or physical claims.
+The dedicated emulator job and its own peer were shut down; AVD/profile/signing originals preserved. Rerun
+`python3 apps/mobile/e2e/android_lifecycle.py` after storage is available and the disposable emulator is restarted.

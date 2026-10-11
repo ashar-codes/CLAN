@@ -55,7 +55,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const reminders = new Reminders(db, bus, now);
   let me = '';
   const local = () => me;
-  const chat = new Chat(db, bus, permissions, now, local);
+  const chat = new Chat(db, bus, permissions, now, local, (clanId) => !clans.cleanup(clanId));
   const courses = new Courses(db, bus, { clans, notes, files, saved, identity }, now);
   const tasks = new Tasks(db, bus, courses, (c, u) => clans.isActiveMember(c, u), now);
   const exams = new Exams(db, bus, courses, now);

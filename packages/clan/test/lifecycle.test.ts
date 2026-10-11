@@ -46,6 +46,10 @@ describe('device-local CLAN lifecycle', () => {
       expect(await c.store.verify(courseFile.objectId)).toBe(true);
       expect(c.files.list(p, { kind: 'clan', clanId: other.id })).toHaveLength(1);
       expect(c.chat.thread(thread.id)).toBeNull();
+      expect(() => c.chat.setMe(clan.id, 'late')).toThrow('awaiting cleanup');
+      expect(() => c.chat.queue(clan.id, { id: 'late-outbox' })).toThrow('awaiting cleanup');
+      expect(() => c.chat.ingest({ id: thread.id, clanId: clan.id, kind: 'group', with: null, lastSeq: 0, readSeq: 0, unread: 0, updatedAt: 0 }, 'late', [])).toThrow('awaiting cleanup');
+      expect(c.chat.thread(thread.id)).toBeNull();
       expect(c.notifications.list(p)).toEqual([]);
       expect(db.prepare('SELECT 1 FROM wb_boards WHERE id = ?').get(clanBoard.id)).toBeUndefined();
       expect(db.prepare('SELECT 1 FROM wb_boards WHERE id = ?').get(ownBoard.id)).toBeDefined();
@@ -132,6 +136,7 @@ describe('device-local CLAN lifecycle', () => {
       c.clans.setLocalArchive(clan.id, c.me, true); c.clans.leave(clan.id, c.me);
       expect(c.clans.isActiveMember(clan.id, c.me)).toBe(false);
       expect(c.clans.isActiveMember(clan.id, owner)).toBe(true);
+      expect(c.clans.storedCopies(c.me).map((x) => x.id)).toContain(clan.id);
       expect(c.clans.list(c.me, { archived: true })).toEqual([]);
       expect(c.notes.mine(user(c.me)).map((x) => x.id)).toContain(ownNote.id);
       expect(() => c.clans.setLocalArchive(clan.id, c.me, false)).toThrow('Not allowed');

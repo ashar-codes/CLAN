@@ -9,7 +9,7 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | IMPLEMENTED; desktop + Android emulator PASS | see git log | 4 desktop E2Es + 17 targeted unit tests + full emulator cross-device run PASS; physical Android NOT TESTED |
 | P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | IMPLEMENTED; host + desktop PASS, native UI pending | see git log | 70 targeted units + 5 desktop chat/sharing E2Es PASS |
 | P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | `7d16b04` | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
-| P0-5 | CLAN archive / remove from device / leave / delete | IN PROGRESS; archive/restore + leave PASS on desktop and Android emulator | see git log | Typecheck, 50 targeted security/lifecycle units, archive + leave desktop E2Es and native lifecycle PASS; removal/delete remain |
+| P0-5 | CLAN archive / remove from device / leave / delete | IMPLEMENTED; desktop PASS; native cleanup completion pending | see git log | Core/security units, desktop removal/delete E2Es PASS; native archive/leave PASS; cleanup confirmation defect fixed, rerun interrupted by low storage |
 | P1-6…10 | Notifications + Raise Hand, persistent mobile CLANs (standby hosts, epochs), Android hosting, iOS parity, installers | NOT STARTED | — | — |
 
 ## P0-1 root cause and fix
@@ -224,3 +224,22 @@ eligible iOS destination, reporting missing iOS 26.5 platform support. `-showdes
 Logs: `/tmp/clan-142-ios-build1.log`, `/tmp/clan-142-ios-destinations.log`. No IPA/.app, simulator or physical iOS PASS.
 User platform-component installation request remains pending. Free disk space about 9 GB; no personal data or signing
 material deleted. Android disposable emulator can be restarted independently. See BUILDING.md for exact rerun.
+
+### Mobile cleanup and stored copies after leave
+
+Implemented native confirmation/retry/scoped download and Outbox cleanup, plus desktop/mobile stored-copy controls
+after leaving. Delayed chat writes cannot resurrect pending/removed caches. Private and other-session references stay;
+corrupt indexes fail closed; synchronous moves precede reported download completion. Typecheck PASS, **27/27** target
+units (15.40 s, `/tmp/clan-142-mobile-cleanup-unit2.log`), updated desktop cleanup E2Es **2/2** (18.86 s,
+`/tmp/clan-142-stored-copy-e2e.log`). Contract mock initially normalized file URIs incorrectly; corrected adapter, no
+production permission bypass. Native build/install PASS. Initial native cleanup **FAIL** exposed an empty-card return
+hiding successful completion. Source fixed; rerun **INTERRUPTED** exit130 due <1GB disk, after archive/restart/restore,
+authenticated leave and private retention PASS. Final native completion/rejoin remains NOT TESTED; no timeout increase.
+Logs `/tmp/clan-142-native-cleanup.log`, `/tmp/clan-142-native-cleanup2.log`. Verified project-owned Python test/peer
+and launchd emulator job stopped; profile preserved. Other processes/data/signing keys untouched.
+
+Xcode now lists iOS26.5 generic destinations and iPhone17 simulator; earlier component block resolved
+(`/tmp/clan-142-ios-destinations2.log`). Native compile rerun and further heavy software/native gates are blocked by
+storage (790MiB free at stop). User asked to free >=15GB; do not delete user data/signing material. No IPA or iOS PASS.
+Machine load during checks ~23–33; available tests ran sequentially, and software gates remain distinguishable from
+physical hardware evidence. Final complete suites/reliability/install-update/candidate packaging remain pending.

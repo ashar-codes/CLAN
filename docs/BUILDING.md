@@ -64,3 +64,9 @@ Current evidence: `/tmp/clan-142-ios-build1.log` — Expo prebuild/codegen and C
 `xcodebuild -workspace ios/CLAN.xcworkspace -scheme CLAN -showdestinations` inside the isolated mobile directory.
 The Oct 11 recheck confirms the same block. No simulator/runtime devices, compiled .app or IPA are available.
 Install the requested iOS platform support/runtime in Xcode Settings > Components, then rerun; monitor free space.
+
+
+Later Oct 11 recheck: iOS 26.5 platform/runtime installation now completed; Xcode lists generic device/simulator
+and an iPhone 17 simulator (`/tmp/clan-142-ios-destinations2.log`). This resolves the earlier destination block.
+The compile rerun is pending adequate free storage (about 3–4 GB remaining); user asked to free at least 15 GB.
+Do not delete personal data, signing keys or existing profiles to make space. No native compile PASS or IPA yet.

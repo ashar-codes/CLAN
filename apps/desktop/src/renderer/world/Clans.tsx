@@ -15,11 +15,12 @@ type Rehost = { clanId: string; name: string; type: ClanType };
 export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { experience: Experience; nearby: NearbyClan[]; onCreate(t?: ClanType): void; onJoin(): void; onRehost(r: Rehost): void }) {
   const [places, reload] = useLoad<ClanPlaceView[]>(api.clan.places);
   const [archived, reloadArchived] = useLoad(api.clan.archived);
+  const [copies, reloadCopies] = useLoad(api.clan.storedCopies);
   const [pending, reloadPending] = useLoad(api.clan.pendingCleanup);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState(''), [retrying, setRetrying] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const refresh = () => { reload(); reloadArchived(); reloadPending(); };
+  const refresh = () => { reload(); reloadArchived(); reloadPending(); reloadCopies(); };
   if (open) return <ClanRoomView id={open} experience={experience} onBack={(message) => { setOpen(null); setNotice(message ?? ''); refresh(); }} onRehost={onRehost} />;
   return (
     <div className="stack">
@@ -43,6 +44,10 @@ export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { expe
         </div>
       </section>
       {!!archived?.length && <section className="card" aria-label="Archived CLANs"><span className="eyebrow">Archived on this device</span><p className="muted">Your files and membership are retained.</p>{archived.map((clan) => <div key={clan.id} className="row between"><button onClick={() => setOpen(clan.id)}>{clan.name}</button><button onClick={() => { setErr(''); void api.clan.archiveLocal(clan.id, false).then(refresh, (e) => setErr(errText(e))); }}>Restore</button></div>)}</section>}
+      {!!copies?.filter((clan) => !places?.some((p) => p.id === clan.id) && !archived?.some((p) => p.id === clan.id)).length && <section className="card" aria-label="Stored CLAN copies"><h2>Stored copies · left or ended</h2><p>These copies do not restore membership or access to a live room.</p>{copies.filter((clan) => !places?.some((p) => p.id === clan.id) && !archived?.some((p) => p.id === clan.id)).map((clan) => <div key={clan.id} className="row between"><span>{clan.name}</span><button disabled={!!retrying} onClick={() => {
+        if (!confirm((clan.mine ? 'This may be the only copy. Delete this CLAN’s history and hosting authority?' : 'Remove this CLAN’s stored history and verified downloads? Remote revocation cannot be confirmed here.') + ' Personal study data, Course files, exports, edited and unknown legacy downloads stay. End any live session first. Failures stay pending for retry.')) return;
+        setRetrying(clan.id); setErr(''); void api.clan.cleanup(clan.id, clan.mine ? 'delete' : 'remove').then((result) => setNotice(`Cleanup finished. ${result.retained} modified or shared copies retained.`), (e) => setErr(errText(e))).finally(() => { setRetrying(null); refresh(); });
+      }}>{clan.mine ? 'Delete CLAN' : 'Remove copy'}</button></div>)}</section>}
       {err && <p role="alert">{err}</p>}
       <section className="card"><span className="eyebrow">Nearby CLANs</span><NearbyMini list={nearby} onJoin={onJoin} /></section>
     </div>

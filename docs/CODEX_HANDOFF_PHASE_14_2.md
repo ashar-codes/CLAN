@@ -161,3 +161,12 @@ Latest iOS result supersedes earlier build-running notes: Expo prebuild/codegen 
 xcodebuild FAIL/BLOCKED (missing iOS 26.5 platform/destination), confirmed by showdestinations. Native compile,
 simulator execution, signing and IPA remain unverified. User has been asked for platform-component installation.
 Use isolated `apps/mobile/scripts/ios-build.sh`; see BUILDING.md. Do not rerun CocoaPods setup unnecessarily.
+
+
+Current storage interruption: free disk reached ~790MiB. Dedicated emulator `clan.phase142.emu` and the owned native
+lifecycle test/peer were stopped safely; profile/AVD retained. Mobile cleanup implementation + post-leave stored-copy
+controls are present. Typecheck/target contracts and desktop E2Es PASS; native run1 FAIL (empty card hid completion),
+fixed; run2 INTERRUPTED exit130 before verifying fix. Do not call native cleanup PASS. See lifecycle/progress docs.
+User requested to free >=15GB; no further large builds/tests until space is available. Xcode now DOES recognize iOS26.5
+and iPhone17 simulator; component installation resolved, compile still pending. Recheck storage, restart only the
+owned emulator, rerun android_lifecycle.py, then attention/sharing and final gates. No physical Windows results yet.

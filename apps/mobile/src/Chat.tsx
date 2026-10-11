@@ -7,13 +7,13 @@ import { AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, S
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Notifications from 'expo-notifications';
-import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
 import { api, catchUpChat, mergeChatMessages as merge, formatBytes } from '@classroom/client';
 import type { ChatMessageView, ChatThreadView, ClientMessage, ResourceView, ServerMessage } from '@classroom/protocol';
 import { download, shareFile, type Conn, type FileState } from './transfers';
 import { phoneClan, me as meP } from './core/clan';
 import { MobileFileActions } from './FileActions';
+import { outbox } from './chat-outbox';
 
 Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }) });
 /** A local notice for a message that arrives while you're not looking at that conversation (text only if short). */
@@ -25,15 +25,6 @@ async function notify(title: string, body: string) {
 
 type C = { text: string; muted: string; border: string; surface: string; accent: string; danger: string };
 type Send = Extract<ClientMessage, { t: 'chat.send' }>;
-const dir = () => new Directory(Paths.document, 'CLAN');
-const outboxFile = () => new File(dir(), 'chat-outbox.json');
-const readJson = <T,>(f: File, fallback: T): T => { try { return f.exists ? JSON.parse(f.textSync()) : fallback; } catch { return fallback; } };
-const writeJson = (f: File, v: unknown) => { if (!dir().exists) dir().create({ intermediates: true }); f.write(JSON.stringify(v)); };
-const outbox = {
-  list: (clanId: string) => readJson<Record<string, Send[]>>(outboxFile(), {})[clanId] ?? [],
-  add(clanId: string, m: Send) { const all = readJson<Record<string, Send[]>>(outboxFile(), {}); all[clanId] = [...(all[clanId] ?? []).filter((x) => x.id !== m.id), m]; writeJson(outboxFile(), all); },
-  sent(id: string) { const all = readJson<Record<string, Send[]>>(outboxFile(), {}); for (const k of Object.keys(all)) all[k] = all[k]!.filter((x) => x.id !== id); writeJson(outboxFile(), all); },
-};
 
 /** Chat state; `onServer` must receive every server message of this connection. */
 export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessage) => void) {
@@ -111,15 +102,16 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
 
   const post = useCallback((threadId: string, body: string, extra: Partial<Send> = {}) => {
     const m: Send = { t: 'chat.send', id: randomUUID(), thread: { id: threadId }, body, ...extra };
-    outbox.add(clanId, m); // durable before it leaves
+    try { outbox.add(clanId, m); } // durable before it leaves
+    catch (e) { setError((e as Error).message); return false; }
     setPending((p) => ({ ...p, [m.id]: { m, at: Date.now() } }));
-    send(m);
+    send(m); return true;
   }, [clanId, send]);
 
   const onServer = useCallback((m: ServerMessage) => {
     if (m.t === 'hello' || (m.t === 'member.status' && m.status === 'approved')) void refresh().catch((e) => setError((e as Error).message));
-    else if (m.t === 'chat.ack') { outbox.sent(m.id); setPending(({ [m.id]: _, ...rest }) => rest); }
-    else if (m.t === 'chat.nack' && m.code !== 'rate_limited') { outbox.sent(m.id); setPending((p) => (p[m.id] ? { ...p, [m.id]: { ...p[m.id]!, failed: m.message } } : p)); }
+    else if (m.t === 'chat.ack') { try { outbox.sent(m.id); } catch (e) { setError((e as Error).message); return; } setPending(({ [m.id]: _, ...rest }) => rest); }
+    else if (m.t === 'chat.nack' && m.code !== 'rate_limited') { try { outbox.sent(m.id); } catch (e) { setError((e as Error).message); return; } setPending((p) => (p[m.id] ? { ...p, [m.id]: { ...p[m.id]!, failed: m.message } } : p)); }
     else if (m.t === 'chat.message') {
       setMsgs((x) => ({ ...x, [m.thread.id]: merge(x[m.thread.id] ?? [], [m.message]) }));
       const reading = viewing.current && AppState.currentState === 'active' && ref.current.active === m.thread.id;
@@ -151,10 +143,10 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
   }, [setViewing]);
   const retry = useCallback((id: string) => {
     const p = ref.current.pending[id]; if (!p) return;
-    outbox.add(clanId, p.m);
+    try { outbox.add(clanId, p.m); } catch (e) { setError((e as Error).message); return; }
     setPending((x) => ({ ...x, [id]: { m: p.m, at: Date.now() } })); send(p.m);
   }, [clanId, send]);
-  const discard = useCallback((id: string) => { outbox.sent(id); setPending(({ [id]: _, ...rest }) => rest); }, []);
+  const discard = useCallback((id: string) => { try { outbox.sent(id); } catch (e) { setError((e as Error).message); return; } setPending(({ [id]: _, ...rest }) => rest); }, []);
 
   /** Attach a file to the OPEN conversation only: the audience is fixed before the upload starts. */
   const [sending, setSending] = useState<{ name: string; sent: number; size: number; error?: string; notice?: string } | null>(null);
@@ -165,7 +157,7 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
     try {
       const r = await shareFile(conn, file, to, randomUUID(), (sent, size) => setSending({ name: file.name, sent, size }));
       if ('pending' in r) { setSending({ name: file.name, sent: file.size, size: file.size, notice: 'Sent for teacher approval. Approved files appear in Classroom files.' }); return; }
-      post(thread.id, '', { attachment: { kind: 'file', resourceId: r.id } });
+      if (!post(thread.id, '', { attachment: { kind: 'file', resourceId: r.id } })) throw new Error('File uploaded, but its chat message could not be saved to the Outbox.');
       setSending(null);
     } catch (e) { setSending({ name: file.name, sent: 0, size: file.size, error: (e as Error).message }); }
   }, [conn, post]);
@@ -268,7 +260,7 @@ export function ChatSection({ c, chat, conn, people, canSendFiles }: { c: C; cha
             style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>📎</Text></Pressable>}
           <Pressable accessibilityRole="button" accessibilityLabel="Send something from your Inbox" onPress={() => setFromInbox(!fromInbox)} style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>⇣</Text></Pressable>
           <TextInput style={[s.input, { color: c.text, borderColor: c.border }]} value={text} onChangeText={setText} maxLength={4000} placeholder="Message" placeholderTextColor={c.muted} accessibilityLabel="Message" multiline />
-          <Pressable accessibilityRole="button" disabled={!text.trim()} onPress={() => { following.current = true; setAway(false); chat.post(t.id, text.trim()); setText(''); }} style={[s.chip, { borderColor: c.accent, opacity: text.trim() ? 1 : 0.5, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.accent, fontWeight: '700' }}>Send</Text></Pressable>
+          <Pressable accessibilityRole="button" disabled={!text.trim()} onPress={() => { following.current = true; setAway(false); if (chat.post(t.id, text.trim())) setText(''); }} style={[s.chip, { borderColor: c.accent, opacity: text.trim() ? 1 : 0.5, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.accent, fontWeight: '700' }}>Send</Text></Pressable>
         </View>
       )}
       </KeyboardAvoidingView></SafeAreaView></Modal>

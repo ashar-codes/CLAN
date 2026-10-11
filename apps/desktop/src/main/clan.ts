@@ -39,6 +39,7 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
 
   handle('clan:list', () => c.clans.list(c.me));
   handle('clan:archived', () => c.clans.list(c.me, { archived: true }));
+  handle('clan:storedCopies', () => c.clans.storedCopies(c.me));
   handle('clan:archiveLocal', (id, on) => c.clans.setLocalArchive(Id.parse(id), c.me, z.boolean().parse(on)));
   /** CLANs as places: real counts only. */
   handle('clan:places', () => c.clans.list(c.me).map((x) => {
