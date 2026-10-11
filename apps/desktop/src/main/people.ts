@@ -16,7 +16,7 @@ import { PeopleChanged } from '@clan/core';
 import { candidateInterfaces, createClassroomTls, logError } from '@classroom/server';
 import { IMAGE_PREVIEW_BYTES, TEXT_PREVIEW_BYTES, previewImageMime, previewKind, type FilePreview } from '@classroom/client';
 import { newEd25519, nodeSigner, sha256File } from '@classroom/client/node';
-import { keyFingerprint, PROFILE_FIELDS, safetyNumber, TEMP_TTLS, VOICE_MIME, type PeerBody } from '@classroom/protocol';
+import { ackCode, encodeTransfer, keyFingerprint, parseReceiveCode, PROFILE_FIELDS, QRX_MAX_BYTES, safetyNumber, TEMP_TTLS, verifyAck, VOICE_MIME, type PeerBody } from '@classroom/protocol';
 import { startPeopleRuntime } from './people-runtime.ts';
 import { canOpen } from './student.ts';
 import { windowsOpenWith } from './open-with.ts';
@@ -160,6 +160,55 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     const key = Key.parse(k), b = z.object({ kind: z.string() }).passthrough().parse(body) as PeerBody;
     if (!b.kind.startsWith('call.')) throw new Error('Not a call signal.');
     return rt.sendLive(p.callSignal(key, b as Extract<PeerBody, { kind: `call.${string}` }>));
+  });
+  // ---- optical (animated QR) transfer: encoded here so the sender's identity signature uses the keystore key ----
+  const optical = new Map<string, ReturnType<typeof encodeTransfer>>();
+  handle('people:opticalStart', async (rawTo, rawPath) => {
+    const to = rawTo ? parseReceiveCode(z.string().max(300).parse(rawTo)) : null;
+    if (rawTo && !to) throw new Error('That is not a CLAN receive code.');
+    let path = rawPath === undefined || rawPath === null ? null : z.string().max(4096).parse(rawPath);
+    if (!path) { const win = BrowserWindow.getFocusedWindow(); const r = win ? await dialog.showOpenDialog(win, { properties: ['openFile'] }) : await dialog.showOpenDialog({ properties: ['openFile'] }); if (r.canceled || !r.filePaths[0]) return null; path = r.filePaths[0]; }
+    const st = await stat(path);
+    if (!st.isFile()) throw new Error('Choose a file.');
+    if (st.size > QRX_MAX_BYTES) throw new Error(`That file is ${Math.round(st.size / 1e5) / 10} MB. QR transfer is limited to ${QRX_MAX_BYTES / 1024 / 1024} MB — share it over a direct connection instead.`);
+    const tx = encodeTransfer({ bytes: new Uint8Array(await readFile(path)), name: basename(path), mime: mimeOf(path) }, { blockSize: st.size > 64_000 ? 600 : 400, to: to ?? undefined, signer });
+    if (optical.size > 4) optical.delete(optical.keys().next().value!);
+    optical.set(tx.id, tx);
+    return { id: tx.id, name: tx.info.name, size: tx.info.size, mode: tx.meta.mode, minFrames: tx.minFrames, to: to?.name ?? null };
+  });
+  handle('people:opticalFrames', (id, from, count) => {
+    const tx = optical.get(z.string().regex(/^[0-9a-f]{16}$/).parse(id)); if (!tx) throw new Error('That transfer was stopped.');
+    const f = z.number().int().min(0).parse(from), n = z.number().int().min(1).max(200).parse(count);
+    return Array.from({ length: n }, (_, i) => tx.frame(f + i));
+  });
+  handle('people:opticalStop', (id) => { optical.delete(z.string().parse(id)); });
+  handle('people:opticalReceipt', (id, text) => {
+    const tx = optical.get(z.string().parse(id)); if (!tx) throw new Error('That transfer was stopped.');
+    const r = verifyAck(z.string().max(600).parse(text), { id: tx.id, sha256: tx.info.sha256 });
+    if (!r) return null;
+    const c0 = p.contact(r.key);
+    return { key: r.key, name: c0?.name ?? null, fingerprint: keyFingerprint(r.key) };
+  });
+  handle('people:opticalAck', (id, sha) => ackCode({ id: z.string().regex(/^[0-9a-f]{16}$/).parse(id), sha256: z.string().regex(/^[0-9a-f]{64}$/).parse(sha), signer }));
+  const opticalFile = async (bytes: unknown, name: unknown) => {
+    const b = Buffer.from(z.instanceof(Uint8Array).parse(bytes));
+    if (b.length > QRX_MAX_BYTES) throw new Error('Too large.');
+    const safe = z.string().max(200).parse(name).replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, '_').slice(0, 120) || 'file';
+    return { b, safe };
+  };
+  handle('people:opticalSave', async (bytes, name) => {
+    const { b, safe } = await opticalFile(bytes, name);
+    const win = BrowserWindow.getFocusedWindow();
+    const r = win ? await dialog.showSaveDialog(win, { defaultPath: safe }) : await dialog.showSaveDialog({ defaultPath: safe });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, b);
+    return { name: basename(r.filePath) };
+  });
+  handle('people:opticalInbox', async (bytes, name, mime) => {
+    const { b, safe } = await opticalFile(bytes, name);
+    const tmp = join(o.dataDir, 'people', 'optical'); await mkdir(tmp, { recursive: true });
+    const path = join(tmp, `${randomUUID()}-${safe}`); await writeFile(path, b);
+    try { await c.capture.capture({ kind: 'user', userId: c.me }, { kind: 'file', path, name: safe, mime: z.string().max(120).parse(mime) }); } finally { await rm(path, { force: true }); }
   });
   handle('people:armMedia', (kind) => armMedia(z.enum(['microphone', 'camera']).parse(kind)));
   handle('people:logCall', (raw) => p.logCall(z.object({ id: z.string().max(64), peerKey: Key, direction: z.enum(['in', 'out']), connectedAt: z.number().int().nullable().optional(), endedAt: z.number().int().nullable().optional(), outcome: z.string().max(40).optional() }).parse(raw)));

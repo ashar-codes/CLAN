@@ -313,7 +313,7 @@ export type NearbyPersonView = { key: string; name: string; profile: import('@cl
 export type MyPeopleProfile = { key: string; fingerprint: string; qr: string; port: number; profile: { name: string; fields: Record<string, unknown>; fieldVisibility: Record<string, 'everyone' | 'friends' | 'nobody'>;
   visibility: 'everyone' | 'friends' | 'invisible'; everyoneUntil: number | null; avatar: { sha256: string; size: number; mime: string; objectId: string } | null; updatedAt: number } };
 export type PeopleApi = {
-  me(): Promise<MyPeopleProfile>; qrImage(): Promise<string>; resetQr(): Promise<MyPeopleProfile>;
+  me(): Promise<MyPeopleProfile>; qrImage(intent?: 'profile' | 'friend' | 'chat'): Promise<string>; resetQr(): Promise<MyPeopleProfile>;
   update(p: Record<string, unknown>): Promise<unknown>; pickAvatar(): Promise<unknown>; avatar(key: 'me' | string): Promise<string | null>;
   visibility(v: 'everyone' | 'friends' | 'invisible', ms?: number): Promise<string>;
   nearby(): Promise<NearbyPersonView[]>; contacts(f?: 'friends' | 'requests' | 'blocked' | 'all'): Promise<PeopleContact[]>; contact(key: string): Promise<PeopleContact | null>;
@@ -326,6 +326,14 @@ export type PeopleApi = {
   sendFile(convId: string, files?: File[]): Promise<PeopleTransfer[]>; sendVoice(convId: string, bytes: Uint8Array, mime: string, durationMs: number): Promise<PeopleTransfer>;
   file(action: 'accept' | 'decline' | 'cancel' | 'retry', transferId: string): Promise<void>; voiceBytes(transferId: string): Promise<Uint8Array>;
   preview(transferId: string): Promise<FilePreview>; save(transferId: string): Promise<{ name: string } | null>; openWith(transferId: string): Promise<void>;
+  /** Animated-QR transfer (sender side runs in the main process so the identity key signs it). */
+  opticalStart(receiveCode?: string | null, path?: string | null): Promise<{ id: string; name: string; size: number; mode: 'public' | 'private'; minFrames: number; to: string | null } | null>;
+  opticalFrames(id: string, from: number, count: number): Promise<string[]>;
+  opticalStop(id: string): Promise<void>;
+  opticalReceipt(id: string, text: string): Promise<{ key: string; name: string | null; fingerprint: string } | null>;
+  opticalAck(id: string, sha256: string): Promise<string>;
+  opticalSave(bytes: Uint8Array, name: string): Promise<{ name: string } | null>;
+  opticalInbox(bytes: Uint8Array, name: string, mime: string): Promise<void>;
   /** Lets the next microphone (voice note, call) or camera (QR scan) request through, for 15 s. */
   armMedia(kind: 'microphone' | 'camera'): Promise<void>;
   signal(key: string, body: Record<string, unknown>): Promise<boolean>; logCall(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }): Promise<void>;
