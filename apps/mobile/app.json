@@ -113,6 +113,20 @@
         }
       ],
       "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "CLAN uses the camera when you scan a CLAN code (a person, a CLAN or an optical file transfer) or take a photo for your Inbox.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "CLAN uses the microphone only while you record a voice message or are in a call you started or answered."
+        }
+      ],
       "@react-native-community/datetimepicker",
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
