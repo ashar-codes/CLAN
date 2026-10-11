@@ -215,3 +215,12 @@ owner-action refusal, cancellation, restart/cache/reconnect cleanup and intact r
 Xcode/CocoaPods 1.17.0 prerequisites PASS; isolated iOS prebuild/codegen succeeded and pod installation is downloading
 native dependencies (`/tmp/clan-142-ios-build1.log`), not yet compile PASS. Dedicated `clan.phase142.emu` launchd job
 stopped to release its 3 GB while iOS builds; emulator/profile files retained. Branch pushed through `a2840ed`.
+
+### iOS first native build attempt
+
+User completed Xcode first launch; license and SDK queries PASS. CocoaPods 1.17.0 installed. Isolated native build
+script now completes Expo prebuild/codegen and pod installation, but native compile **FAIL/BLOCKED**: Xcode has no
+eligible iOS destination, reporting missing iOS 26.5 platform support. `-showdestinations` confirms the block.
+Logs: `/tmp/clan-142-ios-build1.log`, `/tmp/clan-142-ios-destinations.log`. No IPA/.app, simulator or physical iOS PASS.
+User platform-component installation request remains pending. Free disk space about 9 GB; no personal data or signing
+material deleted. Android disposable emulator can be restarted independently. See BUILDING.md for exact rerun.

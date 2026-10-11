@@ -13,7 +13,7 @@ Requirements: Node ≥ 24, pnpm 11. Runtime needs no internet; installing depend
 ## Mobile (Expo development build — not Expo Go, react-native-zeroconf is native)
 * Android: Android SDK + JDK 17, then `pnpm --filter @classroom/mobile android` (or `build:android`).
 * iOS: Xcode on macOS, then `pnpm --filter @classroom/mobile ios`.
-* On the current build machine the Android SDK + JDK 17 are installed (Android builds run); Xcode is not (no iOS build).
+* On the current build machine the Android SDK + JDK 17 are installed (Android builds run); Xcode 26.6 and CocoaPods 1.17.0 are installed. iOS 26.5 platform support/runtime is still missing; native compilation is blocked.
 
 ## Beta release builds (v0.1.0, all from macOS arm64)
 Prerequisites built once (git-ignored binaries; packaging **fails** if one is missing — `apps/desktop/build/require-helpers.cjs`):
@@ -50,3 +50,17 @@ cd ../.. && apps/mobile/scripts/android-dev.sh --prebuild --release          # s
   APK given to testers. Upgrade tests build a higher one without editing the repo: `CLAN_TEST_VERSION=0.1.1:2`.
 * **iOS:** needs Xcode + CocoaPods + an Apple Developer team (see `docs/BETA_READINESS.md`).
 
+
+### Isolated iOS compile (Phase 14.2)
+
+Run `apps/mobile/scripts/ios-build.sh` on the Mac after Xcode first launch and platform-component installation.
+Sources and installed dependencies are mirrored into `~/clan-ios-build`; generated iOS files/Pods stay there.
+The script compiles an **unsigned simulator .app**, never an IPA. `--device-compile` checks the device SDK without
+signing. Neither result is a physical-device test or an installable phone release. A genuine phone installer additionally
+requires an approved Apple team/signing profile and hardware verification; do not replace existing identities.
+
+Current evidence: `/tmp/clan-142-ios-build1.log` — Expo prebuild/codegen and CocoaPods installation PASS;
+`xcodebuild` FAIL because no eligible destination exists (iOS 26.5 platform missing). Recheck with
+`xcodebuild -workspace ios/CLAN.xcworkspace -scheme CLAN -showdestinations` inside the isolated mobile directory.
+The Oct 11 recheck confirms the same block. No simulator/runtime devices, compiled .app or IPA are available.
+Install the requested iOS platform support/runtime in Xcode Settings > Components, then rerun; monitor free space.

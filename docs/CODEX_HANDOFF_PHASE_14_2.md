@@ -155,3 +155,9 @@ Isolated iOS build running from `/Users/ashar/clan-ios-build`, session log `/tmp
 prebuild/codegen PASS, pod dependency download ongoing, native compile unverified. CocoaPods 1.17.0 installed, SDKs
 available, simulator runtime absent. Dedicated Android launchd job stopped for memory; AVD/profile retained and may
 be restarted for the next genuine Android regression. Original checkout/signing/application profiles preserved.
+
+
+Latest iOS result supersedes earlier build-running notes: Expo prebuild/codegen and CocoaPods install PASS;
+xcodebuild FAIL/BLOCKED (missing iOS 26.5 platform/destination), confirmed by showdestinations. Native compile,
+simulator execution, signing and IPA remain unverified. User has been asked for platform-component installation.
+Use isolated `apps/mobile/scripts/ios-build.sh`; see BUILDING.md. Do not rerun CocoaPods setup unnecessarily.
