@@ -44,6 +44,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 const val SERVICE_TYPE = "_clanlink._tcp"
 private val R_RE = Regex("^[A-Za-z0-9_-]{8,24}$")
+private val T_RE = Regex("^[A-Za-z0-9_-]{16}$")
 
 @SuppressLint("MissingPermission") // JS requests NEARBY_WIFI_DEVICES / location first; failures surface as errors
 class PeerRadios(private val ctx: Context, private val emit: (String, Map<String, Any?>) -> Unit) {
@@ -65,6 +66,12 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
     )
   }
 
+  /** This phone's IPv4 addresses on Wi-Fi / hotspot / Wi-Fi Direct interfaces (for the link addresses in its QR). */
+  fun addresses(): List<String> = java.net.NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+    .filter { it.isUp && !it.isLoopback && (it.name.startsWith("wlan") || it.name.startsWith("p2p") || it.name.startsWith("ap") || it.name.startsWith("swlan") || it.name.startsWith("eth")) }
+    .flatMap { i -> i.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>().map { it.hostAddress ?: "" } }
+    .filter { it.isNotEmpty() }.distinct().take(4)
+
   // ---------------- NSD on the current Wi-Fi ----------------
   private val nsd get() = ctx.getSystemService(Context.NSD_SERVICE) as NsdManager
   private var nsdReg: NsdManager.RegistrationListener? = null
@@ -72,10 +79,10 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
   private val resolveQueue = ArrayDeque<NsdServiceInfo>()
   private var resolving = false
 
-  fun nsdAdvertise(r: String, port: Int) {
-    require(R_RE.matches(r)) { "bad id" }
+  fun nsdAdvertise(r: String, t: String, port: Int) {
+    require(R_RE.matches(r) && (t.isEmpty() || T_RE.matches(t))) { "bad id" }
     nsdStopAdvertise()
-    val info = NsdServiceInfo().apply { serviceName = "clan-${r.take(8)}"; serviceType = SERVICE_TYPE; setPort(port); setAttribute("r", r); setAttribute("v", "1") }
+    val info = NsdServiceInfo().apply { serviceName = "clan-${r.take(8)}"; serviceType = SERVICE_TYPE; setPort(port); setAttribute("r", r); if (t.isNotEmpty()) setAttribute("t", t); setAttribute("v", "1") }
     val l = object : NsdManager.RegistrationListener {
       override fun onServiceRegistered(i: NsdServiceInfo) {}
       override fun onRegistrationFailed(i: NsdServiceInfo, code: Int) { emit("radio", mapOf("type" to "error", "via" to "nsd", "message" to "advertise failed ($code)")) }
@@ -110,8 +117,9 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
       override fun onResolveFailed(s: NsdServiceInfo, code: Int) { main.post { resolving = false; nextResolve() } }
       override fun onServiceResolved(s: NsdServiceInfo) {
         val r = s.attributes["r"]?.let { String(it) } ?: ""
+        val t = s.attributes["t"]?.let { String(it) }?.takeIf { T_RE.matches(it) } ?: ""
         val host = s.host?.hostAddress
-        if (host != null && R_RE.matches(r)) emit("radio", mapOf("type" to "found", "via" to "nsd", "r" to r, "host" to host, "port" to s.port, "name" to s.serviceName))
+        if (host != null && R_RE.matches(r)) emit("radio", mapOf("type" to "found", "via" to "nsd", "r" to r, "t" to t, "host" to host, "port" to s.port, "name" to s.serviceName))
         main.post { resolving = false; nextResolve() }
       }
     })
@@ -154,15 +162,17 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
   }
 
   /** Offer our link listener on Wi-Fi Direct and look for others doing the same. */
-  fun p2pStart(r: String, port: Int, done: (String?) -> Unit) {
-    require(R_RE.matches(r)) { "bad id" }
+  fun p2pStart(r: String, t: String, port: Int, done: (String?) -> Unit) {
+    require(R_RE.matches(r) && (t.isEmpty() || T_RE.matches(t))) { "bad id" }
     val (m, c) = p2pReady()
     p2pService?.let { m.removeLocalService(c, it, null) }
-    val svc = WifiP2pDnsSdServiceInfo.newInstance("clan-${r.take(8)}", SERVICE_TYPE, mapOf("r" to r, "p" to port.toString(), "v" to "1"))
+    val svc = WifiP2pDnsSdServiceInfo.newInstance("clan-${r.take(8)}", SERVICE_TYPE, mapOf("r" to r, "t" to t, "p" to port.toString(), "v" to "1"))
     p2pService = svc
     m.setDnsSdResponseListeners(c, { _, _, _ -> }, { domain, record, device ->
-      val rr = record["r"] ?: "", pp = record["p"]?.toIntOrNull() ?: 0
-      if (domain.contains(SERVICE_TYPE) && R_RE.matches(rr) && pp in 1..65535) emit("radio", mapOf("type" to "found", "via" to "p2p", "r" to rr, "port" to pp, "device" to device.deviceAddress, "name" to device.deviceName))
+      val rr = record["r"] ?: ""
+      val pp = record["p"]?.toIntOrNull() ?: 0
+      val tt = record["t"]?.takeIf { T_RE.matches(it) } ?: ""
+      if (domain.contains(SERVICE_TYPE) && R_RE.matches(rr) && pp in 1..65535) emit("radio", mapOf("type" to "found", "via" to "p2p", "r" to rr, "t" to tt, "port" to pp, "device" to device.deviceAddress))
     })
     m.addLocalService(c, svc, listener("advertise") { err ->
       if (err != null) return@listener done(err)
@@ -200,17 +210,18 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
   private val awareService = "clanlink"
   private fun passFor(r: String) = "clan-link-$r" // not a secret: the NAN data path must be secured to carry the port; the link handshake protects the session
 
-  fun awareStart(r: String, port: Int, done: (String?) -> Unit) {
+  private var awareT = ""
+  fun awareStart(r: String, t: String, port: Int, done: (String?) -> Unit) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return done("Wi-Fi Aware data paths need Android 10 or newer.")
     val wam = ctx.getSystemService(Context.WIFI_AWARE_SERVICE) as WifiAwareManager? ?: return done("Wi-Fi Aware is not supported on this phone.")
     if (!wam.isAvailable) return done("Wi-Fi Aware is off or unavailable right now (turn on Wi-Fi and location if asked).")
-    require(R_RE.matches(r)) { "bad id" }
-    awareR = r; awarePort = port
+    require(R_RE.matches(r) && (t.isEmpty() || T_RE.matches(t))) { "bad id" }
+    awareR = r; awareT = t; awarePort = port
     wam.attach(object : AttachCallback() {
       override fun onAttachFailed() { done("Wi-Fi Aware could not start.") }
       override fun onAttached(session: WifiAwareSession) {
         aware = session
-        session.publish(PublishConfig.Builder().setServiceName(awareService).setServiceSpecificInfo(r.toByteArray()).build(), object : DiscoverySessionCallback() {
+        session.publish(PublishConfig.Builder().setServiceName(awareService).setServiceSpecificInfo("$r.$t".toByteArray()).build(), object : DiscoverySessionCallback() {
           override fun onPublishStarted(s: PublishDiscoverySession) { pub = s }
           override fun onMessageReceived(peer: PeerHandle, message: ByteArray) {
             // a subscriber asked for a data path: offer one, carrying our link port
@@ -223,11 +234,12 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
         session.subscribe(SubscribeConfig.Builder().setServiceName(awareService).build(), object : DiscoverySessionCallback() {
           override fun onSubscribeStarted(s: SubscribeDiscoverySession) { sub = s; done(null) }
           override fun onServiceDiscovered(peer: PeerHandle, info: ByteArray, filter: List<ByteArray>) {
-            val theirR = String(info)
+            val parts = String(info).split('.', limit = 2)
+            val theirR = parts[0]; val theirT = parts.getOrNull(1)?.takeIf { T_RE.matches(it) } ?: ""
             if (!R_RE.matches(theirR) || theirR == awareR) return
             val id = "a${++awareSeq}"
             awarePeers[id] = peer to theirR
-            emit("radio", mapOf("type" to "found", "via" to "aware", "peer" to id, "r" to theirR))
+            emit("radio", mapOf("type" to "found", "via" to "aware", "peer" to id, "r" to theirR, "t" to theirT))
           }
         }, main)
       }

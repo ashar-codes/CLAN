@@ -9,10 +9,10 @@ export type PeerCapabilities = {
   wifiDirect: boolean; wifiAware: boolean; wifiAwareAvailable: boolean; localHotspot: boolean; joinWifi: boolean;
 };
 export type RadioEvent =
-  | { type: 'found'; via: 'nsd'; r: string; host: string; port: number; name: string }
-  | { type: 'found'; via: 'bonjour'; r: string; service: string }
-  | { type: 'found'; via: 'p2p'; r: string; port: number; device: string; name: string }
-  | { type: 'found'; via: 'aware'; r: string; peer: string }
+  | { type: 'found'; via: 'nsd'; r: string; t: string; host: string; port: number; name: string }
+  | { type: 'found'; via: 'bonjour'; r: string; t: string; service: string }
+  | { type: 'found'; via: 'p2p'; r: string; t: string; port: number; device: string }
+  | { type: 'found'; via: 'aware'; r: string; t: string; peer: string }
   | { type: 'connected'; via: 'p2p'; owner: boolean; host: string | null }
   | { type: 'connected'; via: 'aware'; peer: string; host: string; port: number; net: string }
   | { type: 'lost'; via: string; name?: string }
@@ -27,9 +27,10 @@ type NativeApi = {
   connect(host: string, port: number, net: string | null): Promise<string>;
   connectService?(name: string): Promise<string>;
   write(id: string, b64: string): boolean; close(id: string): void;
-  advertise(r: string, port: number): void; stopAdvertise(): void; browse(): void; stopBrowse(): void;
-  p2pStart(r: string, port: number): Promise<void>; p2pConnect(device: string): Promise<void>; p2pDisconnect(): void; p2pStop(): void;
-  awareStart(r: string, port: number): Promise<void>; awareConnect(peer: string): Promise<void>; awareStop(): void;
+  addresses(): string[];
+  advertise(r: string, t: string, port: number): void; stopAdvertise(): void; browse(): void; stopBrowse(): void;
+  p2pStart(r: string, t: string, port: number): Promise<void>; p2pConnect(device: string): Promise<void>; p2pDisconnect(): void; p2pStop(): void;
+  awareStart(r: string, t: string, port: number): Promise<void>; awareConnect(peer: string): Promise<void>; awareStop(): void;
   hotspotStart(): Promise<{ ssid: string; passphrase: string }>; hotspotStop(): void;
   joinWifi(ssid: string, passphrase: string): Promise<void>; leaveWifi(): void;
   availabilityStart(text: string): void; availabilityStop(): void; availabilityRunning(): boolean;

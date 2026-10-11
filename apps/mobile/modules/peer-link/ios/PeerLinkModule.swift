@@ -12,6 +12,8 @@ import UIKit
 private let serviceType = "_clanlink._tcp"
 private let idPattern = try! NSRegularExpression(pattern: "^[A-Za-z0-9_-]{8,24}$")
 private func validId(_ s: String) -> Bool { idPattern.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil }
+private let tagPattern = try! NSRegularExpression(pattern: "^[A-Za-z0-9_-]{16}$")
+private func validTag(_ s: String) -> Bool { tagPattern.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil }
 
 public class PeerLinkModule: Module {
   private let queue = DispatchQueue(label: "clan.peerlink")
@@ -20,6 +22,7 @@ public class PeerLinkModule: Module {
   private var conns: [String: NWConnection] = [:]
   private var seq = 0
   private var advertR: String?
+  private var advertT = ""
   private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
   private func params() -> NWParameters {
@@ -57,7 +60,7 @@ public class PeerLinkModule: Module {
             self.sendEvent("socket", ["id": id, "type": "accepted", "remote": "\(c.endpoint)"])
           }
           self.listener = l
-          if let r = self.advertR { l.service = NWListener.Service(name: "clan-\(r.prefix(8))", type: serviceType, txtRecord: NWTXTRecord(["r": r, "v": "1"]).data) }
+          if let r = self.advertR { l.service = NWListener.Service(name: "clan-\(r.prefix(8))", type: serviceType, txtRecord: NWTXTRecord(["r": r, "t": self.advertT, "v": "1"]).data) }
           l.start(queue: self.queue)
         } catch { promise.reject("LISTEN", error.localizedDescription) }
       }
@@ -80,13 +83,14 @@ public class PeerLinkModule: Module {
     }
     Function("close") { (id: String) in self.close(id) }
 
-    Function("advertise") { (r: String, port: Int) in
-      guard validId(r) else { return }
+    Function("advertise") { (r: String, t: String, port: Int) in
+      guard validId(r), t.isEmpty || validTag(t) else { return }
       self.queue.async {
-        self.advertR = r
-        self.listener?.service = NWListener.Service(name: "clan-\(r.prefix(8))", type: serviceType, txtRecord: NWTXTRecord(["r": r, "v": "1"]).data)
+        self.advertR = r; self.advertT = t
+        self.listener?.service = NWListener.Service(name: "clan-\(r.prefix(8))", type: serviceType, txtRecord: NWTXTRecord(["r": r, "t": t, "v": "1"]).data)
       }
     }
+    Function("addresses") { () -> [String] in PeerLinkModule.localAddresses() }
     Function("stopAdvertise") { self.queue.async { self.advertR = nil; self.listener?.service = nil } }
     Function("browse") {
       self.queue.async {
@@ -97,9 +101,9 @@ public class PeerLinkModule: Module {
             switch ch {
             case .added(let res):
               guard case let .service(name, _, _, _) = res.endpoint, name.hasPrefix("clan-") else { continue }
-              var r = ""
-              if case let .bonjour(txt) = res.metadata { r = txt["r"] ?? "" }
-              if validId(r) { self.sendEvent("radio", ["type": "found", "via": "bonjour", "r": r, "service": name]) }
+              var r = "", t = ""
+              if case let .bonjour(txt) = res.metadata { r = txt["r"] ?? ""; t = txt["t"] ?? "" }
+              if validId(r) { self.sendEvent("radio", ["type": "found", "via": "bonjour", "r": r, "t": validTag(t) ? t : "", "service": name]) }
             case .removed(let res):
               if case let .service(name, _, _, _) = res.endpoint { self.sendEvent("radio", ["type": "lost", "via": "bonjour", "name": name]) }
             default: break
@@ -138,17 +142,34 @@ public class PeerLinkModule: Module {
     Function("availabilityRunning") { () -> Bool in self.backgroundTask != .invalid }
 
     // Not on iOS: Wi-Fi Direct, Wi-Fi Aware data paths (iOS 26 framework not used in this build), creating a hotspot.
-    AsyncFunction("p2pStart") { (_: String, _: Int, promise: Promise) in promise.reject("UNSUPPORTED", "Wi-Fi Direct is not available on iPhone.") }
+    AsyncFunction("p2pStart") { (_: String, _: String, _: Int, promise: Promise) in promise.reject("UNSUPPORTED", "Wi-Fi Direct is not available on iPhone.") }
     AsyncFunction("p2pConnect") { (_: String, promise: Promise) in promise.reject("UNSUPPORTED", "Wi-Fi Direct is not available on iPhone.") }
     Function("p2pDisconnect") { () in }
     Function("p2pStop") { () in }
-    AsyncFunction("awareStart") { (_: String, _: Int, promise: Promise) in promise.reject("UNSUPPORTED", "Wi-Fi Aware is not used on iPhone in this version.") }
+    AsyncFunction("awareStart") { (_: String, _: String, _: Int, promise: Promise) in promise.reject("UNSUPPORTED", "Wi-Fi Aware is not used on iPhone in this version.") }
     AsyncFunction("awareConnect") { (_: String, promise: Promise) in promise.reject("UNSUPPORTED", "Wi-Fi Aware is not used on iPhone in this version.") }
     Function("awareStop") { () in }
     AsyncFunction("hotspotStart") { (promise: Promise) in promise.reject("UNSUPPORTED", "iPhone cannot create a hotspot from an app. Use Settings › Personal Hotspot, or join another phone's hotspot.") }
     Function("hotspotStop") { () in }
 
     OnDestroy { self.queue.async { self.listener?.cancel(); self.browser?.cancel(); for c in self.conns.values { c.cancel() }; self.conns.removeAll() } }
+  }
+
+  /** IPv4 addresses on Wi-Fi / hotspot interfaces (en*, bridge*), for the link addresses in this phone's QR. */
+  static func localAddresses() -> [String] {
+    var out: [String] = []
+    var ifaddr: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return [] }
+    defer { freeifaddrs(ifaddr) }
+    for p in sequence(first: first, next: { $0.pointee.ifa_next }) {
+      let i = p.pointee
+      guard let sa = i.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET), (i.ifa_flags & UInt32(IFF_UP)) != 0, (i.ifa_flags & UInt32(IFF_LOOPBACK)) == 0 else { continue }
+      let name = String(cString: i.ifa_name)
+      guard name.hasPrefix("en") || name.hasPrefix("bridge") else { continue }
+      var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+      if getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 { out.append(String(cString: host)) }
+    }
+    return Array(Set(out)).prefix(4).map { $0 }
   }
 
   private func endBackground() { if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid } }

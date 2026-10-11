@@ -35,19 +35,20 @@ class PeerLinkModule : Module() {
     Function("close") { id: String -> sockets.close(id) }
 
     // ---- discovery on the current Wi-Fi (router, hotspot, CLAN Direct network) ----
-    Function("advertise") { r: String, port: Int -> radios.nsdAdvertise(r, port) }
+    Function("addresses") { radios.addresses() }
+    Function("advertise") { r: String, t: String, port: Int -> radios.nsdAdvertise(r, t, port) }
     Function("stopAdvertise") { radios.nsdStopAdvertise() }
     Function("browse") { radios.nsdBrowse() }
     Function("stopBrowse") { radios.nsdStopBrowse() }
 
     // ---- Wi-Fi Direct ----
-    AsyncFunction("p2pStart") { r: String, port: Int, promise: Promise -> radios.p2pStart(r, port) { err -> if (err == null) promise.resolve(null) else promise.reject("P2P", err, null) } }
+    AsyncFunction("p2pStart") { r: String, t: String, port: Int, promise: Promise -> radios.p2pStart(r, t, port) { err -> if (err == null) promise.resolve(null) else promise.reject("P2P", err, null) } }
     AsyncFunction("p2pConnect") { device: String, promise: Promise -> radios.p2pConnect(device) { err -> if (err == null) promise.resolve(null) else promise.reject("P2P", err, null) } }
     Function("p2pDisconnect") { radios.p2pDisconnect() }
     Function("p2pStop") { radios.p2pStop() }
 
     // ---- Wi-Fi Aware ----
-    AsyncFunction("awareStart") { r: String, port: Int, promise: Promise -> radios.awareStart(r, port) { err -> if (err == null) promise.resolve(null) else promise.reject("AWARE", err, null) } }
+    AsyncFunction("awareStart") { r: String, t: String, port: Int, promise: Promise -> radios.awareStart(r, t, port) { err -> if (err == null) promise.resolve(null) else promise.reject("AWARE", err, null) } }
     AsyncFunction("awareConnect") { peer: String, promise: Promise -> radios.awareConnect(peer) { err -> if (err == null) promise.resolve(null) else promise.reject("AWARE", err, null) } }
     Function("awareStop") { radios.awareStop() }
 

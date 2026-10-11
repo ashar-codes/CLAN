@@ -1,6 +1,7 @@
 // The phone's people runtime on the real native pieces: first contact and certificate-pinned TLS from the
 // pinned-transport module, files through expo-file-system, the device identity key from the Keystore/Keychain.
-// Runs only while the app is in the foreground (no background discovery or connections).
+// Phones also speak clan-link/1 directly to other phones (src/people/nearby.ts): the same People store and outbox,
+// whichever path reaches the person. Background behaviour follows the Nearby availability setting.
 import { AppState } from 'react-native';
 import { getRandomBytes } from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
@@ -11,6 +12,13 @@ import { deviceSigner } from '../storage';
 import { phoneClan } from '../core/clan';
 import { bump } from '../ui/kit';
 import { startPhonePeople, type PhoneEnv, type PhonePeople } from './runtime';
+import { nearby } from './nearby';
+import type { PeerEnvelope } from '@classroom/protocol';
+
+/** Live call signals from any path go to the call screen (set by it). */
+const liveSubs = new Set<(e: PeerEnvelope) => void>();
+export const onPeopleLive = (cb: (e: PeerEnvelope) => void) => { liveSubs.add(cb); return () => { liveSubs.delete(cb); }; };
+const live = (e: PeerEnvelope) => { for (const f of liveSubs) f(e); };
 
 const dir = () => { const d = new Directory(Paths.document, 'people', 'incoming'); if (!d.exists) d.create({ intermediates: true, idempotent: true }); return d; };
 
@@ -44,7 +52,7 @@ const env: PhoneEnv = {
 let rt: PhonePeople | null = null, starting: Promise<PhonePeople> | null = null, wanted = false;
 // Stopped whenever the app leaves the foreground; started again when it returns (if people were in use).
 AppState.addEventListener('change', (st) => {
-  if (st !== 'active') { rt?.stop(); rt = null; }
+  if (st !== 'active') { rt?.stop(); rt = null; } // the computer path; direct links follow the Nearby setting (nearby.ts)
   else if (wanted) void phonePeople().catch(() => {});
 });
 /** Starts people networking for this app session (idempotent). */
@@ -55,7 +63,10 @@ export function phonePeople(): Promise<PhonePeople> {
     const s = await deviceSigner();
     const signer = { publicKey: s.publicKey, sign: (b: Uint8Array) => s.sign(b) as string };
     if (!subscribed) { subscribed = true; phoneClan().bus.subscribe('mobile.people', PeopleChanged, () => bump()); }
-    rt = startPhonePeople({ people: phoneClan().people, signer, env, onChange: () => bump() });
+    const links = nearby.manager(signer);
+    nearby.onLive(live);
+    rt = startPhonePeople({ people: phoneClan().people, signer, env, links, onLive: live, onChange: () => bump() });
+    void nearby.start();
     return rt;
   })().finally(() => { starting = null; });
 }

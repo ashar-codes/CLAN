@@ -35,7 +35,10 @@ export class PeerCallError extends Error { readonly status: number; constructor(
 
 const CHUNK = 4 * 1024 * 1024; // below the computer's 9 MiB request limit
 
-export function startPhonePeople(o: { people: People; signer: Signer; env: PhoneEnv; onLive?(e: PeerEnvelope): void; onChange?(what: string): void; now?: () => number; tickMs?: number }) {
+/** The direct-link side (clan-link/1 over Wi-Fi Direct, Aware, Apple peer-to-peer, hotspot or LAN): a ConnectionManager. */
+export type PhoneLinks = { connected(key: string): boolean; connect(address: string, o?: { expectKey?: string; invite?: string }): Promise<unknown>; sendLive(e: PeerEnvelope): Promise<boolean> };
+
+export function startPhonePeople(o: { people: People; signer: Signer; env: PhoneEnv; links?: PhoneLinks; onLive?(e: PeerEnvelope): void; onChange?(what: string): void; now?: () => number; tickMs?: number }) {
   const p = o.people, env = o.env, now = o.now ?? (() => Date.now());
   p.setSigner(o.signer);
   const changed = (w: string) => o.onChange?.(w);
@@ -55,7 +58,16 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
   async function connectQr(text: string) {
     const q = parseProfileQr(text.trim());
     if (!q) throw new Error('That is not a CLAN profile code.');
-    let last: Error = new Error('Could not reach that computer. Make sure you are on the same Wi-Fi.');
+    let last: Error = new Error('Could not reach that person. Make sure you are on the same Wi-Fi or hotspot, or connect directly first.');
+    // a phone's code (or a computer's link listener): the clan-link handshake proves the key
+    for (const l of o.links ? q.links : []) {
+      try {
+        await o.links!.connect(l, { expectKey: q.key, invite: q.invite });
+        for (let i = 0; i < 30 && !p.contact(q.key)?.profile; i++) await new Promise((r) => setTimeout(r, 100));
+        p.markVerified(q.key);
+        return p.contact(q.key)!;
+      } catch (e) { last = e as Error; if (!q.endpoints.length) continue; }
+    }
     for (const ep of q.endpoints) {
       try {
         const body = '{}', headers = { ...peerAuthHeaders(o.signer, { method: 'POST', path: '/peer/hello', body, to: q.spkiSha256, nonce: env.nonce() }), 'content-type': 'application/json', 'x-clan-invite': q.invite };
@@ -83,8 +95,9 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
       const byPeer = new Map<string, ReturnType<People['due']>>();
       for (const d of p.due(now())) byPeer.set(d.to, [...(byPeer.get(d.to) ?? []), d]);
       for (const [key, items] of byPeer) {
+        if (o.links?.connected(key)) continue; // the open direct link delivers it, with an authenticated receipt
         const r = p.route(key);
-        if (!r?.tls || !r.endpoints.length) { for (const d of items) p.deliveryFailed(d.id, 'Phones can reach computers only. This person is not reachable from a phone.'); continue; }
+        if (!r?.tls || !r.endpoints.length) { for (const d of items) p.deliveryFailed(d.id, 'Waiting for a direct connection to this person.', false); continue; }
         let done = false;
         for (const ep of r.endpoints) {
           try {
@@ -97,8 +110,8 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
         changed('delivered');
       }
       sockets();
-      for (const t of p.pendingDownloads()) if (!inflight.has(t.id)) void download(t.id, t.peerKey, t.size);
-      for (const t of p.pendingUploads()) if (!inflight.has(t.id) && t.path) void upload(t.id, t.peerKey, t.path, t.size);
+      for (const t of p.pendingDownloads()) if (!inflight.has(t.id) && !o.links?.connected(t.peerKey)) void download(t.id, t.peerKey, t.size);
+      for (const t of p.pendingUploads()) if (!inflight.has(t.id) && t.path && !o.links?.connected(t.peerKey)) void upload(t.id, t.peerKey, t.path, t.size);
       await p.sweep();
     } catch (e) { console.warn('[people]', (e as Error).message); }
     finally { ticking = null; }
@@ -170,8 +183,19 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
 
   const timer = setInterval(() => void tick(), o.tickMs ?? 4000);
   void tick();
+  /** Call signaling: over the direct link when there is one, else the computer's socket. */
+  async function sendLive(env: PeerEnvelope) {
+    if (o.links?.connected(env.to)) return o.links.sendLive(env);
+    const r = p.route(env.to);
+    if (r?.tls && r.endpoints[0]) {
+      const res = await call(r.endpoints[0], r.tls, env.to, 'POST', '/peer/inbox', JSON.stringify({ envelopes: [env], intro: intro(env.to) })) as { results: { ok: boolean; error?: string }[] };
+      if (!res.results[0]?.ok) throw new Error(res.results[0]?.error ?? 'The other person did not accept the call.');
+      return true;
+    }
+    return false;
+  }
   return {
-    connectQr, tick,
+    connectQr, tick, sendLive,
     connected: (key: string) => open.get(key)?.readyState === 1,
     stop() { clearInterval(timer); for (const ws of open.values()) ws.close(); open.clear(); },
   };
