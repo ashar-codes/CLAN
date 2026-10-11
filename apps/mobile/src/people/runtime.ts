@@ -112,7 +112,7 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
       const have = await env.files.size(part).catch(() => 0);
       if (have < size) {
         const headers = peerAuthHeaders(o.signer, { method: 'GET', path, body: '', to: key, nonce: env.nonce() });
-        await tFor(r.tls).downloadToFile(`https://${r.endpoints[0]}${path}`, { ...headers, ...(have ? { range: `bytes=${have}-` } : {}) }, part, have, (n) => p.progress(id, have + n));
+        await tFor(r.tls).downloadToFile(`https://${r.endpoints[0]}${path}`, { ...headers, ...(have ? { range: `bytes=${have}-` } : {}) }, part, have, (n) => p.progress(id, Math.max(have, n))); // n: bytes on disk
       }
       await p.completeDownload(id, part);
       changed('transfers');
