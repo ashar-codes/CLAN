@@ -67,7 +67,8 @@ function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): 
     const wifi = parseWifiQr(t);
     if (wifi) { setScan(false); setPendingWifi(wifi); return true; }
     if (t.startsWith('CLQ1') || t.startsWith('clan://qrx/')) { setScan(false); onOptical(); return true; }
-    if (t.startsWith('clan://direct#') || t.startsWith('clan://')) { setScan(false); void Linking.openURL(t); return true; }
+    if (t.startsWith('clan://link?')) { setScan(false); setOk('That is a device-link code. Open Me › My Devices › Link to use it.'); return true; }
+    if (t.startsWith('clan://direct#')) { setScan(false); void Linking.openURL(t); return true; } // joining a CLAN Direct network (existing flow)
     setErr('That code is not a CLAN code.');
   };
   const intended = connected && people().contact(connected.key);

@@ -53,6 +53,17 @@ export const REQUEST_SKEW_MS = 120_000;
 /** A link code is a short, single-use, 2-minute secret shown on the trusted device: `CLAN-XXXX-XXXX-XXXX` (60 bits). */
 export const LINK_TTL_MS = 120_000;
 export const LINK_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // no 0/O/1/I
+/**
+ * Link code as a QR (`clan://link?c=<code>&a=<host:port>`): exactly what the screen already shows as text — the same
+ * one-time, two-minute code, still approved on the existing device — so scanning adds convenience, not authority.
+ */
+export const linkQr = (code: string, addresses: string[]) => `clan://link?${new URLSearchParams([['c', code], ...addresses.slice(0, 3).map((a) => ['a', a] as [string, string])]).toString()}`;
+export function parseLinkQr(text: string): { code: string; address: string } | null {
+  const m = /^clan:\/\/link\?(.*)$/.exec(text.trim()); if (!m || text.length > 300) return null;
+  const q = new URLSearchParams(m[1]), code = normalizeLinkCode(q.get('c') ?? '');
+  if (!code) return null;
+  return { code, address: q.getAll('a').find((a) => /^\d+\.\d+\.\d+\.\d+:\d{2,5}$/.test(a)) ?? '' };
+}
 export const normalizeLinkCode = (s: string) => { const c = s.toUpperCase().replace(/^CLAN-?/, '').replace(/[^0-9A-Z]/g, ''); return c.length === 12 && [...c].every((x) => LINK_ALPHABET.includes(x)) ? c : null; };
 export const formatLinkCode = (c: string) => `CLAN-${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8, 12)}`;
 /** Proof transcripts bind the code to the TLS key the client actually saw, both device keys and both nonces. */
@@ -68,3 +79,12 @@ export const LinkGrant = z.object({
   approver: z.object({ fp: z.string(), endpoints: z.array(z.string().max(80)).max(8) }),
 });
 export type LinkGrant = z.infer<typeof LinkGrant>;
+
+/** Standard Wi-Fi QR payload (`WIFI:T:WPA;S:…;P:…;;`) — phones' own camera apps understand it too. */
+export const wifiQr = (ssid: string, pass: string) => `WIFI:T:WPA;S:${ssid.replace(/([\\;,:"])/g, '\\$1')};P:${pass.replace(/([\\;,:"])/g, '\\$1')};;`;
+export function parseWifiQr(t: string): { ssid: string; passphrase: string } | null {
+  if (!/^WIFI:/i.test(t) || t.length > 300) return null;
+  const field = (k: string) => { const m = new RegExp(`(?:^WIFI:|;)${k}:((?:\\\\.|[^;\\\\])*)`, 'i').exec(t); return m ? m[1]!.replace(/\\(.)/g, '$1') : null; };
+  const ssid = field('S'), passphrase = field('P');
+  return ssid && passphrase && passphrase.length >= 8 && passphrase.length <= 63 && new TextEncoder().encode(ssid).length <= 32 ? { ssid, passphrase } : null;
+}

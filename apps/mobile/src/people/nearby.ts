@@ -218,11 +218,4 @@ class Nearby {
 
 export const nearby = new Nearby();
 
-/** Standard Wi-Fi QR payload (also understood by the phone's own camera app). */
-export const wifiQr = (ssid: string, pass: string) => `WIFI:T:WPA;S:${ssid.replace(/([\\;,:"])/g, '\\$1')};P:${pass.replace(/([\\;,:"])/g, '\\$1')};;`;
-export function parseWifiQr(t: string): { ssid: string; passphrase: string } | null {
-  if (!/^WIFI:/i.test(t) || t.length > 300) return null;
-  const field = (k: string) => { const m = new RegExp(`(?:^WIFI:|;)${k}:((?:\\\\.|[^;\\\\])*)`, 'i').exec(t); return m ? m[1]!.replace(/\\(.)/g, '$1') : null; };
-  const ssid = field('S'), passphrase = field('P');
-  return ssid && passphrase && passphrase.length >= 8 && passphrase.length <= 63 ? { ssid, passphrase } : null;
-}
+export { wifiQr, parseWifiQr } from '@classroom/protocol';
