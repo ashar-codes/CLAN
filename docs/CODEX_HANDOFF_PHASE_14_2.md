@@ -1,0 +1,102 @@
+# Codex handoff — Phase 14.2
+
+Written by Claude Code when capacity ran low (the CLI cannot read the weekly usage percentage, so this was written
+early). Progress table: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md).
+
+## 1. Where things are
+* Repo worktree: `/Users/ashar/clan-astra-phase12` (isolated). **Do not touch** the original checkout
+  `/Users/ashar/Desktop/My Projects/untitled folder` (branch `main` @ `2a6d854` with 226 staged files).
+* Branch: `phase-14.2` (local only, **not pushed**). HEAD: see `git log -1` (handoff docs on top of `a833dd1`).
+* Baseline: tag `clan-beta-v0.1.0-rc1` = `6b86e7f`; integration branch `clan-astra-phase12` @ `1994793` (docs).
+* Remote: `https://github.com/ashar-codes/CLAN` (PRIVATE). Pushed so far: branch `clan-astra-phase12`, tag
+  `clan-beta-v0.1.0-rc1`. The Mac's active `gh` account is `ryvostudios`; use `GH_TOKEN=$(gh auth token -u ashar-codes)`
+  for repo commands instead of switching the global account.
+
+## 2. Completed in 14.2 (source, verified by tests on macOS only)
+| Commit | Change | Files |
+|---|---|---|
+| `fd8249c` | Join tries every advertised IPv4 address and pairs once (P0-1 part 1) | `packages/protocol/src/index.ts` (`Advertisement.a`, `lanUrls`), `packages/server/src/discovery.ts`, `packages/client/src/{index,pairing}.ts` (`Candidate.alt`, `lanCarrier`), `apps/mobile/src/discovery.ts`, `packages/server/test/multi-address.test.ts` |
+| `a833dd1` | Windows host never binds virtual adapters (P0-1 part 2) | `packages/server/src/netinfo.ts`, same test file |
+
+Root causes and reasoning: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md) › P0-1.
+
+## 3. Database migrations / compatibility
+No migrations in 14.2. Protocol: the mDNS TXT gains optional `a`; old hosts/clients interoperate (missing `a` ⇒ old
+ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffected.
+
+## 4. Tests actually run (macOS arm64, 2026-10-11)
+* PASS: `pnpm typecheck`; `packages/server/test/multi-address.test.ts` (3); `unit`, `clan`, `discovery`, `direct`
+  (58); `security`, `mobile`, `integration` (60); `discovery` + `direct` re-run after the netinfo change (20).
+* NOT RUN in 14.2: full unit suite, desktop E2E, Android emulator suites, installers. Run them before tagging
+  (`pnpm test`, `pnpm test:e2e`, `python3 apps/mobile/e2e/android_cross_device.py` — see docs/TESTING.md).
+* Windows / physical Android / iOS: **NOT TESTED**.
+
+## 5. Security / architecture decisions
+* Discovery stays untrusted: extra addresses only add *candidates*; `lanCarrier` checks the `/api/info` session id,
+  then OPAQUE + pinned TLS + host approval decide. One OPAQUE attempt per host (no doubled guess counting).
+* No TLS, firewall or authorization relaxation. Firewall prompts on Windows must be answered by the user.
+
+## 6. Next actions (priority order) — exact continuation steps
+1. **Windows retest of P0-1 (needs the Windows PC):** check out `phase-14.2` (after it is pushed, §8),
+   `pnpm install --frozen-lockfile`, `pnpm dev`; on first host start answer the Windows Defender Firewall prompt
+   **Allow, Private networks**; the Wi-Fi profile must be *Private* (`Get-NetConnectionProfile`). Host a Classroom.
+   On the Mac run the same commit (`pnpm dev`) and join; on Android install an APK built from this commit
+   (`NO_INSTALL=1 apps/mobile/scripts/android-dev.sh --prebuild --release`) and join. Record in `design/hardware/`.
+   If it still fails, collect `ipconfig /all`, `Get-NetFirewallRule -DisplayName "*Electron*","*CLAN*"`, the Mac's
+   `CLAN_DEBUG_DISCOVERY=1 pnpm dev` output (`browse up {url, alt}`), and `curl http://<windows-ip>:<bootstrap-port>/api/info`
+   from the Mac.
+2. **P0-2 chat:** desktop `apps/desktop/src/renderer/world/chat/{ChatPanel.tsx,useChat.ts}` (has `loadEarlier`,
+   unread, cursors); mobile `apps/mobile/src/Chat.tsx` (loads the latest 50 only). Scroll container + "Jump to latest",
+   keep position on prepend, auto-scroll only near the bottom; mobile inverted `FlatList` + `KeyboardAvoidingView`.
+   Reuse the existing messages API cursor (check `packages/server/src/chat.ts`). Tests: `apps/desktop/e2e/chat.test.ts`.
+3. **P0-3 classroom file-sharing policy:** server-side in `packages/server/src/{classroom.ts,shares.ts,chat.ts}`
+   (capabilities via `MESSAGE_CAPABILITY` in `server.ts`); policy `everyone | approval | teacher` for `CLASSROOM` only
+   (Study Group/Friends/Project keep current behaviour); a pending-share queue the host approves; tests in
+   `packages/server/test/` (unauthorized and revoked senders).
+4. **P0-4 preview/open/save:** desktop "Open" is already restricted to safe types (docs/SECURITY.md); add Save-as for
+   any type; mobile save via SAF (`expo-file-system` StorageAccessFramework) / share sheet, images inline, PDF via OS
+   viewer. Never execute content; keep SHA-256 checks.
+5. **P0-5 lifecycle:** archive (local flag), leave (member), delete (owner, confirmed), remove-local-copy with
+   last-copy warnings, in `packages/clan` + desktop/mobile UI.
+6. P1 (notifications, Raise Hand, persistent mobile CLANs with standby hosts and fencing epochs, Android hosting
+   service, iOS) — **NOT STARTED**; write a design doc first (no owner-key transfer, no split-brain writes).
+7. 14.2 installers into `Installable Files/` (docs/BUILDING.md › Beta release builds) only after the software gates
+   pass. Never commit binaries.
+
+## 7. Commands
+`pnpm install --frozen-lockfile` · `pnpm typecheck` · `pnpm test` · `pnpm test:e2e` ·
+`npx vitest run packages/server/test/multi-address.test.ts` · Android: `apps/mobile/scripts/android-dev.sh
+--prebuild --release` (signing password from the keychain item "CLAN Android upload key"; `NO_INSTALL=1` skips adb).
+Run long suites on macOS with normal QoS (e.g. `launchctl submit`); background shells time out.
+
+## 8. Pushing
+Not pushed. To publish: review `git log -p clan-astra-phase12..phase-14.2` (no keys, no binaries), then
+`git push https://github.com/ashar-codes/CLAN.git refs/heads/phase-14.2:refs/heads/phase-14.2` with the ashar-codes
+credential. Never force-push; never move `clan-beta-v0.1.0-rc1`.
+
+## 9–11. Platform, hardware, signing
+* Android: RC1 APK (versionCode 2) runs on the emulator; no native hosting yet. iOS: not built (no Xcode).
+* Hardware: a Mac test session is still set up — real RC1 app with a disposable profile in `~/CLAN-hardware-test/`
+  (launchd job `clan.mac-student`; stop with `launchctl remove clan.mac-student`). It never joined a Windows host (no
+  handoff arrived). Windows / physical Android / classroom Wi-Fi: NOT TESTED.
+* Signing: Android upload key `~/.clan-signing/clan-beta-upload.p12`, password in the login keychain; **offline backup
+  not done** (docs/ANDROID_SIGNING_BACKUP.md). macOS ad-hoc; Windows unsigned. RC1 installers in
+  `release/beta-v0.1.0-rc1/` (local, git-ignored) — don't modify.
+
+## 12. Known risks
+P0-1 is a code-level diagnosis; Windows Firewall or a *Public* network profile could still block. Full suites not
+re-run on 14.2.
+
+## 13. Evidence
+`design/beta/v0.1.0/`, `design/beta/v0.1.0-rc1/VERIFICATION.md`, `docs/RC1_HARDWARE_GATES.md`,
+`docs/REAL_DEVICE_TESTING.md`, `docs/WINDOWS_SETUP.md`, `docs/BETA_READINESS.md`.
+
+## 14. Don't repeat
+Don't re-implement multi-address discovery or the Windows adapter filter; don't launch desktop builds without a
+disposable `CLASSROOM_USER_DATA`; never delete or replace the keychain items "Classroom LAN Safe Storage",
+"CLAN Safe Storage" or "CLAN Android upload key".
+
+## 15. Checklist
+- [ ] Push `phase-14.2` (after review) - [ ] Windows retest P0-1 - [ ] Full `pnpm test` + `pnpm test:e2e`
+- [ ] P0-2 chat - [ ] P0-3 share policy - [ ] P0-4 preview/save - [ ] P0-5 lifecycle
+- [ ] Android key offline backup - [ ] P1 design doc before code - [ ] 14.2 installers + hardware pack
