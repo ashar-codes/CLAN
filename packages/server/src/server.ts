@@ -524,7 +524,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   classroom.on('timeline', () => toTeachers(() => ({ t: 'timeline', events: classroom.timeline() })));
   classroom.on('state', () => {
     const info = classroom.info();
-    for (const [ws, p] of sockets) send(ws, { t: 'class.state', classroom: info, capabilities: [...classroom.capabilities(p)] });
+    for (const [ws, p] of sockets) send(ws, { t: 'class.state', classroom: { ...info, ...(sessionAuthority ? { authority: sessionAuthority() } : {}) }, capabilities: [...classroom.capabilities(p)] });
     if (info.ended) { void presentations.end().then(() => media?.close()); for (const ws of sockets.keys()) ws.close(WS_CLOSE.ended, 'class ended'); }
   });
   // Presentation control state to everyone; pending requests only to those who may decide on them.

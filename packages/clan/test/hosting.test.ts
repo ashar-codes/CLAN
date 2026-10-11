@@ -339,6 +339,7 @@ describe('persistent hosting authority', () => {
         ({ clanId: w.clan.id, sessionId, teacherPublicKey, authority: { chain, proof: by.sign(hostSessionStatement({ clanId: w.clan.id, epoch: chain.at(-1)!.epoch, sessionId, teacherPublicKey })) } });
       const genesis = w.phone.h.chainOf(w.clan.id)!;
       expect(await w.third.h.verifySession(session(genesis, w.ownerKey))).toBe(0);
+      await expect(w.third.h.verifySession({ ...session(genesis, w.ownerKey), authority: undefined })).rejects.toThrow('omitted');
       await expect(w.third.h.verifySession(session(genesis, w.thirdKey))).rejects.toThrow('not run by');
       const ok = session(genesis, w.ownerKey);
       await expect(w.third.h.verifySession({ ...ok, teacherPublicKey: key().publicKey })).rejects.toThrow('not run by'); // proof for another session key

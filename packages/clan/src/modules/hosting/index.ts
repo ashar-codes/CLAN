@@ -196,6 +196,10 @@ export class HostAuthority {
    * OPAQUE-bound signing key was vouched for by the chain's current host. Returns the session's epoch.
    */
   async verifySession(o: { clanId: string; sessionId: string; teacherPublicKey: string; authority: unknown; localKey?: string }) {
+    if (o.authority === undefined) {
+      if (this.anchorOf(o.clanId) || this.chainOf(o.clanId)) throw new HostingError('not_authoritative', 'This CLAN requires hosting authority; the session omitted it.');
+      return null; // Legacy CLANs have no persistent authority to verify.
+    }
     const p = HostSessionAuthority.safeParse(o.authority);
     if (!p.success || p.data.chain[0]!.clanId !== o.clanId) throw new HostingError('invalid', 'The session sent malformed hosting authority.');
     if (!this.anchorOf(o.clanId)) this.anchorFromPairing(o.clanId, p.data.chain[0]);
