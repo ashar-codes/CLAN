@@ -40,7 +40,7 @@ async function device(name: string) {
   addr = `tcp:127.0.0.1:${l.port}`;
   memNet.set(`mem:${name}`, (link) => void cm.accept(link));
   stops.push(() => cm.stop(), () => l.close());
-  return { ...d, p: d.app.people, cm, key: signer.publicKey, addr: () => addr, setAddr: (a: string) => { addr = a; }, live, listener: l };
+  return { ...d, p: d.app.people, cm, key: signer.publicKey, signer, addr: () => addr, setAddr: (a: string) => { addr = a; }, live, listener: l };
 }
 
 describe('people over clan-link/1 (no TLS server, no router needed)', () => {
@@ -148,5 +148,37 @@ describe('people over clan-link/1 (no TLS server, no router needed)', () => {
     expect(() => b.p.storeAvatar(a.key, 'image/png', fake)).toThrow(/does not match/);
     // someone who may not see the profile gets no picture
     expect(await a.p.avatarFor(m.key)).toBeNull();
+  }, 30_000);
+
+  it('a hostile peer on an authenticated link: malformed, oversized and cross-conversation requests change nothing', async () => {
+    const a = await device('HostA'), c = await device('HostC'), m = await device('HostM');
+    // Aisha (a) has a chat with c and offers c a file; m is a stranger she lets in with her code
+    await c.cm.connect(a.addr(), { expectKey: a.key, invite: a.p.inviteToken() });
+    const conv = c.p.inviteChat(a.key); await c.cm.tick(); await wait(() => a.p.conversations().length === 1);
+    a.p.acceptChat(conv); await a.cm.tick(); await wait(() => c.p.conversation(conv)?.state === 'active');
+    const src = join(a.storageDir, 'secret.pdf'); writeFileSync(src, randomBytes(50_000));
+    const t = await a.p.offerFile(conv, src, { name: 'secret.pdf', mime: 'application/pdf' }); await a.cm.tick();
+    await wait(() => c.p.transfer(t.id)?.state === 'offered');
+    c.p.acceptFile(t.id); // accepted by c — never by m
+    // m connects with the invite and speaks raw protocol messages on the authenticated link
+    const { linkInitiate } = await import('@classroom/protocol');
+    const raw = await linkInitiate(await tcpTransport().dial(a.addr()), { signer: m.signer, expectKey: a.key, invite: a.p.inviteToken() });
+    const replies: Record<string, unknown>[] = [];
+    raw.onMessage((x) => { try { replies.push(JSON.parse(new TextDecoder().decode(x))); } catch { /* binary */ } });
+    const send = (o: unknown) => raw.send(new TextEncoder().encode(typeof o === 'string' ? o : JSON.stringify(o)));
+    send('not json'); send('{"t":42}'); send({ t: 'nonsense', id: '1' });
+    send({ t: 'get', id: '2', transferId: t.id, offset: 0, length: 1000 }); // someone else's accepted transfer
+    send({ t: 'get', id: '3', transferId: t.id, offset: -5, length: 1e12 });
+    send({ t: 'env', id: '4', envelopes: [{ not: 'an envelope' }, ...Array.from({ length: 300 }, () => ({}))] });
+    send({ t: 'hi', profile: { profile: { key: c.key, name: 'Forged C' }, sig: 'x' }, addrs: ['tcp:1.2.3.4:1', 'ftp://x'] });
+    await wait(() => replies.filter((r) => r.t === 'err' || r.t === 'res').length >= 3, 5000);
+    expect(replies.find((r) => r.id === '2')).toMatchObject({ t: 'err', code: 'not_found' });
+    expect(replies.find((r) => r.id === '3')).toMatchObject({ t: 'err', code: 'not_found' });
+    const res = replies.find((r) => r.id === '4') as { results: { ok: boolean }[] };
+    expect(res.results).toHaveLength(100); // capped
+    expect(res.results.every((x) => !x.ok)).toBe(true);
+    expect(a.p.contact(c.key)?.name).toBe('HostC'); // a forged profile for someone else is ignored
+    expect(raw.closed).toBe(false); // nonsense is ignored, not fatal — but nothing was applied
+    raw.close();
   }, 30_000);
 });
