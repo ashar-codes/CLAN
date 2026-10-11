@@ -118,6 +118,12 @@ export class HostAuthority {
   /** The owner is one of this account's own linked devices (mobile-created CLAN delegating to a linked desktop). */
   anchorLinkedOwner(clanId: string, ownerKey: string) {
     if (!this.linkedDeviceKey(ownerKey)) throw new HostingError('forbidden', 'The owner key is not a linked device of this account.');
+    const a = this.anchorOf(clanId);
+    // Same owner already learned in its authenticated session, now confirmed as one of our own devices.
+    if (a?.source === 'pairing' && a.ownerKey === ownerKey) { this.db.prepare("UPDATE hosting_anchors SET source = 'linked-device' WHERE clan_id = ?").run(clanId); return; }
+    // A CLAN this device already takes part in without an anchor (a legacy CLAN, possibly its own) can never be claimed
+    // by another device: a hand-over would replace its data.
+    if (!a && this.clans.members(clanId).length) throw new HostingError('forbidden', 'This CLAN already exists on this device and cannot be taken over.');
     this.anchor(clanId, ownerKey, 'linked-device');
   }
 
@@ -332,7 +338,8 @@ export class HostAuthority {
         const clanId = g.clanId;
         tx(this.db, () => {
           this.clans.ensureKnown({ id: clanId, type: b.clan.type as never, name: b.clan.name, expiresAt: b.clan.expiresAt, createdBy: this.me() });
-          if (!this.anchorOf(clanId)) this.anchorLinkedOwner(clanId, g.ownerKey as string);
+          const anchored = this.anchorOf(clanId);
+          if (!anchored || anchored.source === 'pairing') this.anchorLinkedOwner(clanId, g.ownerKey as string);
         });
         this.beginStaging(b.chain, b.delegation, b.header, o.localKey);
         pushing.set(clanId, callerKey);

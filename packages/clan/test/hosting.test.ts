@@ -306,6 +306,17 @@ describe('persistent hosting authority', () => {
       await expect(w.third.h.accept([fake], w.thirdKey.publicKey)).rejects.toThrow('another owner');
       expect(() => w.third.h.anchorFromPairing(w.clan.id, fake)).toThrow('different owner');
       expect(() => w.third.h.anchorLinkedOwner(w.clan.id, w.ownerKey.publicKey)).toThrow('not a linked device');
+      // a linked device cannot claim a CLAN this device already has without an anchor (e.g. its own legacy CLAN)
+      const legacy = w.desk.app.clans.create({ type: 'FRIENDS', name: 'Mine', createdBy: w.desk.app.me });
+      expect(() => w.desk.h.anchorLinkedOwner(legacy.id, w.ownerKey.publicKey)).toThrow('cannot be taken over');
+      // the same owner learned at pairing may be confirmed as a linked device (the owner's desktop that had joined)
+      const both = device({ now: () => T0, owner: () => w.ownerKey.publicKey });
+      try {
+        both.app.clans.recordJoined({ id: w.clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: both.app.me });
+        both.h.anchorFromPairing(w.clan.id, w.phone.h.chainOf(w.clan.id)![0]);
+        both.h.anchorLinkedOwner(w.clan.id, w.ownerKey.publicKey);
+        expect(both.h.anchorOf(w.clan.id)).toEqual({ ownerKey: w.ownerKey.publicKey, source: 'linked-device' });
+      } finally { both.db.close(); }
       const lone = device({ now: () => T0, owner: () => null });
       try {
         lone.app.clans.recordJoined({ id: w.clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: lone.app.me });
