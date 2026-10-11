@@ -25,6 +25,8 @@ const clanId = clan.clans.create({ type: values.type as 'STUDY_GROUP', name: 'Ph
 const host = values.host ?? candidateInterfaces().find((i) => i.private)?.address ?? '127.0.0.1';
 const s = await startClassroomServer({ title: 'Phone test group', host, db, storageDir: join(dir, 'storage'), advertise: true, clan: { type: values.type as 'STUDY_GROUP', id: clanId }, hostName: 'Host Hira', chat: clan.chat, whiteboard: clan.whiteboard,
   media: { binary: join(import.meta.dirname, '../../native/livekit/bin', `${process.platform}-${process.arch}`, 'livekit-server'), workDir: join(dir, 'media') } });
+// Match the desktop host's own local-reader mapping so /state observes persisted messages, not an empty projection.
+clan.chat.setMe(s.chat!.clanKey, s.chat!.hostHandle);
 setInterval(() => { for (const m of s.classroom.roster()) if (m.status === 'pending') s.classroom.setStatus(m.id, 'approved'); }, 300).unref();
 
 // the host's own live connection (as the desktop host app has)

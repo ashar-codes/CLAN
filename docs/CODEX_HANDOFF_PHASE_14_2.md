@@ -100,3 +100,5 @@ disposable `CLASSROOM_USER_DATA`; never delete or replace the keychain items "Cl
 - [ ] Push `phase-14.2` (after review) - [ ] Windows retest P0-1 - [ ] Full `pnpm test` + `pnpm test:e2e`
 - [ ] P0-2 chat - [ ] P0-3 share policy - [ ] P0-4 preview/save - [ ] P0-5 lifecycle
 - [ ] Android key offline backup - [ ] P1 design doc before code - [ ] 14.2 installers + hardware pack
+
+Native chat focused checks now passed: bidirectional/persisted messages, older pages, reader position, Jump to latest. Harness fixes cover asynchronous notification prompts and Escape closing RN Modal; `tools/sim/class-peer.ts` now initializes the host local-reader mapping. Full updated-APK suites remain pending.

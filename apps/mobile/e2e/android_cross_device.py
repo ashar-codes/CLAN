@@ -42,6 +42,22 @@ def tap(label):
         if 260 < y < 2100: break
         adb('shell', 'input', 'swipe', '24', '1100' if y <= 260 else '1500', '24', '1500' if y <= 260 else '1100', '300'); time.sleep(0.4); x, y = find(label)
     adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.7)
+def open_chat():
+    # Approval mounts chat asynchronously and can show an OS notification prompt after joining.
+    # Observe each actual window instead of tapping stale room coordinates through that prompt.
+    for _ in range(14):
+        current = nodes()
+        if any(n.get('text') == 'Close chat' for n in current): return
+        button = next((n for n in current if n.get('resource-id') == 'com.android.permissioncontroller:id/permission_allow_button'), None)
+        if button is None:
+            button = next((n for n in current if n.get('content-desc') == 'Open chat' and n.get('clickable') == 'true'), None)
+        if button is not None:
+            x, y = center(button); adb('shell', 'input', 'tap', str(x), str(y))
+        else:
+            adb('shell', 'input', 'swipe', '24', '1700', '24', '900', '300')
+        time.sleep(0.7)
+    raise AssertionError('chat modal did not open')
+
 def type_(label, text, dismiss=True):
     x, y = find(label, edit=True); adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.3)
     adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END')
@@ -125,17 +141,14 @@ def main():
             if i in (25, 50): time.sleep(11)
             http(47499, '/chat', {'body': f'History {i:02d}'})
         tap('Home'); tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')
-        # Dismiss only an actual OS permission prompt; searching absent buttons must not scroll the room.
-        for n in nodes():
-            if n.get('resource-id') == 'com.android.permissioncontroller:id/permission_allow_button':
-                x, y = center(n); adb('shell', 'input', 'tap', str(x), str(y)); break
         until(lambda: any(m['status'] == 'approved' and m['connected'] for m in http(47499, '/state')['members']), 'member connected')
         ok('joined over OPAQUE + pinned TLS')
-        tap('Open chat'); find('Close chat', scroll=False)
+        open_chat()
         http(47499, '/chat', {'body': 'Welcome from the host'}); find('Welcome from the host'); ok('host message shown on the phone')
-        type_('Message', 'Hello from the phone'); tap('Send'); find('Hello from the phone')
+        type_('Message', 'Hello from the phone', dismiss=False); tap('Send'); find('Hello from the phone')
         until(lambda: any(m['body'] == 'Hello from the phone' for m in http(47499, '/state')['messages']), 'phone chat persisted by host')
         ok('phone message accepted by the host')
+        adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); find('Close chat', scroll=False)  # hide IME, keep modal open
         def earlier(label):
             for _ in range(16):
                 try:

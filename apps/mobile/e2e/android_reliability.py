@@ -9,7 +9,7 @@
 Usage: python3 apps/mobile/e2e/android_reliability.py"""
 import os, signal, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
-from android_cross_device import PKG, HOST_IP, adb, find, http, ok, tap, type_, until
+from android_cross_device import PKG, HOST_IP, adb, find, http, ok, tap, type_, until, open_chat
 
 DATA = f'/data/data/{PKG}/files/SQLite'
 def start(): adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(3)
@@ -47,7 +47,7 @@ def main():
         tap('Home'); tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')
         connected = lambda: any(m['status'] == 'approved' and m['connected'] for m in http(47499, '/state')['members'])
         until(connected, 'member connected', 60); ok('joined')
-        tap('Open chat')
+        open_chat()
         http(47499, '/chat', {'body': 'Before the freeze'}); find('Before the freeze'); ok('messages flow')
         h.send_signal(signal.SIGSTOP); time.sleep(20); h.send_signal(signal.SIGCONT)
         until(connected, 'phone connected after the host woke', 90)

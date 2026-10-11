@@ -84,3 +84,15 @@ PASS: typecheck; **70/70** targeted sharing/chat/security/data-safety unit tests
 checksum failure, duplicate approval, policy change and removal during copying, plus live controls/table visibility.
 Logs `/tmp/clan-142-sharing-typecheck2.log`, `/tmp/clan-142-sharing-unit2.log`, `/tmp/clan-142-sharing-e2e1.log`.
 Native UI changes still require an updated APK and emulator verification. Physical devices remain NOT TESTED.
+
+### Native chat observation fixes
+
+Two full emulator runs failed at the chat interaction, not at secure joining or personal sync. Evidence identified
+an asynchronous Android notification prompt intercepting the tap and the harness's Escape key closing the new native
+modal (ReactModalHostView explicitly treats KEYCODE_ESCAPE as a modal-close request). The harness now observes the
+actual prompt/window, verifies Close chat, sends with the keyboard open and uses Android Back to hide the IME.
+The simulated host now records its own local chat-reader handle, matching desktop setup; otherwise `/state` falsely
+reported an empty local projection even for persisted messages. Host persistence is now an explicit assertion.
+A focused emulator run has passed both-way chat, host persistence, older-page access, retained reading position and
+Jump to latest (`/tmp/clan-142-chat-native-focused3.log`). Whiteboard/file checks and an updated-APK full rerun are still
+pending; no timeout increases and no physical-device claims.
