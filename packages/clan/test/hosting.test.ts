@@ -6,7 +6,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writ
 import { join } from 'node:path';
 import { newEd25519, nodeSigner } from '@classroom/client/node';
 import { serverCheckpointSection } from '@classroom/server';
-import { authorityHash, checkpointHash, sectionBytes, sha256Hex, signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointHeader, type CheckpointProvider, type HostDelegation } from '@classroom/protocol';
+import { authorityHash, checkpointHash, hostSessionStatement, sectionBytes, sha256Hex, signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointHeader, type CheckpointProvider, type HostDelegation } from '@classroom/protocol';
 import { HostAuthority } from '../src/index.ts';
 import { file, setup, user } from './helpers.ts';
 
@@ -322,6 +322,32 @@ describe('persistent hosting authority', () => {
         lone.app.clans.recordJoined({ id: w.clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: lone.app.me });
         await expect(lone.h.accept(w.phone.h.chainOf(w.clan.id), w.thirdKey.publicKey)).rejects.toThrow('not yet trusted');
       } finally { lone.db.close(); }
+    } finally { w.close(); }
+  });
+
+  it('members verify that a session is run by the current authorized host; stale and forged sessions are refused', async () => {
+    const w = world();
+    try {
+      const session = (chain: AuthorityRecord[], by: Signer, sessionId = randomUUID(), teacherPublicKey = key().publicKey) =>
+        ({ clanId: w.clan.id, sessionId, teacherPublicKey, authority: { chain, proof: by.sign(hostSessionStatement({ clanId: w.clan.id, epoch: chain.at(-1)!.epoch, sessionId, teacherPublicKey })) } });
+      const genesis = w.phone.h.chainOf(w.clan.id)!;
+      expect(await w.third.h.verifySession(session(genesis, w.ownerKey))).toBe(0);
+      await expect(w.third.h.verifySession(session(genesis, w.thirdKey))).rejects.toThrow('not run by');
+      const ok = session(genesis, w.ownerKey);
+      await expect(w.third.h.verifySession({ ...ok, teacherPublicKey: key().publicKey })).rejects.toThrow('not run by'); // proof for another session key
+      const h = await handoff(w);
+      expect(await w.third.h.verifySession(session(h.chain, w.deskKey))).toBe(1); // the new host's session
+      // the old host (it relinquished) cannot present its epoch to members who know the newer one
+      await expect(w.third.h.verifySession(session(genesis, w.ownerKey))).rejects.toThrow('older');
+      // a member device that never paired before anchors from this first authenticated session; a different owner is refused
+      const fresh = device({ now: () => T0, owner: () => null });
+      try {
+        fresh.app.clans.recordJoined({ id: w.clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'desk', hostName: 'Desk', me: fresh.app.me });
+        expect(await fresh.h.verifySession(session(h.chain, w.deskKey))).toBe(1);
+        const attacker = key();
+        const fake = signHostStatement(attacker, { type: 'clan-host-authority' as const, v: 1 as const, clanId: w.clan.id, ownerKey: attacker.publicKey, epoch: 0, hostKey: attacker.publicKey, prevHash: null, checkpointHash: null, delegation: null, ack: null, issuedAt: 1 });
+        await expect(fresh.h.verifySession(session([fake], attacker))).rejects.toThrow();
+      } finally { fresh.db.close(); }
     } finally { w.close(); }
   });
 });

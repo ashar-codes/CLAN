@@ -1,7 +1,7 @@
 // Persistent hosting: the host server fences every authoritative write on the device's current hosting epoch.
 import { afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { JOIN_POLICY, signHostStatement, type AuthorityRecord } from '@classroom/protocol';
+import { JOIN_POLICY, sessionAuthorityProblem, signHostStatement, type AuthorityRecord } from '@classroom/protocol';
 import { startClassroomServer, type RunningServer, type ServerOptions } from '../src/index.ts';
 import { device, secureJoin, socket, tmp, trFor, trustServer } from './helpers.ts';
 
@@ -12,7 +12,7 @@ function authority(clanId: string) {
   const owner = device();
   const genesis: AuthorityRecord = signHostStatement(owner, { type: 'clan-host-authority' as const, v: 1 as const, clanId, ownerKey: owner.publicKey, epoch: 0, hostKey: owner.publicKey, prevHash: null, checkpointHash: null, delegation: null, ack: null, issuedAt: 1 });
   const state = { writable: true };
-  return { state, genesis, assertWritable: () => { if (!state.writable) throw new Error('Hosting is paused for a handoff.'); } };
+  return { state, genesis, owner, chain: () => [genesis], sign: (b: Uint8Array) => owner.sign(b), assertWritable: () => { if (!state.writable) throw new Error('Hosting is paused for a handoff.'); } };
 }
 async function host(o: Partial<ServerOptions> & { clanId: string }) {
   const s = await startClassroomServer({ title: 'Fenced', host: '127.0.0.1', storageDir: tmp('fence-'), clan: { type: 'STUDY_GROUP', id: o.clanId, expiresAt: null }, ...o });
@@ -35,7 +35,10 @@ describe('host-epoch fencing', () => {
     expect(j.status).toBe('approved');
     const w = socket(s.url, j.token); await w.opened;
     const hello = await w.next('hello');
-    expect(hello.classroom.authority).toEqual(a.genesis); // inside the authenticated session only
+    expect(hello.classroom.authority?.chain).toEqual([a.genesis]); // inside the authenticated session only
+    // the host device's key binds its epoch to this session's OPAQUE-bound signing key
+    expect(sessionAuthorityProblem(hello.classroom.authority!, a.genesis, { sessionId: s.classroom.id, teacherPublicKey: j.binding.teacherPublicKey })).toBeNull();
+    expect(sessionAuthorityProblem(hello.classroom.authority!, a.genesis, { sessionId: randomUUID(), teacherPublicKey: j.binding.teacherPublicKey })).toMatch(/not run by/);
     const h = socket(s.url, s.classroom.teacherToken); await h.opened; await h.next('hello');
 
     a.state.writable = false; // e.g. paused for a hand-over, or the delegation was revoked

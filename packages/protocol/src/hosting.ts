@@ -5,6 +5,7 @@
 // relinquished its epoch). Wall-clock expiry can only remove rights, never grant them.
 import { z } from 'zod';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { b64u, canonicalBytes, ed25519Verify } from './trust.ts';
 
 const Key = z.string().regex(/^[A-Za-z0-9_-]{43}$/); // raw Ed25519 public key, base64url
@@ -132,3 +133,17 @@ export const checkpointBlobs = (h: CheckpointHeader) => {
   for (const b of [...Object.values(h.sections), ...h.files]) m.set(b.sha256, b.size);
   return [...m].map(([sha256, size]) => ({ sha256, size }));
 };
+
+// ---- the authorized host runs this session ----
+/** Signed by the epoch's host device key: binds the hosting authority to one authenticated session (its OPAQUE-bound
+ *  session signing key), so members detect a session run by a stale, relinquished or forked host. */
+export const hostSessionStatement = (o: { clanId: string; epoch: number; sessionId: string; teacherPublicKey: string }) =>
+  canonicalBytes({ type: 'clan-host-session', v: 1, clanId: o.clanId, epoch: o.epoch, sessionId: o.sessionId, teacherPublicKey: o.teacherPublicKey });
+export const HostSessionAuthority = z.object({ chain: AuthorityChain, proof: Sig }).strict();
+export type HostSessionAuthority = z.infer<typeof HostSessionAuthority>;
+export function sessionAuthorityProblem(a: HostSessionAuthority, head: AuthorityRecord, o: { sessionId: string; teacherPublicKey: string }): string | null {
+  try {
+    const ok = ed25519.verify(b64u.decode(a.proof), hostSessionStatement({ clanId: head.clanId, epoch: head.epoch, sessionId: o.sessionId, teacherPublicKey: o.teacherPublicKey }), b64u.decode(head.hostKey));
+    return ok ? null : 'This session is not run by the CLAN\'s authorized host.';
+  } catch { return 'This session is not run by the CLAN\'s authorized host.'; }
+}

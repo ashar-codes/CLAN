@@ -6,7 +6,7 @@
 import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  authorityHash, b64u, CheckpointHeader, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
+  authorityHash, b64u, CheckpointHeader, HostSessionAuthority, sessionAuthorityProblem, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
   signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointProvider, type HostSigner,
 } from '@classroom/protocol';
 import { z } from 'zod';
@@ -107,6 +107,21 @@ export class HostAuthority {
   anchorOf(clanId: string) {
     const a = this.db.prepare('SELECT owner_key k, source s FROM hosting_anchors WHERE clan_id = ?').get(clanId) as { k: string; s: string } | undefined;
     return a ? { ownerKey: a.k, source: a.s } : null;
+  }
+  /**
+   * Member side, on `hello` inside the authenticated session: anchors the owner on first contact, learns the session's
+   * authority chain (a newer epoch known here, a fork or another owner are refused) and checks that the session's
+   * OPAQUE-bound signing key was vouched for by the chain's current host. Returns the session's epoch.
+   */
+  async verifySession(o: { clanId: string; sessionId: string; teacherPublicKey: string; authority: unknown; localKey?: string }) {
+    const p = HostSessionAuthority.safeParse(o.authority);
+    if (!p.success || p.data.chain[0]!.clanId !== o.clanId) throw new HostingError('invalid', 'The session sent malformed hosting authority.');
+    if (!this.anchorOf(o.clanId)) this.anchorFromPairing(o.clanId, p.data.chain[0]);
+    await this.accept(p.data.chain, o.localKey ?? '');
+    const head = p.data.chain[p.data.chain.length - 1]!;
+    const problem = sessionAuthorityProblem(p.data, head, o);
+    if (problem) throw new HostingError('not_authoritative', problem);
+    return head.epoch;
   }
   /** Member side: called only with the genesis received inside the authenticated (OPAQUE + pinned TLS, host-approved)
    *  session of this exact CLAN. First binding wins; a later different owner is refused, never replaced. */

@@ -341,3 +341,14 @@ revocations. Portable `pushClan` (`@classroom/client`) resumes from reported off
 relinquish, only re-delivers the signed transition. Desktop registers the sink. Phone UI/native wiring NOT STARTED.
 PASS: real-HTTPS push test (non-host refused, suspended upload resumes at offset 1 MB → only remaining chunks resent,
 lost activation answer re-delivered, revocation stops writes, forged revocation refused).
+
+### P1-7 checkpoint F: members verify the session's host (cloud)
+
+`hello.classroom.authority` is now `{ chain, proof }`: the epoch host's device key signs
+`{clan, epoch, sessionId, session teacherPublicKey}` (the OPAQUE-bound session key). `HostAuthority.verifySession`
+(desktop `clan:joined`, phone `recordJoined`) anchors the owner on first authenticated contact, learns the chain
+(another owner, a fork or an epoch older than one already known are refused) and verifies the proof. A relinquished
+or forked host therefore cannot present itself as the CLAN's host to members who know better. Also: a linked device can
+no longer anchor itself as owner of a CLAN this device already takes part in without an anchor (legacy CLANs).
+Member-facing warning UI for a refused session is NOT STARTED (desktop rejects the IPC; phone ignores). PASS: typecheck;
+hosting units 11 + session verification 1, fence 3 (Linux).

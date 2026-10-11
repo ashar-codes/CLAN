@@ -10,7 +10,7 @@ import { generateKeyPairSync, sign as edSign, createPublicKey, randomUUID, type 
 import * as opaque from '@serenity-kit/opaque';
 import {
   b64u, BleRequest, ClientMessage, DIRECT_PACKAGE_TTL_MS, MESSAGE_CAPABILITY, type BleResponse, type DirectPackage, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
-  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, type AuthorityRecord, type ServerMessage, type ResourceView,
+  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, hostSessionStatement, type AuthorityRecord, type ServerMessage, type ResourceView,
 } from '@classroom/protocol';
 import { ChatRelay, type ChatStore } from './chat.ts';
 import { WhiteboardRelay, type WhiteboardStore } from './whiteboard.ts';
@@ -63,11 +63,11 @@ export type ServerOptions = {
   limits?: Partial<Limits>;
   /**
    * Persistent hosting (docs/PHASE_14_2_HOSTING_DESIGN.md): `assertWritable` throws unless this device still holds the
-   * CLAN's current hosting epoch; it guards the session start and every authoritative write. `genesis` (the owner-signed
-   * epoch 0) is sent to members inside the authenticated session so they can anchor the owner key. Omitted → a legacy
-   * single-host CLAN, unchanged.
+   * CLAN's current hosting epoch; it guards the session start and every authoritative write. Members receive the chain
+   * and `sign` (the host device key) over this session's identity inside the authenticated session, to anchor the owner
+   * and verify the session's host. Omitted → a legacy single-host CLAN, unchanged.
    */
-  authority?: { assertWritable(): void; genesis: AuthorityRecord };
+  authority?: { assertWritable(): void; chain(): AuthorityRecord[]; sign(bytes: Uint8Array): string };
 };
 /** Client messages that change nothing durable (ephemeral relays and reads); everything else is fenced. */
 const UNFENCED = new Set<ClientMessage['t']>(['wb.sync', 'wb.cursor', 'chat.typing']);
@@ -126,6 +126,10 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const identity = opts.identity ?? (await ephemeralIdentity());
   const teacherPublicKey = b64u.encode(new Uint8Array(createPublicKey(identity.signingKey).export({ type: 'spki', format: 'der' }).subarray(-32)));
   const signer = { publicKey: teacherPublicKey, sign: (bytes: Uint8Array) => b64u.encode(new Uint8Array(edSign(null, bytes, identity.signingKey))) };
+  const sessionAuthority = opts.authority && (() => {
+    const chain = opts.authority!.chain(), head = chain[chain.length - 1]!;
+    return { chain, proof: opts.authority!.sign(hostSessionStatement({ clanId: head.clanId, epoch: head.epoch, sessionId: classroom.id, teacherPublicKey })) };
+  });
   const tls = await createClassroomTls(classroom.id);
   db.prepare('UPDATE sessions SET teacher_key = ?, tls_spki = ?, connectivity = ? WHERE id = ?').run(teacherPublicKey, tls.spkiSha256, opts.direct ? 'direct' : 'lan', classroom.id);
   let httpsPort = 0;
@@ -569,7 +573,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
           if (!principal || classroom.info().ended) return ws.close(WS_CLOSE.authFailed, 'invalid or expired session');
           sockets.set(ws, principal);
           const memberId = principal.role === 'student' ? principal.memberId : null;
-          send(ws, { t: 'hello', role: principal.role, memberId, status: memberId ? classroom.status(memberId) : null, classroom: { ...classroom.info(), ...(opts.authority ? { authority: opts.authority.genesis } : {}) }, serverTime: Date.now(), capabilities: [...classroom.capabilities(principal)] });
+          send(ws, { t: 'hello', role: principal.role, memberId, status: memberId ? classroom.status(memberId) : null, classroom: { ...classroom.info(), ...(sessionAuthority ? { authority: sessionAuthority() } : {}) }, serverTime: Date.now(), capabilities: [...classroom.capabilities(principal)] });
           if (principal.role === 'student' && classroom.status(principal.memberId) === 'approved' && classroom.can(principal, 'VIEW_MEMBERS')) send(ws, memberRoster(principal));
           if (principal.role === 'teacher') {
             send(ws, hostRoster());

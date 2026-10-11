@@ -249,9 +249,9 @@ function registerIpc() {
   });
   /** Persistent-hosting CLANs fence every host write on this device's current epoch; legacy CLANs return undefined. */
   const hostingAuthority = (clanId: string) => {
-    const hostKey = nodeSigner(keystore.get('sync-device-ed25519', () => newEd25519().privatePkcs8)).publicKey; // same device key as personal sync
-    const chain = clan.hosting.chainOf(clanId);
-    return chain ? { assertWritable: () => void clan.hosting.assertWritable(clanId, hostKey), genesis: chain[0]! } : undefined;
+    const signer = nodeSigner(keystore.get('sync-device-ed25519', () => newEd25519().privatePkcs8)); // same device key as personal sync
+    if (!clan.hosting.chainOf(clanId)) return undefined;
+    return { assertWritable: () => void clan.hosting.assertWritable(clanId, signer.publicKey), chain: () => clan.hosting.chainOf(clanId)!, sign: (b: Uint8Array) => signer.sign(b) };
   };
   ipcMain.handle('teacher:stop', async () => {
     const ended = server?.classroom.clan;
