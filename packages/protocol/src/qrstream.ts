@@ -65,6 +65,13 @@ export type QrxMeta = {
   from?: { key: string; sig: string }; // optional CLAN identity of the sender
 };
 type Frame = { kind: 'meta'; id: string; meta: QrxMeta } | { kind: 'data'; id: string; index: number; k: number; bs: number; len: number; payload: Uint8Array };
+function validInfo(value: unknown): value is NonNullable<QrxMeta['info']> {
+  if (!value || typeof value !== 'object') return false;
+  const i = value as Record<string, unknown>;
+  return typeof i.name === 'string' && i.name.length > 0 && i.name.length <= 120 && !/[\u0000-\u001f\u007f/\\]/.test(i.name)
+    && typeof i.mime === 'string' && i.mime.length <= 100 && Number.isInteger(i.size) && (i.size as number) >= 0 && (i.size as number) <= QRX_MAX_BYTES
+    && typeof i.sha256 === 'string' && /^[0-9a-f]{64}$/.test(i.sha256);
+}
 
 const idHex = (b: Uint8Array) => bytesToHex(b);
 function pack(type: number, id: Uint8Array, body: Uint8Array) {
@@ -88,10 +95,11 @@ export function parseFrame(text: string): Frame | null {
       if (m.v !== 1 || m.id !== id || !Number.isInteger(m.k) || !Number.isInteger(m.bs) || !Number.isInteger(m.len) || !/^[0-9a-f]{64}$/.test(m.sha)) return null;
       if (m.k < 1 || m.k > MAX_K || m.bs < 16 || m.bs > 2048 || m.len < 0 || m.len > QRX_MAX_BYTES + 64 || m.k * m.bs < m.len || (m.k - 1) * m.bs >= Math.max(m.len, 1)) return null;
       if (m.mode !== 'public' && m.mode !== 'private') return null;
+      if (m.mode === 'public' && (!validInfo(m.info) || m.info.size !== m.len || m.info.sha256 !== m.sha)) return null;
       return { kind: 'meta', id, meta: m };
     } catch { return null; }
   }
-  if (b[1] === 1 && body.length > 12) {
+  if (b[1] === 1 && body.length >= 14) {
     const bdv = new DataView(body.buffer, body.byteOffset, body.length);
     const index = bdv.getUint32(0), k = bdv.getUint32(4), bs = bdv.getUint16(8), len = bdv.getUint32(10) >>> 0;
     const payload = body.subarray(14);
@@ -194,6 +202,7 @@ export class QrxReceiver {
     try {
       const k = keyFor(x25519.getSharedSecret(this.recv.secretKey, b64u.decode(m.epk)), m.id);
       const info = JSON.parse(td.decode(xchacha20poly1305(k, b64u.decode(m.n1), hexBytes(m.id)).decrypt(b64u.decode(m.sealed)))) as QrxMeta['info'];
+      if (!validInfo(info)) return null;
       this.key = k; this.info = info; return info;
     } catch { return null; }
   }
@@ -217,7 +226,40 @@ export class QrxReceiver {
     for (const j of [...idx]) if (this.blocks[j]) { const b = this.blocks[j]!; for (let x = 0; x < m.bs; x++) data[x]! ^= b[x]!; idx.delete(j); }
     if (idx.size === 0) return this.solved === m.k ? 'done' : 'progress';
     if (idx.size === 1) this.resolve([...idx][0]!, data); else this.pending.push({ idx, data });
+    this.solveRemainder();
     return this.solved === m.k ? 'done' : 'progress';
+  }
+  /** Peeling can stall on a full-rank cycle without singleton rows. Solve only a bounded small remainder;
+   * the wire format and block selection stay unchanged. Hash verification still rejects damaged solutions. */
+  private solveRemainder() {
+    const m = this.meta!, left = m.k - this.solved;
+    if (!left || left > 128 || this.pending.length < 2) return;
+    const pivots = new Map<number, { idx: Set<number>; data: Uint8Array }>();
+    for (const row of this.pending.slice(-left * 4)) {
+      const idx = new Set(row.idx), data = row.data.slice();
+      while (idx.size) {
+        const j = Math.min(...idx), prior = pivots.get(j);
+        if (!prior) { pivots.set(j, { idx, data }); break; }
+        for (const b of prior.idx) { if (idx.has(b)) idx.delete(b); else idx.add(b); }
+        for (let x = 0; x < m.bs; x++) data[x]! ^= prior.data[x]!;
+      }
+      if (pivots.size === left) break;
+    }
+    // Even an underdetermined system may reveal individual blocks after eliminating its other pivots.
+    for (const j of [...pivots.keys()].sort((a, b) => b - a)) {
+      const row = pivots.get(j)!;
+      for (const b of [...row.idx]) if (b !== j) {
+        const known = this.blocks[b], prior = pivots.get(b);
+        if (known) {
+          for (let x = 0; x < m.bs; x++) row.data[x]! ^= known[x]!;
+          row.idx.delete(b);
+        } else if (prior) {
+          for (const x of prior.idx) { if (row.idx.has(x)) row.idx.delete(x); else row.idx.add(x); }
+          for (let x = 0; x < m.bs; x++) row.data[x]! ^= prior.data[x]!;
+        }
+      }
+      if (row.idx.size === 1 && row.idx.has(j)) this.resolve(j, row.data);
+    }
   }
   private resolve(j: number, data: Uint8Array) {
     const m = this.meta!, queue: [number, Uint8Array][] = [[j, data]];

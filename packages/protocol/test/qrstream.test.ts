@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import QRCode from 'qrcode';
 import jsQRImport from 'jsqr';
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { ackCode, b64u, encodeTransfer, parseFrame, parseReceiveCode, QrxReceiver, receiveCode, verifyAck } from '../src/index.ts';
+import { ackCode, b64u, blocksFor, crc32, encodeTransfer, parseFrame, parseReceiveCode, QrxReceiver, receiveCode, verifyAck } from '../src/index.ts';
 
 type Decode = (d: Uint8ClampedArray, w: number, h: number) => { data: string } | null;
 const jsQR = ((jsQRImport as unknown as { default?: Decode }).default ?? jsQRImport) as unknown as Decode;
@@ -24,6 +24,36 @@ function optical(text: string, damage = 0): string | null {
 }
 
 describe('clan-qrx/1 animated QR transfer', () => {
+  it('recovers a full-rank fountain cycle with no singleton symbols', () => {
+    const bytes = random(48), tx = encodeTransfer({ bytes, name: 'cycle.txt', mime: 'text/plain' }, { blockSize: 16 });
+    const rx = new QrxReceiver(); rx.push(tx.frame(0)); rx.accept();
+    const wanted = new Set(['0,1', '1,2', '0,1,2']);
+    for (let index = 3; index < 5000 && wanted.size; index++) {
+      const row = blocksFor(index, 3, parseInt(tx.id.slice(0, 8), 16)).sort().join(',');
+      if (wanted.delete(row)) rx.push(tx.frame(index + Math.floor(index / 7) + 1));
+    }
+    expect(wanted.size).toBe(0);
+    expect(rx.result().bytes).toEqual(bytes);
+  });
+
+  it('drops a CRC-valid data frame whose header is truncated', () => {
+    const bytes = new Uint8Array(10 + 13 + 4); bytes[0] = 1; bytes[1] = 1;
+    new DataView(bytes.buffer).setUint32(bytes.length - 4, crc32(bytes.subarray(0, bytes.length - 4)));
+    expect(parseFrame('CLQ1' + b64u.encode(bytes))).toBeNull();
+  });
+
+  it('does not display a malformed or unsafe public file description', () => {
+    const tx = encodeTransfer({ bytes: random(16), name: 'a.txt', mime: 'text/plain' });
+    const original = b64u.decode(tx.frame(0).slice(4));
+    for (const name of [{ hostile: 'object' }, '../secret.txt', 'bad\u0000name']) {
+      const meta = JSON.parse(new TextDecoder().decode(original.subarray(10, original.length - 4)));
+      meta.info.name = name;
+      const body = new TextEncoder().encode(JSON.stringify(meta)), frame = new Uint8Array(14 + body.length);
+      frame.set(original.subarray(0, 10)); frame.set(body, 10);
+      new DataView(frame.buffer).setUint32(frame.length - 4, crc32(frame.subarray(0, frame.length - 4)));
+      expect(new QrxReceiver().push('CLQ1' + b64u.encode(frame))).toBeNull();
+    }
+  });
   it('public file through real QR images: drops, duplicates, reordering and damage; exact bytes verified', () => {
     const bytes = random(40_000, 7), tx = encodeTransfer({ bytes, name: 'notes.pdf', mime: 'application/pdf' }, { blockSize: 400 });
     const rx = new QrxReceiver();
