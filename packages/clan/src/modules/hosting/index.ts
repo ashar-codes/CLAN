@@ -22,6 +22,11 @@ export const schema: ModuleSchema = {
     CREATE TABLE hosting_staging (clan_id TEXT NOT NULL REFERENCES clans_clans(id), epoch INTEGER NOT NULL, prev_hash TEXT NOT NULL,
       checkpoint_hash TEXT NOT NULL, delegation TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('staging','verified')),
       updated_at INTEGER NOT NULL, PRIMARY KEY (clan_id, epoch));
+  `, `
+    -- Owner key trusted for a CLAN before any chain is accepted: this device's own establish, the authenticated pairing
+    -- with the CLAN's host, or a linked (personal sync) device. A chain naming another owner is never learned.
+    CREATE TABLE hosting_anchors (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), owner_key TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('owner','pairing','linked-device')), created_at INTEGER NOT NULL);
   `],
 };
 
@@ -33,8 +38,9 @@ type Row = { clan_id: string; owner_key: string; epoch: number; head_hash: strin
 const DAY = 86_400_000;
 
 export class HostAuthority {
-  private db: Db; private clans: Clans; private now: () => number;
-  constructor(db: Db, clans: Clans, now = () => Date.now()) { this.db = db; this.clans = clans; this.now = now; }
+  private db: Db; private clans: Clans; private now: () => number; private linkedDeviceKey: (publicKey: string) => boolean;
+  /** `linkedDeviceKey`: true only for a verified, unrevoked personal-sync device key of this account. */
+  constructor(db: Db, clans: Clans, now = () => Date.now(), linkedDeviceKey: (publicKey: string) => boolean = () => false) { this.db = db; this.clans = clans; this.now = now; this.linkedDeviceKey = linkedDeviceKey; }
 
   private row(clanId: string) { return this.db.prepare('SELECT * FROM hosting_authority WHERE clan_id = ?').get(clanId) as Row | undefined; }
   private chain(r: Row) { return JSON.parse(r.chain) as AuthorityRecord[]; }
@@ -54,9 +60,36 @@ export class HostAuthority {
     const g = signHostStatement(owner, { type: 'clan-host-authority' as const, v: 1 as const, clanId, ownerKey: owner.publicKey, epoch: 0, hostKey: owner.publicKey, prevHash: null, checkpointHash: null, delegation: null, ack: null, issuedAt: this.now() });
     const chk = verifyAuthorityChain([g], { clanId });
     if (!chk.ok) throw new HostingError('invalid', chk.reason);
-    this.db.prepare('INSERT INTO hosting_authority (clan_id, owner_key, epoch, head_hash, chain, state, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?)')
-      .run(clanId, owner.publicKey, chk.hashes[0]!, JSON.stringify([g]), 'active', this.now());
+    tx(this.db, () => {
+      this.anchor(clanId, owner.publicKey, 'owner');
+      this.db.prepare('INSERT INTO hosting_authority (clan_id, owner_key, epoch, head_hash, chain, state, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?)')
+        .run(clanId, owner.publicKey, chk.hashes[0]!, JSON.stringify([g]), 'active', this.now());
+    });
     return this.status(clanId, owner.publicKey)!;
+  }
+
+  // ---- owner-key anchors ----
+  private anchor(clanId: string, ownerKey: string, source: 'owner' | 'pairing' | 'linked-device') {
+    if (!this.clans.get(clanId)) throw new HostingError('unknown_clan', 'Unknown CLAN.');
+    const a = this.anchorOf(clanId);
+    if (a && a.ownerKey !== ownerKey) throw new HostingError('owner_mismatch', 'This CLAN is already bound to a different owner key.');
+    if (!a) this.db.prepare('INSERT INTO hosting_anchors (clan_id, owner_key, source, created_at) VALUES (?, ?, ?, ?)').run(clanId, ownerKey, source, this.now());
+  }
+  anchorOf(clanId: string) {
+    const a = this.db.prepare('SELECT owner_key k, source s FROM hosting_anchors WHERE clan_id = ?').get(clanId) as { k: string; s: string } | undefined;
+    return a ? { ownerKey: a.k, source: a.s } : null;
+  }
+  /** Member side: called only with the genesis received inside the authenticated (OPAQUE + pinned TLS, host-approved)
+   *  session of this exact CLAN. First binding wins; a later different owner is refused, never replaced. */
+  anchorFromPairing(clanId: string, genesis: unknown) {
+    const chk = verifyAuthorityChain([genesis], { clanId });
+    if (!chk.ok) throw new HostingError('invalid', chk.reason);
+    this.anchor(clanId, chk.head.ownerKey, 'pairing');
+  }
+  /** The owner is one of this account's own linked devices (mobile-created CLAN delegating to a linked desktop). */
+  anchorLinkedOwner(clanId: string, ownerKey: string) {
+    if (!this.linkedDeviceKey(ownerKey)) throw new HostingError('forbidden', 'The owner key is not a linked device of this account.');
+    this.anchor(clanId, ownerKey, 'linked-device');
   }
 
   status(clanId: string, localKey: string, at = this.now()): HostStatus | null {
@@ -108,9 +141,9 @@ export class HostAuthority {
     this.setState(clanId, 'frozen');
   }
   /** Abort a handoff before relinquishment. Impossible afterwards: the transition may already be activating elsewhere. */
-  unfreeze(clanId: string) {
+  unfreeze(clanId: string, localKey: string) {
     const r = this.must(clanId);
-    if (r.state !== 'frozen') throw new HostingError('bad_state', 'Only a paused host that has not handed over can resume.');
+    if (r.state !== 'frozen' || this.head(r).hostKey !== localKey || this.pendingTransition(clanId)) throw new HostingError('bad_state', 'Only the paused host that has not handed over can resume.');
     this.setState(clanId, 'active');
   }
 
@@ -192,7 +225,10 @@ export class HostAuthority {
     const clanId = typeof first?.clanId === 'string' ? first.clanId : '';
     if (!this.clans.get(clanId)) throw new HostingError('unknown_clan', 'Unknown CLAN.');
     const r = this.row(clanId);
-    const chk = verifyAuthorityChain(chain, { clanId, ownerKey: r?.owner_key });
+    // Never trust the first chain offered: its owner must match an anchored, authenticated owner key.
+    const anchored = this.anchorOf(clanId)?.ownerKey;
+    if (!r && !anchored) throw new HostingError('unanchored', 'This CLAN\'s owner key is not yet trusted on this device.');
+    const chk = verifyAuthorityChain(chain, { clanId, ownerKey: r?.owner_key ?? anchored });
     if (!chk.ok) throw new HostingError('invalid', chk.reason);
     const rs = chain as AuthorityRecord[], h = chk.head;
     let conflict: string | null = null;

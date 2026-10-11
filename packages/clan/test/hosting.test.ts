@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { newEd25519, nodeSigner } from '@classroom/client/node';
 import { authorityHash, b64u, signHostStatement, verifyAuthorityChain, type AuthorityRecord, type HostDelegation } from '@classroom/protocol';
+import { HostAuthority } from '../src/index.ts';
 import { setup } from './helpers.ts';
 
 const key = () => nodeSigner(newEd25519().privatePkcs8);
@@ -16,6 +17,8 @@ function world(t0 = 1_000_000) {
   const clan = phone.app.clans.create({ type: 'STUDY_GROUP', name: 'Mobile group', createdBy: phone.app.me });
   for (const d of [desk, third]) d.app.clans.recordJoined({ id: clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: d.app.me });
   phone.app.hosting.establish(clan.id, phone.app.me, ownerKey);
+  const genesis = phone.app.hosting.chainOf(clan.id)![0]!;
+  for (const d of [desk, third]) d.app.hosting.anchorFromPairing(clan.id, genesis); // as received in the authenticated session
   const close = () => { for (const d of [phone, desk, third]) d.db.close(); };
   return { phone, desk, third, ownerKey, deskKey, thirdKey, clan, close, tick: (ms: number) => { t += ms; } };
 }
@@ -49,7 +52,7 @@ describe('persistent hosting authority', () => {
     try {
       const h = handoff(w);
       expect(w.phone.app.hosting.status(w.clan.id, w.ownerKey.publicKey)).toMatchObject({ state: 'relinquished', writable: false });
-      expect(() => w.phone.app.hosting.unfreeze(w.clan.id)).toThrow();
+      expect(() => w.phone.app.hosting.unfreeze(w.clan.id, w.ownerKey.publicKey)).toThrow();
       // restart of the old host: same database, still fenced, replay returns the same signed record
       const again = setup({ db: w.phone.db, storageDir: w.phone.storageDir, now: () => 1_000_000 }).app.hosting;
       expect(() => again.assertWritable(w.clan.id, w.ownerKey.publicKey)).toThrow();
@@ -169,6 +172,32 @@ describe('persistent hosting authority', () => {
         expect(() => v.phone.app.hosting.accept([forged], v.ownerKey.publicKey)).toThrow('Conflicting');
         expect(v.phone.app.hosting.status(v.clan.id, v.ownerKey.publicKey)?.writable).toBe(false);
       } finally { v.close(); }
+    } finally { w.close(); }
+  });
+
+  it('trusts no first chain: owner keys are anchored by owner, authenticated pairing or a linked device', () => {
+    const w = world();
+    try {
+      const attacker = key();
+      const fake = signHostStatement(attacker, { type: 'clan-host-authority' as const, v: 1 as const, clanId: w.clan.id, ownerKey: attacker.publicKey, epoch: 0, hostKey: attacker.publicKey, prevHash: null, checkpointHash: null, delegation: null, ack: null, issuedAt: 1 });
+      // anchored to the real owner via pairing: a self-made chain for the same CLAN id is refused, the anchor cannot move
+      expect(() => w.third.app.hosting.accept([fake], w.thirdKey.publicKey)).toThrow('another owner');
+      expect(() => w.third.app.hosting.anchorFromPairing(w.clan.id, fake)).toThrow('different owner');
+      // a device with no anchor learns nothing
+      const lone = setup({ now: () => 1_000_000 });
+      try {
+        lone.app.clans.recordJoined({ id: w.clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: lone.app.me });
+        expect(() => lone.app.hosting.accept(w.phone.app.hosting.chainOf(w.clan.id), w.thirdKey.publicKey)).toThrow('not yet trusted');
+        expect(() => lone.app.hosting.anchorLinkedOwner(w.clan.id, w.ownerKey.publicKey)).toThrow('not a linked device');
+        const linked = new HostAuthority(lone.db, lone.app.clans, () => 1_000_000, (k) => k === w.ownerKey.publicKey);
+        linked.anchorLinkedOwner(w.clan.id, w.ownerKey.publicKey);
+        expect(linked.accept(w.phone.app.hosting.chainOf(w.clan.id), w.thirdKey.publicKey)).toMatchObject({ epoch: 0, state: 'standby' });
+      } finally { lone.db.close(); }
+      // only the paused host itself may resume
+      w.phone.app.hosting.freeze(w.clan.id, w.ownerKey.publicKey);
+      expect(() => w.phone.app.hosting.unfreeze(w.clan.id, w.deskKey.publicKey)).toThrow('paused host');
+      w.phone.app.hosting.unfreeze(w.clan.id, w.ownerKey.publicKey);
+      expect(w.phone.app.hosting.status(w.clan.id, w.ownerKey.publicKey)?.writable).toBe(true);
     } finally { w.close(); }
   });
 });

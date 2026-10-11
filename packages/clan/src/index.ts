@@ -48,7 +48,8 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const identity = new Identity(db, now);
   const clans = new Clans(db, bus, identity, now);
   // Persistent hosting authority (signed epochs). Not yet used by any host path; see docs/PHASE_14_2_HOSTING_DESIGN.md.
-  const hosting = new HostAuthority(db, clans, now);
+  // Linked-device owner anchors: only verified, unrevoked devices of this personal account (never the current device).
+  const hosting = new HostAuthority(db, clans, now, (key) => sync.devices().some((d) => d.publicKey === key && !d.revoked && !d.current));
   const permissions = new Permissions(db, clans, now);
   const store = new ResourceStore(db, bus, opts.storageDir, now);
   const files = new Files(db, bus, store, permissions, clans);
