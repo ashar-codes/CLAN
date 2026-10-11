@@ -14,6 +14,7 @@ export function Friends({ onChat }: { onChat(convId: string): void }) {
   const [friends] = usePeople(() => api.people.contacts('friends'));
   const [requests] = usePeople(() => api.people.contacts('requests'));
   const [blocked] = usePeople(() => api.people.contacts('blocked'));
+  const [offers] = usePeople(() => api.people.deviceOffers());
   const [sel, setSel] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const incoming = requests?.filter((r) => r.relation === 'incoming') ?? [], outgoing = requests?.filter((r) => r.relation === 'outgoing') ?? [];
@@ -31,6 +32,12 @@ export function Friends({ onChat }: { onChat(convId: string): void }) {
       {err && <p role="alert" className="error">{err}</p>}
       <div className="people-cols">
         <div className="stack">
+          {!!offers?.length && <section className="card stack" aria-label="Friends' other devices"><b>Your friends’ other devices</b>
+            {offers.map((o) => <div key={`${o.fromKey}:${o.key}`} className="stack person-row">
+              <span><b>{o.name}</b> — {o.fromName} says this device is also theirs.</span>
+              <small className="muted">Safety number for that device: <span className="mono">{o.safety}</span>. If you can, compare it on their device first.</small>
+              <div className="row"><button className="primary small" onClick={() => run(() => api.people.deviceOffer('accept', o.fromKey, o.key))}>Trust as {o.fromName}</button><button className="small" onClick={() => run(() => api.people.deviceOffer('decline', o.fromKey, o.key))}>Not now</button></div>
+            </div>)}</section>}
           {incoming.length > 0 && <section className="card" aria-label="Friend requests"><b>Requests for you</b><ul className="people-list">{incoming.map((c) => row(c, <>
             <button className="primary small" onClick={() => run(() => api.people.friend('accept', c.key))}>Accept</button>
             <button className="small" onClick={() => run(() => api.people.friend('reject', c.key))}>Decline</button></>))}</ul></section>}

@@ -49,7 +49,10 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   if (rt.port !== saved) await writeFile(portFile, String(rt.port));
   if (rt.linkPort !== savedLink) await writeFile(linkPortFile, String(rt.linkPort));
   c.bus.subscribe('desktop.people', PeopleChanged, (e) => send('people:changed', e.payload));
-  setInterval(() => void p.sweep().catch((e) => logError('people', e)), 60_000).unref();
+  // this computer is one of the account's devices (after Me › My Devices linking); friends hear about the others
+  const devices = () => { try { const acc = c.sync.account(); if (!acc) return; p.announceDevice(acc.accountId, `${p.myProfile().name}’s ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer'}`); if (p.shareDeviceLinks()) void rt.tick(); } catch (e) { logError('people', e); } };
+  devices();
+  setInterval(() => { void p.sweep().catch((e) => logError('people', e)); devices(); }, 60_000).unref();
   void p.sweep();
 
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
@@ -211,6 +214,8 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     const path = join(tmp, `${randomUUID()}-${safe}`); await writeFile(path, b);
     try { await c.capture.capture({ kind: 'user', userId: c.me }, { kind: 'file', path, name: safe, mime: z.string().max(120).parse(mime) }); } finally { await rm(path, { force: true }); }
   });
+  handle('people:deviceOffers', () => p.deviceOffers());
+  handle('people:deviceOffer', (action, from, key) => { const a = z.enum(['accept', 'decline']).parse(action); if (a === 'accept') p.acceptDeviceOffer(Key.parse(from), Key.parse(key)); else p.declineDeviceOffer(Key.parse(from), Key.parse(key)); void rt.tick(); });
   handle('people:armMedia', (kind) => armMedia(z.enum(['microphone', 'camera']).parse(kind)));
   handle('people:logCall', (raw) => p.logCall(z.object({ id: z.string().max(64), peerKey: Key, direction: z.enum(['in', 'out']), connectedAt: z.number().int().nullable().optional(), endedAt: z.number().int().nullable().optional(), outcome: z.string().max(40).optional() }).parse(raw)));
   return { rt, close: () => rt.stop() };

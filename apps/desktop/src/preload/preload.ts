@@ -71,6 +71,7 @@ const api: DesktopApi = {
     sendFile: (c, files) => ipcRenderer.invoke('people:sendFile', c, files ? files.slice(0, 10).map((f) => webUtils.getPathForFile(f)).filter(Boolean) : undefined),
     sendVoice: inv('people:sendVoice'), file: inv('people:file'), voiceBytes: inv('people:voiceBytes'), preview: inv('people:preview'), save: inv('people:save'), openWith: inv('people:openWith'),
     armMedia: inv('people:armMedia'),
+    deviceOffers: inv('people:deviceOffers'), deviceOffer: inv('people:deviceOffer'),
     opticalStart: inv('people:opticalStart'), opticalFrames: inv('people:opticalFrames'), opticalStop: inv('people:opticalStop'), opticalReceipt: inv('people:opticalReceipt'),
     opticalAck: inv('people:opticalAck'), opticalSave: inv('people:opticalSave'), opticalInbox: inv('people:opticalInbox'), signal: inv('people:signal'), logCall: inv('people:logCall'),
     onChanged: (cb) => listen('people:changed', cb), onLive: (cb) => listen('people:live', cb),

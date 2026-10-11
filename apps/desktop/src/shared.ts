@@ -326,6 +326,9 @@ export type PeopleApi = {
   sendFile(convId: string, files?: File[]): Promise<PeopleTransfer[]>; sendVoice(convId: string, bytes: Uint8Array, mime: string, durationMs: number): Promise<PeopleTransfer>;
   file(action: 'accept' | 'decline' | 'cancel' | 'retry', transferId: string): Promise<void>; voiceBytes(transferId: string): Promise<Uint8Array>;
   preview(transferId: string): Promise<FilePreview>; save(transferId: string): Promise<{ name: string } | null>; openWith(transferId: string): Promise<void>;
+  /** Devices a friend presented as theirs; accepting treats that device as the same friend. */
+  deviceOffers(): Promise<{ fromKey: string; fromName: string; key: string; name: string; safety: string; at: number }[]>;
+  deviceOffer(action: 'accept' | 'decline', fromKey: string, key: string): Promise<void>;
   /** Animated-QR transfer (sender side runs in the main process so the identity key signs it). */
   opticalStart(receiveCode?: string | null, path?: string | null): Promise<{ id: string; name: string; size: number; mode: 'public' | 'private'; minFrames: number; to: string | null } | null>;
   opticalFrames(id: string, from: number, count: number): Promise<string[]>;

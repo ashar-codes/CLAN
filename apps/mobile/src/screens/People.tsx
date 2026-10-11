@@ -199,10 +199,19 @@ function InviteTerms({ onSend, onCancel }: { onSend(mode: 'permanent' | 'tempora
 function Friends({ onChat }: { onChat(id: string): void }) {
   const list = useData(() => [...people().contacts('requests'), ...people().contacts('friends'), ...people().contacts('blocked')]) ?? [];
   const me = useData(() => people().myProfile());
+  const offers = useData(() => people().deviceOffers()) ?? [];
+  const c = useC();
   const [name, setName] = useState(me?.name ?? ''), [err, setErr] = useState<string | null>(null);
   return (
     <>
-      {!list.length && <Muted>No friends yet. Connect to someone’s computer with their code in Nearby.</Muted>}
+      {offers.map((o) => (
+        <Card key={`${o.fromKey}:${o.key}`} title="A friend’s other device">
+          <Text style={{ color: c.text }}><Text style={{ fontWeight: '700' }}>{o.name}</Text> — {o.fromName} says this device is also theirs.</Text>
+          <Muted small>Safety number for that device: {o.safety}. If you can, compare it on their device first.</Muted>
+          <Row><Btn small primary label={`Trust as ${o.fromName}`} onPress={() => { setErr(act(() => people().acceptDeviceOffer(o.fromKey, o.key))); void phonePeople().then((r) => r.tick()); }} /><Btn small label="Not now" onPress={() => setErr(act(() => people().declineDeviceOffer(o.fromKey, o.key)))} /></Row>
+        </Card>
+      ))}
+      {!list.length && <Muted>No friends yet. Find people in Nearby or scan their code.</Muted>}
       {list.map((c) => <PersonCard key={c.key} c={c} onChat={onChat} />)}
       <Card title="Your name for people">
         <Field label="Name" value={name} onChange={setName} maxLength={80} />

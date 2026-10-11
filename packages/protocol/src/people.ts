@@ -66,6 +66,8 @@ export type FileMeta = z.infer<typeof FileMeta>;
 export const PeerBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('friend.request'), note: Text(200).optional() }).strict(),
   z.object({ kind: z.literal('friend.accept') }).strict(),
+  /** Friend → friend: this person's other devices, each self-signed for their account (personDeviceStatement). */
+  z.object({ kind: z.literal('device.links'), account: z.string().min(1).max(80), devices: z.array(z.object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/), name: Text(80).min(1), sig: z.string().max(100) }).strict()).max(8) }).strict(),
   /** Friend → friend: the secret that lets them recognise this person's anonymous nearby adverts (presenceTag). */
   z.object({ kind: z.literal('presence.key'), key: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict(),
   z.object({ kind: z.literal('friend.reject') }).strict(),
@@ -142,6 +144,8 @@ export function parseProfileQr(text: string): { key: string; endpoints: string[]
  * identity leaks to an arbitrary advertiser.
  */
 export const presenceTag = (presenceKey: string, r: string) => b64u.encode(hmac(sha256, b64u.decode(presenceKey), new TextEncoder().encode(`clan-presence/v1|${r}`)).slice(0, 12));
+/** What each device signs to say "this identity key is one of the devices of account X" (no device can be claimed by others). */
+export const personDeviceStatement = (account: string, key: string) => new TextEncoder().encode(`clan-device/1|${account}|${key}`);
 /** Short fingerprint people compare to verify each other in person. */
 export const safetyNumber = (a: string, b: string) => {
   const h = sha256(new TextEncoder().encode(['clan-safety/v1', ...[keyFingerprint(a), keyFingerprint(b)].sort()].join('|')));

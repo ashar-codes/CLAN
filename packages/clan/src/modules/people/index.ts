@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { z } from 'zod';
 import {
-  b64u, presenceTag, CHAT_MODES, conversationId, envelopeValid, FILE_MAX, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
+  b64u, personDeviceStatement, presenceTag, safetyNumber, verifyStatement, CHAT_MODES, conversationId, envelopeValid, FILE_MAX, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
   TEMP_TTLS, Visibility, VOICE_MAX, VOICE_MIME, type FileMeta, type PeerBody, type PeerSigner, type ProfileField,
 } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
@@ -59,6 +59,12 @@ export const schema: ModuleSchema = {
   `, `
     -- Other people's pictures, fetched only when their profile (as shown to us) has one; verified by SHA-256.
     CREATE TABLE people_avatar_cache (sha256 TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL, used_at INTEGER NOT NULL);
+  `, `
+    -- This person's own devices (each self-signed for the account; synced between them) and other people's devices
+    -- that a friend presented, waiting for an explicit yes.
+    CREATE TABLE people_my_devices (key TEXT PRIMARY KEY, name TEXT NOT NULL, account TEXT NOT NULL, sig TEXT NOT NULL, at INTEGER NOT NULL);
+    CREATE TABLE people_device_offers (from_key TEXT NOT NULL, key TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', at INTEGER NOT NULL, PRIMARY KEY (from_key, key));
+    ALTER TABLE people_profile ADD COLUMN devices_shared TEXT;
   `],
 };
 
@@ -209,6 +215,47 @@ export class People {
     return this.visibility() === 'everyone';
   }
   /** The secret in this device's profile QR (created once; `reset` makes old printed/shared codes stop working). */
+  // ---------------- this person's other devices ----------------
+  /** Record this device as one of the account's devices (self-signed); synced to the account's other devices. */
+  announceDevice(account: string, name: string) {
+    const key = this.myKey(), n = name.trim().slice(0, 80) || 'Device';
+    const cur = this.db.prepare('SELECT name, account FROM people_my_devices WHERE key = ?').get(key) as { name: string; account: string } | undefined;
+    if (cur?.name === n && cur.account === account) return;
+    this.db.prepare('INSERT OR REPLACE INTO people_my_devices (key, name, account, sig, at) VALUES (?, ?, ?, ?, ?)').run(key, n, account, this.sgn().sign(personDeviceStatement(account, key)), this.now());
+  }
+  /** Tell friends about this account's other devices (when the set changed). */
+  shareDeviceLinks() {
+    const me = this.myKey(), mine = this.db.prepare('SELECT account FROM people_my_devices WHERE key = ?').get(me) as { account: string } | undefined;
+    if (!mine) return 0;
+    const devices = (this.db.prepare('SELECT key, name, sig FROM people_my_devices WHERE account = ? AND key <> ? ORDER BY key').all(mine.account, me) as { key: string; name: string; sig: string }[]).slice(0, 8);
+    const hash = createHash('sha256').update(JSON.stringify([mine.account, devices])).digest('hex');
+    if ((this.db.prepare('SELECT devices_shared FROM people_profile').get() as { devices_shared: string | null } | undefined)?.devices_shared === hash) return 0;
+    this.profileRow();
+    this.db.prepare('UPDATE people_profile SET devices_shared = ? WHERE one = 1').run(hash);
+    if (!devices.length) return 0;
+    const friends = this.contacts('friends');
+    for (const f of friends) this.queue(f.key, { kind: 'device.links', account: mine.account, devices });
+    return friends.length;
+  }
+  /** Devices friends presented as theirs, waiting for this person's decision. */
+  deviceOffers() {
+    return (this.db.prepare("SELECT from_key fromKey, key, name, at FROM people_device_offers WHERE state = 'pending' ORDER BY at DESC").all() as { fromKey: string; key: string; name: string; at: number }[])
+      .filter((o) => this.isFriend(o.fromKey) && !this.isBlocked(o.key)).map((o) => ({ ...o, fromName: this.contact(o.fromKey)?.name ?? 'A friend', safety: safetyNumber(this.myKey(), o.key) }));
+  }
+  /** Yes: treat that device as the same friend (after comparing its safety number in person where possible). */
+  acceptDeviceOffer(fromKey: string, key: string) {
+    const o = this.db.prepare("SELECT * FROM people_device_offers WHERE from_key = ? AND key = ? AND state = 'pending'").get(fromKey, key);
+    if (!o || !this.isFriend(fromKey)) throw new PeerError('not_found', 'That device is no longer offered.');
+    tx(this.db, () => {
+      this.touch(key);
+      this.db.prepare("UPDATE people_device_offers SET state = 'accepted' WHERE from_key = ? AND key = ?").run(fromKey, key);
+      this.setRel(key, 'friend');
+      this.queue(key, { kind: 'friend.accept' });
+      this.queue(key, { kind: 'presence.key', key: this.presenceKey() });
+      this.ensureConversation(key, 'active', 'permanent', null);
+    });
+  }
+  declineDeviceOffer(fromKey: string, key: string) { this.db.prepare("UPDATE people_device_offers SET state = 'declined' WHERE from_key = ? AND key = ?").run(fromKey, key); this.changed('relations', { key }); }
   /** Our presence secret (shared only with friends). Rotated when someone stops being a friend. */
   presenceKey(rotate = false) {
     const r = this.db.prepare('SELECT presence FROM people_profile').get() as { presence: string | null } | undefined;
@@ -636,10 +683,21 @@ export class People {
           this.setRel(e.from, 'incoming', body.note ?? null); break;
         case 'friend.accept':
           if (rel?.state !== 'outgoing' && rel?.state !== 'friend') throw new PeerError('refused', 'No request to accept.');
-          if (rel?.state !== 'friend') this.queue(e.from, { kind: 'presence.key', key: this.presenceKey() });
+          this.queue(e.from, { kind: 'presence.key', key: this.presenceKey() }); // also for a friend's newly accepted device
           this.setRel(e.from, 'friend');
           if (!c || c.state !== 'active') this.ensureConversation(e.from, 'active', 'permanent', null);
           break;
+        case 'device.links': {
+          if (!friend) throw new PeerError('refused', 'Only friends share their devices.');
+          for (const d of body.devices) {
+            if (d.key === e.from || d.key === this.myKey() || !verifyStatement(d.key, personDeviceStatement(body.account, d.key), d.sig)) continue;
+            const r = this.rel(d.key);
+            if (r?.blocked || r?.state === 'friend') continue;
+            this.db.prepare("INSERT INTO people_device_offers (from_key, key, name, state, at) VALUES (?, ?, ?, 'pending', ?) ON CONFLICT (from_key, key) DO UPDATE SET name = excluded.name WHERE state = 'pending'").run(e.from, d.key, d.name, at);
+          }
+          this.changed('relations', { key: e.from });
+          break;
+        }
         case 'presence.key':
           if (!friend) throw new PeerError('refused', 'Only friends share presence.');
           this.db.prepare('UPDATE people_contacts SET presence_key = ? WHERE key = ?').run(body.key, e.from);
@@ -725,7 +783,20 @@ export class People {
     const In = z.object({ state: z.enum(['none', 'outgoing', 'incoming', 'friend']), blocked: z.boolean(), profile: z.unknown().nullable() }).strict();
     const one = (key: string) => { const c = this.contact(key); if (!c || (c.relation === 'none' && !c.blocked)) return null; const row = this.db.prepare('SELECT profile FROM people_contacts WHERE key = ?').get(key) as { profile: string | null };
       return { state: c.relation === 'friend' ? 'friend' : 'none', blocked: c.blocked, profile: row.profile ? JSON.parse(row.profile) : null }; };
-    return [{
+    const devKind = 'people-device', Dev = z.object({ name: z.string().min(1).max(80), account: z.string().min(1).max(80), sig: z.string().max(100), at: z.number().int() }).strict();
+    const devices: SyncProvider = {
+      kind: devKind, policy: 'lww',
+      all: () => new Map((this.db.prepare('SELECT key, name, account, sig, at FROM people_my_devices').all() as { key: string; name: string; account: string; sig: string; at: number }[]).map((r) => [r.key, { name: r.name, account: r.account, sig: r.sig, at: r.at }] as const)),
+      one: (_o, id) => { const r = this.db.prepare('SELECT name, account, sig, at FROM people_my_devices WHERE key = ?').get(id) as { name: string; account: string; sig: string; at: number } | undefined; return r ?? null; },
+      apply: (_o, id, payload) => {
+        if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return;
+        if (payload === null) { this.db.prepare('DELETE FROM people_my_devices WHERE key = ?').run(id); return; }
+        const d = Dev.parse(payload);
+        if (!verifyStatement(id, personDeviceStatement(d.account, id), d.sig)) return; // a device can only be added by itself
+        this.db.prepare('INSERT OR REPLACE INTO people_my_devices (key, name, account, sig, at) VALUES (?, ?, ?, ?, ?)').run(id, d.name, d.account, d.sig, d.at);
+      },
+    };
+    return [devices, {
       kind, policy: 'lww',
       all: () => new Map((this.db.prepare('SELECT key FROM people_relations').all() as { key: string }[]).map((r) => [r.key, one(r.key)] as const).filter(([, v]) => v !== null)),
       one: (_owner, id) => one(id),

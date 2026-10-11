@@ -65,8 +65,11 @@ export function phonePeople(): Promise<PhonePeople> {
     if (!subscribed) { subscribed = true; phoneClan().bus.subscribe('mobile.people', PeopleChanged, () => bump()); }
     const links = nearby.manager(signer);
     nearby.onLive(live);
+    const devices = () => { try { const acc = phoneClan().sync.account(); if (!acc) return; const p = phoneClan().people; p.announceDevice(acc.accountId, `${p.myProfile().name}’s phone`); if (p.shareDeviceLinks()) void rt?.tick(); } catch { /* not linked yet */ } };
+    setInterval(devices, 60_000);
     rt = startPhonePeople({ people: phoneClan().people, signer, env, links, onLive: live, onChange: () => bump() });
     void nearby.start();
+    devices();
     return rt;
   })().finally(() => { starting = null; });
 }
