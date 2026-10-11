@@ -49,7 +49,7 @@ it('moves hosting between the owner\'s linked computers with explicit confirmati
   await panel.getByRole('group', { name: 'Confirm hand-over' }).getByText('Members cannot change anything').waitFor();
   await panel.getByRole('button', { name: 'Pause and hand over' }).click();
   await panel.getByText(/now hosts this CLAN\./).waitFor({ timeout: 60_000 });
-  await panel.getByText('Hosting was handed over').waitFor();
+  await panel.getByText(/Hosted by /).waitFor(); // the source learned the new head and is a standby
 
   // B now holds the CLAN as its host
   await b.getByRole('button', { name: 'CLANs', exact: true }).click();
@@ -60,5 +60,17 @@ it('moves hosting between the owner\'s linked computers with explicit confirmati
   await a.getByRole('button', { name: 'Host again' }).click();
   await a.getByRole('heading', { name: 'Host Movable group again' }).waitFor();
   await a.getByRole('button', { name: 'Host again', exact: true }).last().click();
-  await a.getByText(/handed hosting over/).waitFor();
+  await a.getByText(/handed hosting over|another device is the authorized host/i).waitFor();
+
+  // the owner stops B hosting: B refuses changes from then on
+  await a.getByRole('button', { name: '← Back' }).click();
+  await a.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await a.locator('.clan-card', { hasText: 'Movable group' }).click();
+  const ap = a.getByRole('region', { name: 'Hosting' });
+  await ap.getByRole('button', { name: /^Stop .+ hosting…$/ }).click();
+  await ap.getByRole('button', { name: 'Stop hosting', exact: true }).click();
+  await ap.getByText(/no longer accepts changes\./).waitFor({ timeout: 30_000 });
+  await b.getByRole('button', { name: '← CLANs' }).click();
+  await b.locator('.clan-card', { hasText: 'Movable group' }).click();
+  await b.getByRole('region', { name: 'Hosting' }).getByText(/can no longer accept changes: .*revoked/).waitFor();
 }, 240_000);

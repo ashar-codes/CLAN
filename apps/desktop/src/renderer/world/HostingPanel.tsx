@@ -9,7 +9,7 @@ const mb = (n: number) => `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0)} MB`;
 
 export function HostingPanel({ clanId }: { clanId: string }) {
   const [v, setV] = useState<HostingView | null>(null), [err, setErr] = useState(''), [note, setNote] = useState('');
-  const [confirm, setConfirm] = useState<null | 'handover' | 'cancel' | 'ours' | 'theirs' | 'ack' | 'enable'>(null);
+  const [confirm, setConfirm] = useState<null | 'handover' | 'cancel' | 'ours' | 'theirs' | 'ack' | 'enable' | 'revoke'>(null);
   const [acks, setAcks] = useState<string[]>([]), [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [dest, setDest] = useState(''), [busy, setBusy] = useState(false);
   const load = useCallback(() => api.hosting.status(clanId).then(setV, (e) => setErr(errText(e))), [clanId]);
@@ -85,6 +85,11 @@ export function HostingPanel({ clanId }: { clanId: string }) {
         <select aria-label="Move hosting to" value={dest} onChange={(e) => setDest(e.target.value)}><option value="">Move hosting to…</option>{v.computers.filter((d) => d.publicKey !== h.hostKey).map((d) => <option key={d.fp} value={d.fp}>{d.name}</option>)}</select>
         <button disabled={!dest || busy} onClick={() => act(() => api.hosting.request(clanId, dest), 'Request sent. The current host must confirm and pause to hand over.')}>Ask current host</button>
       </div>}
+      {h && v.isOwner && !isHost && h.state !== 'conflict' && (confirm === 'revoke'
+        ? <div role="group" aria-label="Confirm stop hosting"><p>Stop {v.hostName} from hosting? It refuses all changes once told; its data stays there. Move hosting back with a new hand-over.</p>
+          <div className="row"><button disabled={busy} onClick={() => act(() => api.hosting.revoke(clanId).then((r) => setNote(r.notReached.length ? `Saved. Not yet told: ${r.notReached.join(', ')} — retry when it is on.` : `${v.hostName} no longer accepts changes.`)))}>Stop hosting</button><button onClick={() => setConfirm(null)}>Cancel</button></div></div>
+        : <button disabled={busy} onClick={() => setConfirm('revoke')}>Stop {v.hostName} hosting…</button>)}
+      {v.restored && <p role="alert">{v.restored}</p>}
       <p className="muted">A phone can own a CLAN and move its hosting to one of your computers. Phones do not host CLANs themselves yet, and a CLAN is only available while its current host computer is on.</p>
     </section>
   );

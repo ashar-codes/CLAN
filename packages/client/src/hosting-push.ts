@@ -9,6 +9,8 @@ export type PushSource = {
   chainOf(clanId: string): unknown[] | null;
   pendingTransition(clanId: string): unknown | null;
   relinquish(clanId: string, signer: { publicKey: string; sign(bytes: Uint8Array): string }, delegation: never, ack: never): unknown;
+  /** After the destination activated: the source learns the new head (becomes a standby). */
+  accept?(chain: unknown, localKey: string): Promise<unknown>;
 };
 type Missing = { sha256: string; size: number; have: number };
 
@@ -20,8 +22,13 @@ export async function pushClan(o: {
 }): Promise<{ epoch: number; writable: boolean }> {
   const chain = o.source.chainOf(o.clanId);
   if (!chain) throw new Error('This CLAN has no hosting authority on this device.');
+  const finish = async (record: unknown) => {
+    const r = await o.call('/host/push/activate', { clanId: o.clanId, chain: [...chain, record] }) as { epoch: number; writable: boolean };
+    if (r.writable) await o.source.accept?.([...chain, record], o.signer.publicKey);
+    return r;
+  };
   const signed = o.source.pendingTransition(o.clanId);
-  if (signed) return o.call('/host/push/activate', { clanId: o.clanId, chain: [...chain, signed] }) as Promise<{ epoch: number; writable: boolean }>;
+  if (signed) return finish(signed);
   const cp = o.source.checkpointOf(o.clanId);
   if (!cp) throw new Error('Pause hosting and prepare the hand-over first.');
   const begun = await o.call('/host/push/begin', { chain, delegation: o.delegation, header: cp.header, clan: o.clan }) as { missing: Missing[] };
@@ -40,5 +47,5 @@ export async function pushClan(o: {
   }
   const { ack } = await o.call('/host/push/complete', { clanId: o.clanId }) as { ack: never };
   const record = o.source.relinquish(o.clanId, o.signer, o.delegation as never, ack); // durable before it is sent
-  return o.call('/host/push/activate', { clanId: o.clanId, chain: [...chain, record] }) as Promise<{ epoch: number; writable: boolean }>;
+  return finish(record);
 }

@@ -50,6 +50,15 @@ export function registerHosting(c: ClanApp, o: { sync: Promise<Sync>; liveClanId
     if (!host) throw new Error('The current host is not one of your linked devices.');
     return s.callLinked(host.fp, '/host/push/request', d);
   });
+  /** Owner: withdraw the current (other) host's permission; it stops accepting changes once told. */
+  handle('hosting:revoke', async (raw) => {
+    const clanId = Id.parse(raw), s = await sync(), head = c.hosting.chainOf(clanId)?.at(-1);
+    if (!head?.delegation || head.hostKey === s.signer.publicKey) throw new Error('No other device hosts this CLAN.');
+    const rev = c.hosting.revoke(clanId, s.signer, head.delegation.id);
+    const failed: string[] = [];
+    for (const d of computers()) await s.callLinked(d.fp, '/host/push/revoke', rev).catch(() => failed.push(d.name));
+    return { notReached: failed };
+  });
   handle('hosting:decline', (raw) => c.hosting.clearRequest(Id.parse(raw)));
   /** Current host: pause, check, prepare and push the CLAN to the requested computer. Safe to call again to resume. */
   handle('hosting:handover', async (rawClan, rawAck) => {

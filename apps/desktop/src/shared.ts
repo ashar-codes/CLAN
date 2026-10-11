@@ -315,6 +315,7 @@ export type HostingView = {
   transition?: { epoch: number } | null;
   conflict?: { message: string; forkEpoch: number; ours: string; theirs: string | null } | null; conflictNames: { ours: string; theirs: string | null } | null;
   superseded?: { epoch: number; at: number } | null;
+  restored?: string | null;
   request: { destKey: string; destName: string; expiresAt: number } | null;
   preflight: PreflightIssueView[]; computers: { fp: string; name: string; publicKey: string }[];
 };
@@ -323,6 +324,7 @@ export type HostingApi = {
   enable(clanId: string): Promise<unknown>;
   request(clanId: string, fp: string): Promise<unknown>;
   decline(clanId: string): Promise<void>;
+  revoke(clanId: string): Promise<{ notReached: string[] }>;
   handover(clanId: string, acknowledge: string[]): Promise<{ done: boolean; epoch: number; destName: string }>;
   cancel(clanId: string): Promise<void>;
   resolve(clanId: string, choice: 'ours' | 'theirs'): Promise<{ state: string; notReached: string[] }>;

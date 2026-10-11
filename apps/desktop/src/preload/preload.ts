@@ -64,7 +64,7 @@ const api: DesktopApi = {
     onChanged: (cb) => listen('sync:changed', () => cb()), onData: (cb) => listen('sync:data', () => cb()),
   } as DesktopApi['sync'],
   hosting: {
-    status: inv('hosting:status'), enable: inv('hosting:enable'), request: inv('hosting:request'), decline: inv('hosting:decline'), handover: inv('hosting:handover'),
+    status: inv('hosting:status'), enable: inv('hosting:enable'), request: inv('hosting:request'), decline: inv('hosting:decline'), revoke: inv('hosting:revoke'), handover: inv('hosting:handover'),
     cancel: inv('hosting:cancel'), resolve: inv('hosting:resolve'), exportCopy: inv('hosting:exportCopy'), acknowledgeSuperseded: inv('hosting:acknowledgeSuperseded'),
     onProgress: (cb) => listen('hosting:progress', cb), onChanged: (cb) => listen('hosting:changed', cb),
   } as DesktopApi['hosting'],
