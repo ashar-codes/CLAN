@@ -146,3 +146,12 @@ serializes index updates and protects changed/shared/exported files. Authenticat
 unfinished. Do not advertise helpers as complete erasure. Legacy unowned partials cannot be deleted by title guessing.
 Xcode user completed first launch; SDKs now query successfully. CocoaPods installing; isolated `ios-build.sh` is prepared
 but not yet executed. It compiles unsigned .app, never an IPA or signing identity change. Check logs/progress for evidence.
+
+Desktop remove/delete controls now passed typecheck and two real Electron E2Es (owner changed-file failure/retry,
+last-copy warning, restart/rehost fence, private/original retention; member secure join, owner refusal, scoped removal,
+restart/cache/reconnect and intact remote host). Mobile cleanup controls/tests remain next. See lifecycle doc for exact
+scope and conservative legacy/edited/exported retention. Pending intent must never be cleared because cleanup failed.
+Isolated iOS build running from `/Users/ashar/clan-ios-build`, session log `/tmp/clan-142-ios-build1.log`;
+prebuild/codegen PASS, pod dependency download ongoing, native compile unverified. CocoaPods 1.17.0 installed, SDKs
+available, simulator runtime absent. Dedicated Android launchd job stopped for memory; AVD/profile retained and may
+be restarted for the next genuine Android regression. Original checkout/signing/application profiles preserved.

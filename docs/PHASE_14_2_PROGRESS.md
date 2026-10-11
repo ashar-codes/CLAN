@@ -201,3 +201,17 @@ Destructive cleanup coordinator/desktop and mobile controls remain pending; thes
 feature. Final full suites, native cleanup controls and packaging remain pending. Machine load at gate finish ~36/46/37;
 no physical-device performance claim. Xcode license/SDK check now PASS (26.6, iOS SDK 26.5); no simulator runtime/device
 installed. CocoaPods setup and an isolated unsigned native compile script are being prepared; no IPA exists yet.
+
+### Desktop removal/delete controls
+
+Desktop confirmation and retry UI now coordinates scoped cleanup. End the local live session first; private data and
+other hosts remain intact. Owner deletion keeps a durable tombstone/last-copy warning; member removal clears local
+membership/routes. Modified/shared/external downloads are retained and counted. Unknown legacy ownership is retained,
+explicitly described in confirmation. Failures stay unavailable under Cleanup pending until successful retry.
+PASS: typecheck (`/tmp/clan-142-cleanup-controls-typecheck2.log`); owner actual Electron E2E **1/1**, 5.87 s
+(`/tmp/clan-142-cleanup-controls-e2e1.log`), including changed-byte failure/retry, source/private retention, restart and
+host-authority fencing; secure member join/removal **1/1**, 7.31 s (`/tmp/clan-142-remove-controls-e2e1.log`), including
+owner-action refusal, cancellation, restart/cache/reconnect cleanup and intact remote host. Mobile remains pending.
+Xcode/CocoaPods 1.17.0 prerequisites PASS; isolated iOS prebuild/codegen succeeded and pod installation is downloading
+native dependencies (`/tmp/clan-142-ios-build1.log`), not yet compile PASS. Dedicated `clan.phase142.emu` launchd job
+stopped to release its 3 GB while iOS builds; emulator/profile files retained. Branch pushed through `a2840ed`.

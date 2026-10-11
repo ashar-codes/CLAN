@@ -15,12 +15,16 @@ type Rehost = { clanId: string; name: string; type: ClanType };
 export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { experience: Experience; nearby: NearbyClan[]; onCreate(t?: ClanType): void; onJoin(): void; onRehost(r: Rehost): void }) {
   const [places, reload] = useLoad<ClanPlaceView[]>(api.clan.places);
   const [archived, reloadArchived] = useLoad(api.clan.archived);
+  const [pending, reloadPending] = useLoad(api.clan.pendingCleanup);
   const [err, setErr] = useState('');
+  const [notice, setNotice] = useState(''), [retrying, setRetrying] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const refresh = () => { reload(); reloadArchived(); };
-  if (open) return <ClanRoomView id={open} experience={experience} onBack={() => { setOpen(null); refresh(); }} onRehost={onRehost} />;
+  const refresh = () => { reload(); reloadArchived(); reloadPending(); };
+  if (open) return <ClanRoomView id={open} experience={experience} onBack={(message) => { setOpen(null); setNotice(message ?? ''); refresh(); }} onRehost={onRehost} />;
   return (
     <div className="stack">
+      {notice && <p role="status">{notice}</p>}
+      {!!pending?.length && <section className="card" aria-label="Pending CLAN cleanup"><h2>Cleanup pending</h2><p>These CLANs stay unavailable until cleanup finishes. Personal study data is retained.</p>{pending.map((item) => <div className="row between" key={item.id}><span>{item.name}</span><button disabled={retrying === item.id} onClick={() => { setRetrying(item.id); void api.clan.cleanup(item.id, item.kind).then((result) => { setNotice(`Cleanup finished. ${result.retained} modified or shared download copies retained.`); refresh(); }, (e) => setErr(errText(e))).finally(() => setRetrying(null)); }}>Retry cleanup</button></div>)}</section>}
       <header className="page-head">
         <div><span className="eyebrow">Your places</span><h1 className="title world">CLANs</h1></div>
         <div className="row"><button className="primary" onClick={() => onCreate('STUDY_GROUP')}>Create CLAN</button><button onClick={onJoin}>Join by Code</button></div>
@@ -48,16 +52,17 @@ export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { expe
 const TABS = ['Overview', 'Files', 'Members', 'Notes', 'Saved', 'Chat', 'Tasks'] as const;
 const FUTURE = new Set(['Tasks']);
 
-function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experience: Experience; onBack(): void; onRehost(r: Rehost): void }) {
+function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experience: Experience; onBack(message?: string): void; onRehost(r: Rehost): void }) {
   const [d] = useLoad<ClanDetail>(useCallback(() => api.clan.detail(id), [id]));
   const [tab, setTab] = useState<(typeof TABS)[number]>('Overview');
   const [archiveConfirm, setArchiveConfirm] = useState(false), [archiveError, setArchiveError] = useState('');
   const [leaveConfirm, setLeaveConfirm] = useState(false);
+  const [cleanupConfirm, setCleanupConfirm] = useState(false), [cleaning, setCleaning] = useState(false);
   if (!d) return null;
   const host = d.members.find((m) => m.role === 'owner');
   return (
     <div className="stack room-page">
-      <button className="link back" onClick={onBack}>← CLANs</button>
+      <button className="link back" onClick={() => onBack()}>← CLANs</button>
       <div className="row between"><div><span className="eyebrow">{TYPE_LABEL[d.clan.type]}{d.sessions ? ` · ${d.sessions} session${d.sessions === 1 ? '' : 's'}` : ''}</span>
         <h1 className="title world">{d.clan.name}</h1></div>
         {d.mine && d.clan.type !== 'TEMPORARY' && <button className="primary" onClick={() => onRehost({ clanId: d.clan.id, name: d.clan.name, type: d.clan.type })}>Host again</button>}</div>
@@ -76,8 +81,13 @@ function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experi
         {tab === 'Chat' && <OfflineChat clanId={d.clan.id} />}
         {tab === 'Saved' && (d.saved.length ? d.saved.map((s) => <a key={s.id} className="line" href={s.url} target="_blank" rel="noreferrer noopener">{s.title}<span className="muted">{s.source}</span></a>) : <p className="muted">Share a link from Saved.</p>)}
       </section>
-      <section className="card"><button onClick={() => setArchiveConfirm(true)}>Archive on this device</button>{archiveConfirm && <div role="group" aria-label="Confirm archive"><p>Hide this CLAN from My CLANs on this device? Files and membership remain available in Archived CLANs.</p><div className="row"><button onClick={() => { void api.clan.archiveLocal(id, true).then(onBack, (e) => setArchiveError(errText(e))); }}>Confirm archive</button><button onClick={() => setArchiveConfirm(false)}>Cancel</button></div></div>}{archiveError && <p role="alert">{archiveError}</p>}</section>
-      {!d.mine && <section className="card"><button onClick={() => setLeaveConfirm(true)}>Leave CLAN</button>{leaveConfirm && <div role="group" aria-label="Confirm leave"><p>Leave this CLAN on this device? Personal study data and stored copies stay. This offline action cannot confirm that the host revoked your session. Join again through the host's current approval policy.</p><div className="row"><button onClick={() => { void api.clan.leaveLocal(id).then(onBack, (e) => setArchiveError(errText(e))); }}>Confirm leave</button><button onClick={() => setLeaveConfirm(false)}>Cancel</button></div></div>}</section>}
+      <section className="card"><button onClick={() => setArchiveConfirm(true)}>Archive on this device</button>{archiveConfirm && <div role="group" aria-label="Confirm archive"><p>Hide this CLAN from My CLANs on this device? Files and membership remain available in Archived CLANs.</p><div className="row"><button onClick={() => { void api.clan.archiveLocal(id, true).then(() => onBack(), (e) => setArchiveError(errText(e))); }}>Confirm archive</button><button onClick={() => setArchiveConfirm(false)}>Cancel</button></div></div>}{archiveError && <p role="alert">{archiveError}</p>}</section>
+      {!d.mine && <section className="card"><button onClick={() => setLeaveConfirm(true)}>Leave CLAN</button>{leaveConfirm && <div role="group" aria-label="Confirm leave"><p>Leave this CLAN on this device? Personal study data and stored copies stay. This offline action cannot confirm that the host revoked your session. Join again through the host's current approval policy.</p><div className="row"><button onClick={() => { void api.clan.leaveLocal(id).then(() => onBack(), (e) => setArchiveError(errText(e))); }}>Confirm leave</button><button onClick={() => setLeaveConfirm(false)}>Cancel</button></div></div>}</section>}
+      <section className="card"><button disabled={cleaning} onClick={() => setCleanupConfirm(true)}>{d.mine ? 'Delete CLAN from this device' : 'Remove CLAN copy from this device'}</button>{cleanupConfirm && <div role="group" aria-label="Confirm CLAN cleanup">
+        <p>{d.mine ? 'This device may hold the only copy. Delete its CLAN history and shared files, and remove its hosting authority? Offline copies on other devices remain.' : 'Remove this device’s CLAN chat, boards, shared references and verified downloads, and leave its local membership? Remote revocation cannot be confirmed here.'}</p>
+        <p>Personal study data, files used by your Courses, exported and edited files stay. Older downloads without recorded ownership may remain. End any live session first. Once confirmed, failures stay pending and can be retried.</p>
+        <div className="row"><button disabled={cleaning} onClick={() => { setCleaning(true); setArchiveError(''); void api.clan.cleanup(id, d.mine ? 'delete' : 'remove').then((result) => onBack(`CLAN cleanup finished. ${result.retained} modified or shared download copies retained.`), (e) => setArchiveError(errText(e))).finally(() => setCleaning(false)); }}>{cleaning ? 'Removing…' : d.mine ? 'Confirm delete' : 'Confirm remove'}</button><button disabled={cleaning} onClick={() => setCleanupConfirm(false)}>Cancel</button></div>
+      </div>}</section>
     </div>
   );
 }

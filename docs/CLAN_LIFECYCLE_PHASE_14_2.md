@@ -26,9 +26,27 @@ Failure/delayed acknowledgement is explicitly shown as **remote revocation uncon
 offline host revoked rights. An offline room's Leave action has the same local-only warning. Private study data and
 stored copies are retained; leave does not claim to erase files already downloaded.
 
-## Remaining actions (implementation pending)
+## Scoped removal and owner deletion
 
-The core cleanup foundation is implemented, but destructive controls are **not exposed yet**. An appended migration
+Desktop controls are implemented and verified. They require ending the current local host session first; no other live
+meeting is stopped by a background cleanup action. Owner deletion shows a last-copy warning, removes this device's
+CLAN history and authority, and retains the canonical tombstone. Member-copy removal leaves local membership and
+forgets only scoped reconnect routes. Neither action claims to erase or revoke offline copies on remote devices.
+
+The controller persists authorized intent, clears module projections, stops scoped download jobs, removes only exact
+owned downloads/partials, preserves adopted classroom bytes in the Resource Store, cleans stopped server history, then
+collects unreferenced managed objects. Only successful cleanup marks completion. Failures remain fenced and visible
+under **Cleanup pending**, with Retry cleanup. Referenced bytes, exported files, symlinks and changed downloaded files
+are retained; the result reports retained indexed copies. Older downloads/partials lacking ownership records are kept,
+as confirmation explains. No class-title folder deletion or guessed scope is permitted.
+
+Desktop native E2Es cover owner cancellation, changed-file failure/retry, restart/rehost fencing, original source and
+private note retention; member cancellation, owner-action refusal, restart/cache/reconnect removal and intact remote
+host authority. Mobile controls/native cleanup checks remain unfinished.
+
+## Core foundation and remaining mobile work
+
+The core cleanup foundation is implemented. Appended migrations
 records authorized remove/delete intent, candidate object IDs and completion separately. Pending intent fences reads,
 membership restoration and host capabilities; owner deletion cannot be undone by startup classroom imports. Only a
 completed member-copy removal may be cleared by the authenticated join coordinator. The composition root calls each
@@ -40,11 +58,11 @@ unlink-before-metadata crashes. Adopted classroom objects still require server-o
 referenced bytes. Cleanup completion must wait for host/download cleanup; clearing projections is not physical erasure.
 The implementation also rechecks file-sharing membership at publication after asynchronous storage.
 
-* **Remove local copy:** confirmation must describe exactly which local cached CLAN data is removed. Modules remove
+* **Mobile remove local copy:** confirmation must describe exactly which local cached CLAN data is removed. Modules remove
   their own rows through public APIs; the resource store releases scoped references and preserves blobs referenced
   by personal data or another CLAN. Externally exported files are not CLAN's cache. Never delete personal courses,
   notes, Diary, signing keys or another CLAN. Do not call hiding a list row removal of the stored copy.
-* **Owner delete:** require local owner authorization and explicit confirmation, stop an owned live host, record a
+* **Mobile owner delete:** require local owner authorization and explicit confirmation, stop an owned live host, record a
   durable deletion marker before cleanup, and prevent startup imports from recreating the deleted CLAN. This device
   cannot erase offline copies on other devices or claim a global deletion acknowledgement.
 * **Last copy:** there is currently no verified durable replica registry. Warn that this device may have the only

@@ -11,6 +11,7 @@ const inv = (ch: string) => (...a: unknown[]) => ipcRenderer.invoke(ch, ...a);
 const api: DesktopApi = {
   clan: {
     archived: inv('clan:archived'), archiveLocal: inv('clan:archiveLocal'),
+    pendingCleanup: inv('clan:pendingCleanup'), cleanup: inv('clan:cleanup'),
     leaveLocal: inv('clan:leaveLocal'), leaveMembership: inv('clan:leaveMembership'),
     home: inv('clan:home'), joined: inv('clan:joined'), places: inv('clan:places'), personalFiles: inv('files:personal'), addPersonalFile: inv('files:addPersonal'), list: inv('clan:list'), detail: inv('clan:detail'),
     notes: inv('notes:mine'), createNote: inv('notes:create'), updateNote: inv('notes:update'), removeNote: inv('notes:remove'), shareNote: inv('notes:share'),

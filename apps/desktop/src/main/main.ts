@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { ClanType, JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
 import { leaveClanSession, pairAndJoin, reconnect, type Candidate } from '@classroom/client';
 import { pinnedTransport } from '@classroom/client/node';
-import { backupDb, logError, openDbSafely } from '@classroom/server';
+import { backupDb, logError, openDbSafely, purgeStoppedSessions } from '@classroom/server';
 import { Keystore } from './keystore.ts';
 import { Trust } from './trust.ts';
 import { candidateInterfaces, openDb, startClassroomServer, type RunningServer } from '@classroom/server';
@@ -304,6 +304,30 @@ function registerIpc() {
 
   const files = (studentFiles = new StudentFiles(() => BrowserWindow.getAllWindows()[0], trust, (sid, id) => server?.classroom.id === sid ? server.resources.openForDownload({ role: 'teacher' }, id) : null));
   const conn = (c: unknown): Conn => ConnArgs.parse(c);
+  const cleanupTasks = new Map<string, Promise<{ retained: number }>>();
+  ipcMain.handle('clan:pendingCleanup', () => clan.clans.pendingCleanup(clan.me).map((intent) => ({ id: intent.clanId, kind: intent.kind, name: clan.clans.get(intent.clanId)?.name ?? 'CLAN' })));
+  ipcMain.handle('clan:cleanup', (_e, rawId, rawKind) => {
+    const id = z.uuid().parse(rawId), kind = z.enum(['remove', 'delete']).parse(rawKind);
+    if (server) throw new Error('End the current CLAN session before removing stored copies.');
+    clan.clans.requestCleanup(id, clan.me, kind); // durable authorization, before asynchronous cleanup
+    const previous = cleanupTasks.get(id); if (previous) return previous;
+    const task = (async () => {
+      const hostSessions = clan.clans.sessionsOf(id);
+      const sessions = [...new Set([...hostSessions, ...clan.clans.localSessionsOf(id, clan.me)])];
+      trust.forgetClanSessions(id); for (const sid of sessions) trust.forgetSession(sid);
+      clan.purgeClanProjection(id);
+      const copies = await files.removeSessionCopies(sessions);
+      await purgeStoppedSessions(db(), join(app.getPath('userData'), 'storage'), hostSessions, {
+        preserve: (path) => clan.store.preserveAdoptedAt(path), removed: (path) => clan.store.forgetAdoptedAt(path),
+      });
+      for (const objectId of clan.clans.cleanupObjects(id)) {
+        if (clan.store.collectOwned(objectId) === 'adopted') throw new Error('A classroom file still needs scoped cleanup. The request remains pending.');
+      }
+      clan.clans.completeCleanup(id, clan.me);
+      return { retained: copies.retained };
+    })().finally(() => cleanupTasks.delete(id));
+    cleanupTasks.set(id, task); return task;
+  });
   ipcMain.handle('clan:leaveLocal', (_e, raw) => { const id = z.uuid().parse(raw); clan.clans.leave(id, clan.me); trust.forgetClanSessions(id); });
   ipcMain.handle('clan:leaveMembership', async (_e, raw, id) => {
     const c = conn(raw), clanId = z.uuid().parse(id);
