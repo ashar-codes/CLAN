@@ -255,6 +255,8 @@ export class Assignments extends EventEmitter {
   /** Startup: in-flight uploads from previous runs can't continue (their sessions ended). */
   async sweep() {
     this.db.prepare("UPDATE uploads SET state = 'failed', error = 'Interrupted: the class ended before the upload finished.' WHERE state = 'uploading' AND session_id != ?").run(this.classroom.id);
-    await this.storage.sweepTmp(() => false);
+    // Quarantined shares awaiting host review are durable (they survive the session and restarts); keep their bytes.
+    const pending = new Set((this.db.prepare("SELECT id FROM share_uploads WHERE state = 'complete' AND approval = 'pending'").all() as { id: string }[]).map((r) => r.id));
+    await this.storage.sweepTmp((id) => pending.has(id));
   }
 }
