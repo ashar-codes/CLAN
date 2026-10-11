@@ -71,3 +71,14 @@ computer→phone and 9 MB phone→computer files verified with receipts. Mobile 
 NOT IN THIS BUILD (needs native modules / device validation): phone-to-phone contact (no listener on phones), camera QR
 scanning (expo-camera), voice-note recording/playback (expo-audio), calls on phones (@livekit/react-native-webrtc is
 present but the call UI is unvalidated, so not shipped).
+
+### Stage 5 — verification (cloud, Linux)
+| Check | Result |
+|---|---|
+| `pnpm typecheck` (root, desktop, mobile, visual-lab) | PASS |
+| `pnpm test` unit + integration | PASS — 392 passed, 14 skipped (hardware/LAN-gated), 0 failed |
+| People core / transport / phone runtime | PASS — 9 + 5 + 1 |
+| Desktop E2E `people.test.ts` | PASS — 5/5 |
+| Desktop E2E full suite (Phase 14.2 regression: hosting, classroom, join, chat, sync, lifecycle, sharing…) | 30 passed, 2 skipped, 6 failed — the same 6 as the untouched Phase 14.2 baseline: screen sharing ×3 (no capture in Xvfb), Astra canvas/world ×2 (WebGL blocklisted), board-tape (pre-existing `Leave` vs `Leave membership` selector clash). None in code this phase touched. |
+| Mobile: Metro Android bundle (`expo export`) | PASS (People screen included) |
+| macOS / Windows / Android / iOS hardware | NOT TESTED — `PHASE_14_3_HARDWARE_TESTS.md` |
