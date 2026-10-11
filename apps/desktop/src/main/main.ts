@@ -200,6 +200,7 @@ function registerIpc() {
     if (server) await server.close();
     await direct.stop();
     // Every hosted session belongs to a canonical CLAN: re-host keeps it; classrooms reuse their course's CLAN; others are created.
+    await clan.hosting.ready(); // a database restored from an older backup never resumes hosting
     let title = a.title, type = a.type, clanId: string | null;
     if (a.clanId) {
       const c = clan.clans.get(a.clanId);

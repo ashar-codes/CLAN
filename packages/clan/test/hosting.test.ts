@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { randomUUID, createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { newEd25519, nodeSigner } from '@classroom/client/node';
 import { serverCheckpointSection } from '@classroom/server';
 import { authorityHash, checkpointHash, hostSessionStatement, sectionBytes, sha256Hex, signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointHeader, type CheckpointProvider, type HostDelegation } from '@classroom/protocol';
@@ -232,13 +233,19 @@ describe('persistent hosting authority', () => {
     } finally { w.close(); }
   });
 
-  it('a failed import (crash before activation) leaves the device a standby; the retry activates', async () => {
-    let fail = true;
-    const flaky = (): CheckpointProvider => ({ section: 'zz-test', export: () => ({ rows: [], files: [] }), validate: () => [], import: () => { if (fail) throw new Error('crash during import'); } });
+  it('a storage failure or crash before activation leaves the device a standby with its staging; the retry activates', async () => {
+    let fail = true, diskFull = true;
+    const flaky = (): CheckpointProvider => ({ section: 'zz-test', export: () => ({ rows: [], files: [] }), validate: () => [],
+      materialize: async () => { if (diskFull) { diskFull = false; throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }); } },
+      import: () => { if (fail) throw new Error('crash during import'); } });
     const w = world({ extra: () => [flaky()] });
     try {
       const s = await seed(w);
       const h = await handoff(w);
+      // storage fails while placing bytes: nothing imported, still a standby, staging kept for the retry
+      await expect(w.desk.h.accept(h.chain, w.deskKey.publicKey)).rejects.toThrow('ENOSPC');
+      expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ epoch: 0, writable: false });
+      expect(await w.desk.h.missingBlobs(w.clan.id)).toEqual([]);
       await expect(w.desk.h.accept(h.chain, w.deskKey.publicKey)).rejects.toThrow('crash during import');
       expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ epoch: 0, writable: false });
       expect(w.desk.app.chat.page(s.thread.id)).toEqual([]); // imported rows rolled back with the authority update
@@ -451,6 +458,30 @@ describe('persistent hosting authority', () => {
       await w.desk.h.accept(h.chain, w.deskKey.publicKey);
       expect(() => w.desk.app.clans.requestCleanup(w.clan.id, w.desk.app.me, 'delete')).toThrow('hosts this CLAN for its owner');
       expect(w.phone.h.cleanupBlocked(w.clan.id)).toBeNull(); // the owner device (now standby) may still delete its own copy
+    } finally { w.close(); }
+  });
+
+  it('a database restored from an older backup never resumes hosting (fence outside the database)', async () => {
+    const w = world();
+    try {
+      await seed(w);
+      await w.phone.h.fenceSettled();
+      const snapshot = join(w.phone.storageDir, 'before-handover.db');
+      w.phone.db.exec(`VACUUM INTO '${snapshot}'`); // what backupDb keeps
+      const h = await handoff(w);
+      await w.phone.h.fenceSettled();
+      expect(w.phone.h.status(w.clan.id, w.ownerKey.publicKey)?.state).toBe('relinquished');
+      // corruption → openDbSafely restores the older backup; same device, same hosting folder
+      const restored = new DatabaseSync(snapshot);
+      const again = device({ now: () => T0, owner: () => w.ownerKey.publicKey, base: setup({ db: restored as never, storageDir: w.phone.storageDir, now: () => T0 }) }).h;
+      expect(again.status(w.clan.id, w.ownerKey.publicKey)).toMatchObject({ state: 'active', writable: true }); // what the backup says
+      await again.ready();
+      expect(again.status(w.clan.id, w.ownerKey.publicKey)).toMatchObject({ state: 'standby', writable: false });
+      expect(again.localWriteBlocked(w.clan.id)).toMatch(/older backup/);
+      expect((await again.handoverStatus(w.clan.id, w.ownerKey.publicKey)).restored).toMatch(/older backup/);
+      // it can still learn the real chain as a standby, and the fence is never lowered by the restored database
+      expect(await again.accept(h.chain, w.ownerKey.publicKey)).toMatchObject({ epoch: 1, state: 'standby' });
+      restored.close();
     } finally { w.close(); }
   });
 });

@@ -96,6 +96,47 @@ export class HostAuthority {
     this.dir = o.dir; this.me = o.me ?? (() => '');
     this.freeBytes = o.freeBytes ?? (async () => { await mkdir(this.dir, { recursive: true }); const f = await statfs(this.dir); return f.bavail * f.bsize; });
   }
+  // ---- rollback protection ----
+  // Database backups (openDbSafely restores the newest healthy one after corruption) must never bring back an older
+  // hosting state: this file, outside the database and its backups, records the highest epoch this device accepted and
+  // whether it relinquished it. A restored state older than the file is demoted to a never-writable standby.
+  private fenceFile() { return join(this.dir, 'fence.json'); }
+  private loaded: Promise<void> | null = null;
+  private fenceWrites: Promise<void> = Promise.resolve();
+  /** Await before hosting a session (desktop does so before starting a host server). Idempotent. */
+  ready() { return this.loaded ??= this.checkFence(); }
+  private async checkFence() {
+    let f: { clans?: Record<string, { epoch: number; relinquished: boolean }> } = {};
+    try { f = JSON.parse(new TextDecoder().decode(await readFile(this.fenceFile()))); } catch { /* first run, or no fence yet */ }
+    for (const [clanId, x] of Object.entries(f.clans ?? {})) {
+      const r = this.row(clanId);
+      if (!r || typeof x?.epoch !== 'number') continue;
+      const older = r.epoch < x.epoch || (r.epoch === x.epoch && x.relinquished && (r.state === 'active' || r.state === 'frozen'));
+      if (older && r.state !== 'standby') this.db.prepare("UPDATE hosting_authority SET state = 'standby', conflict = ?, updated_at = ? WHERE clan_id = ?")
+        .run(JSON.stringify({ restored: `This device's hosting records were restored from an older backup (epoch ${r.epoch}; this device had reached epoch ${x.epoch}). It will not accept changes for this CLAN; its data is kept.` }), this.now(), clanId);
+    }
+  }
+  private recordFence() {
+    const rows = this.db.prepare('SELECT clan_id, epoch, state FROM hosting_authority').all() as { clan_id: string; epoch: number; state: HostState }[];
+    const clans = Object.fromEntries(rows.map((r) => [r.clan_id, { epoch: r.epoch, relinquished: r.state === 'relinquished' }]));
+    const write = async () => {
+      await mkdir(this.dir, { recursive: true });
+      // never lower what the file already promises (a restored database must not rewrite the fence downwards)
+      let prev: Record<string, { epoch: number; relinquished: boolean }> = {};
+      try { prev = JSON.parse(new TextDecoder().decode(await readFile(this.fenceFile()))).clans ?? {}; } catch { /* none yet */ }
+      for (const [id, p] of Object.entries(prev)) { const n = clans[id]; if (!n || p.epoch > n.epoch || (p.epoch === n.epoch && p.relinquished)) clans[id] = p; }
+      const tmp = `${this.fenceFile()}.tmp`;
+      await rm(tmp, { force: true });
+      const fh = await open(tmp, 'a');
+      try { await fh.write(new TextEncoder().encode(JSON.stringify({ v: 1, clans }))); } finally { await fh.close(); }
+      await rename(tmp, this.fenceFile());
+    };
+    // Best effort: a failed write only weakens rollback detection (the database commit already happened).
+    return this.fenceWrites = this.fenceWrites.then(write, write).catch(() => {});
+  }
+  /** Resolves when the rollback fence file reflects every committed hosting change so far. */
+  fenceSettled() { return this.fenceWrites.catch(() => {}); }
+
   /** Each owning module (and the host server) contributes one section; both ends must register the same set. */
   register(p: CheckpointProvider) {
     if (this.providers.has(p.section)) throw new Error(`Duplicate checkpoint section ${p.section}.`);
@@ -134,6 +175,7 @@ export class HostAuthority {
       this.db.prepare('INSERT INTO hosting_authority (clan_id, owner_key, epoch, head_hash, chain, state, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?)')
         .run(clanId, owner.publicKey, chk.hashes[0]!, JSON.stringify([g]), 'active', this.now());
     });
+    void this.recordFence();
     return this.status(clanId, owner.publicKey)!;
   }
 
@@ -199,7 +241,7 @@ export class HostAuthority {
    *  lost hosting rights, or the records conflict. Devices that never hosted (standby caches) are not gated. */
   localWriteBlocked(clanId: string, at = this.now()): string | null {
     const r = this.row(clanId); if (!r) return null;
-    if (r.state === 'standby') return null;
+    if (r.state === 'standby') return r.conflict && r.conflict.includes('"restored"') ? 'This device\'s hosting records were restored from an older backup.' : null;
     if (r.state === 'active') return hostAuthorized(this.head(r), at, this.revoked(r)) ? null : 'This device\'s hosting permission has expired or was revoked.';
     return r.state === 'frozen' ? 'Hosting is paused for a hand-over.' : r.state === 'conflict' ? 'Conflicting hosting records; writes are unavailable until resolved.' : 'This device handed hosting over.';
   }
@@ -242,6 +284,7 @@ export class HostAuthority {
       conflict: c && { message: c.message, forkEpoch: c.forkEpoch, ours: authorityHash(this.chain(r)[c.forkEpoch] ?? this.head(r)), theirs: c.competing ? authorityHash(c.competing[c.forkEpoch] ?? c.competing.at(-1)!) : null,
         oursHost: (this.chain(r)[c.forkEpoch] ?? this.head(r)).hostKey, theirsHost: c.competing ? (c.competing[c.forkEpoch] ?? c.competing.at(-1)!).hostKey : null },
       superseded: sup,
+      restored: r.state !== 'conflict' && r.conflict ? (() => { try { return (JSON.parse(r.conflict) as { restored?: string }).restored ?? null; } catch { return null; } })() : null,
     };
   }
   /** Destination: room for the remaining blobs plus the copies made when activating, with a safety reserve. */
@@ -460,6 +503,7 @@ export class HostAuthority {
       this.db.prepare('INSERT INTO hosting_transitions (clan_id, epoch, record, created_at) VALUES (?, ?, ?, ?)').run(clanId, r.epoch, JSON.stringify(t), at);
       this.setState(clanId, 'relinquished');
     });
+    void this.recordFence();
     return t;
   }
   pendingTransition(clanId: string) {
@@ -727,7 +771,7 @@ export class HostAuthority {
       conflict = { message: msg, prevState: (r && r.state !== 'conflict' ? r.state : r ? this.conflictOf(r)?.prevState : 'standby') ?? 'standby', forkEpoch, competing: rs };
       throw new HostingError('conflict', msg);
     };
-    try { return this.apply(clanId, r, rs, h, chk.hashes, localKey, fail, sections); } finally {
+    try { const head = this.apply(clanId, r, rs, h, chk.hashes, localKey, fail, sections); void this.recordFence(); return head; } finally {
       // Recorded outside the rolled-back transaction: the CLAN stays unavailable for writes until the owner resolves it.
       if (conflict) this.setState(clanId, 'conflict', JSON.stringify(conflict));
     }
