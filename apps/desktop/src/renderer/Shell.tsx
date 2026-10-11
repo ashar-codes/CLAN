@@ -1,4 +1,4 @@
-// Production shell: My Space / Commons / CLANs / Study / Saved / Me. The world is the navigation, every place also has a
+// Production shell: My Space / My CLANs / Nearby / Chats / Friends / Study / Saved / Me. The world is the navigation, every place also has a
 // conventional equivalent, and the Visual Experience setting (Full / Reduced / Minimal) decides how much of it is drawn.
 import { useCallback, useEffect, useState } from 'react';
 import type { ClanType, HomeView } from '../shared.ts';
@@ -12,12 +12,17 @@ import { Study } from './world/Study.tsx';
 import { Ctx, SessionBar, useActiveSession, type StudyCtx, type StudyTarget } from './world/study/common.tsx';
 import { Saved } from './world/Saved.tsx';
 import { Me } from './world/Me.tsx';
+import { NearbyPeople } from './world/people/NearbyPeople.tsx';
+import { Chats } from './world/people/Chats.tsx';
+import { Friends } from './world/people/Friends.tsx';
+import { CallProvider } from './world/people/Call.tsx';
+import { usePeople } from './world/people/common.tsx';
 import { QuickCapture } from './world/QuickCapture.tsx';
 import { useAI } from './world/ai/ctx.tsx';
 import type { AIScope } from '../shared.ts';
 
-type Tab = 'space' | 'commons' | 'clans' | 'study' | 'saved' | 'me';
-const TABS: [Tab, string, string][] = [['space', 'My Space', '⌂'], ['commons', 'Commons', '◎'], ['clans', 'CLANs', '▦'], ['study', 'Study', '▥'], ['saved', 'Saved', '❏'], ['me', 'Me', '☺']];
+type Tab = 'space' | 'clans' | 'commons' | 'chats' | 'friends' | 'study' | 'saved' | 'me';
+const TABS: [Tab, string, string][] = [['space', 'My Space', '⌂'], ['clans', 'My CLANs', '▦'], ['commons', 'Nearby', '◎'], ['chats', 'Chats', '✉'], ['friends', 'Friends', '☻'], ['study', 'Study', '▥'], ['saved', 'Saved', '❏'], ['me', 'Me', '☺']];
 type Rehost = { clanId: string; name: string; type: ClanType };
 
 export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType): void; onJoin(): void; onRehost(r: Rehost): void }) {
@@ -29,6 +34,12 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
   const [nearby, setNearby] = useState<NearbyClan[]>([]);
   const [toast, setToast] = useState('');
   const ai = useAI();
+  const [chatId, setChatId] = useState<string | null>(null);
+  const openChat = (id: string) => { setChatId(id); setTab('chats'); };
+  const [convs] = usePeople(() => api.people.conversations());
+  const unread = convs?.reduce((n, c) => n + c.unread + (c.state === 'invited_in' ? 1 : 0), 0) ?? 0;
+  const [reqs] = usePeople(() => api.people.contacts('requests'));
+  const incoming = reqs?.filter((r) => r.relation === 'incoming').length ?? 0;
   const [manualFocus, setFocus] = useState(false);
   // A Focus study session turns Focus Mode on; ending it restores whatever was set before. No penalties, no streaks.
   const focus = manualFocus || !!session?.focus;
@@ -77,17 +88,20 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
 
   return (
     <Ctx.Provider value={study}>
+    <CallProvider>
     <div className={`shell ${focus ? 'is-focus' : ''}`}>
       <header className="shell-top">
         <span className="brand-sm">CLAN</span>
         <button className="ask-clan" onClick={() => go('guide')} aria-label="Ask CLAN">Ask CLAN</button>
         <nav className="tabs-main" aria-label="Main">
-          {TABS.map(([t, l, ic]) => <button key={t} className={tab === t ? 'on' : ''} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}><span className="tab-ic" aria-hidden>{ic}</span>{l}</button>)}
+          {TABS.map(([t, l, ic]) => { const n = t === 'chats' ? unread : t === 'friends' ? incoming : 0; return <button key={t} className={tab === t ? 'on' : ''} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}><span className="tab-ic" aria-hidden>{ic}</span>{l}{n > 0 && <span className="badge" aria-label={`${n} new`}>{n}</span>}</button>; })}
         </nav>
       </header>
       <main className="shell-body" key={tab}>
         {tab === 'space' && h && <MySpace h={h} nearby={nearby.length} beacon={focus ? 'focus' : 'available'} experience={experience} go={go} quick={quick} />}
-        {tab === 'commons' && <Commons nearby={nearby} experience={experience} onJoin={onJoin} onCreate={() => onCreate('STUDY_GROUP')} />}
+        {tab === 'commons' && <Commons nearby={nearby} experience={experience} onJoin={onJoin} onCreate={() => onCreate('STUDY_GROUP')} people={<NearbyPeople onChat={openChat} />} />}
+        {tab === 'chats' && <Chats openId={chatId} setOpenId={setChatId} />}
+        {tab === 'friends' && <Friends onChat={openChat} />}
         {tab === 'clans' && <Clans experience={experience} nearby={nearby} onCreate={onCreate} onJoin={onJoin} onRehost={onRehost} />}
         {tab === 'study' && <Study experience={experience} />}
         {tab === 'saved' && <Saved experience={experience} />}
@@ -98,6 +112,7 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
       <QuickCapture onDone={(m, g) => { setToast(m); reloadHome(); if (g) go(g); }} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>
+    </CallProvider>
     </Ctx.Provider>
   );
 }

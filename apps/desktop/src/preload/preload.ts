@@ -70,7 +70,7 @@ const api: DesktopApi = {
     read: inv('people:read'), clear: inv('people:clear'), remove: inv('people:remove'),
     sendFile: (c, files) => ipcRenderer.invoke('people:sendFile', c, files ? files.slice(0, 10).map((f) => webUtils.getPathForFile(f)).filter(Boolean) : undefined),
     sendVoice: inv('people:sendVoice'), file: inv('people:file'), voiceBytes: inv('people:voiceBytes'), preview: inv('people:preview'), save: inv('people:save'), openWith: inv('people:openWith'),
-    signal: inv('people:signal'), logCall: inv('people:logCall'),
+    armMedia: inv('people:armMedia'), signal: inv('people:signal'), logCall: inv('people:logCall'),
     onChanged: (cb) => listen('people:changed', cb), onLive: (cb) => listen('people:live', cb),
   } as DesktopApi['people'],
   hosting: {

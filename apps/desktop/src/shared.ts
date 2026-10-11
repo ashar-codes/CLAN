@@ -326,6 +326,8 @@ export type PeopleApi = {
   sendFile(convId: string, files?: File[]): Promise<PeopleTransfer[]>; sendVoice(convId: string, bytes: Uint8Array, mime: string, durationMs: number): Promise<PeopleTransfer>;
   file(action: 'accept' | 'decline' | 'cancel' | 'retry', transferId: string): Promise<void>; voiceBytes(transferId: string): Promise<Uint8Array>;
   preview(transferId: string): Promise<FilePreview>; save(transferId: string): Promise<{ name: string } | null>; openWith(transferId: string): Promise<void>;
+  /** Lets the next microphone (voice note, call) or camera (QR scan) request through, for 15 s. */
+  armMedia(kind: 'microphone' | 'camera'): Promise<void>;
   signal(key: string, body: Record<string, unknown>): Promise<boolean>; logCall(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }): Promise<void>;
   onChanged(cb: (e: { what: string; convId?: string; key?: string }) => void): () => void;
   onLive(cb: (e: { from: string; body: Record<string, unknown> & { kind: string; callId: string } }) => void): () => void;

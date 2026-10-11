@@ -2,14 +2,17 @@
 // visibility, its QR code, and scanning someone else's code (camera or picture) to connect with a verified identity.
 import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
-import type { NearbyPersonView } from '../../../shared.ts';
+import type { NearbyPersonView, PeopleContact } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import { errText, Initials, REL, usePeople } from './common.tsx';
+import { ChatInvite } from './Chats.tsx';
 
 export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
   const [list] = usePeople(() => api.people.nearby());
   const [me, reloadMe] = usePeople(() => api.people.me());
   const [msg, setMsg] = useState(''), [err, setErr] = useState('');
+  const [connected, setConnected] = useState<string | null>(null);
+  const [cc] = usePeople(() => connected ? api.people.contact(connected) : Promise.resolve(null), [connected]);
   useEffect(() => { const t = setInterval(() => void api.people.nearby().then(() => {}), 5000); return () => clearInterval(t); }, []);
   const act = (f: () => Promise<unknown>, done: string) => { setErr(''); void f().then(() => setMsg(done), (e) => setErr(errText(e))); };
   const vis = me?.profile.visibility;
@@ -30,7 +33,9 @@ export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
         {!list?.length && <p className="muted" role="status">Nobody nearby is visible to you right now. People appear here only while they choose to be visible.</p>}
         {list?.map((n) => <NearbyCard key={n.key} n={n} onChat={onChat} onError={setErr} />)}
       </div>
-      <QrCard onConnected={(name) => setMsg(`Connected to ${name}. Their identity matched the code.`)} onError={setErr} />
+      {cc && !list?.some((n) => n.key === cc.key) && <div role="list" aria-label="Connected by code" className="people-list">
+        <NearbyCard n={{ key: cc.key, name: cc.name, profile: cc.profile ?? { key: cc.key, name: cc.name, avatar: null, updatedAt: 0 }, endpoint: '', relation: cc.relation, seenAt: cc.lastSeen, verified: cc.verified }} onChat={onChat} onError={setErr} /></div>}
+      <QrCard onConnected={(c) => { setConnected(c.key); setMsg(`Connected to ${c.name}. Their identity matched the code.`); }} onError={setErr} />
     </section>
   );
 }
@@ -47,22 +52,22 @@ function NearbyCard({ n, onChat, onError }: { n: NearbyPersonView; onChat(id: st
       <div className="row">
         {rel === 'none' && <button onClick={() => run(() => api.people.friend('request', n.key))}>Add friend</button>}
         {rel === 'incoming' && <button className="primary" onClick={() => run(() => api.people.friend('accept', n.key))}>Accept friend</button>}
-        <button onClick={() => run(() => api.people.invite(n.key).then(onChat))}>Invite to chat</button>
+        <ChatInvite peerKey={n.key} onChat={onChat} onError={onError} />
       </div>
     </article>
   );
 }
 
 /** Your code and a scanner. A scanned code must match the identity and certificate the person presents. */
-function QrCard({ onConnected, onError }: { onConnected(name: string): void; onError(e: string): void }) {
+function QrCard({ onConnected, onError }: { onConnected(c: PeopleContact): void; onError(e: string): void }) {
   const [img, setImg] = useState<string | null>(null), [text, setText] = useState(''), [scanning, setScanning] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
-  const connect = (code: string) => void api.people.connectQr(code).then((c) => onConnected(c.name), (e) => onError(errText(e)));
+  const connect = (code: string) => void api.people.connectQr(code).then(onConnected, (e) => onError(errText(e)));
   const decode = (data: ImageData) => jsQR(data.data, data.width, data.height)?.data ?? null;
   useEffect(() => {
     if (!scanning) return;
     let stream: MediaStream | null = null, stop = false;
-    void navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }).then((s) => {
+    void api.people.armMedia('camera').then(() => navigator.mediaDevices.getUserMedia({ video: true, audio: false })).then((s) => {
       stream = s; if (!video.current) return; video.current.srcObject = s; void video.current.play();
       const c = document.createElement('canvas'), ctx = c.getContext('2d')!;
       const loop = () => {

@@ -28,7 +28,7 @@ async function launch(env: Record<string, string> = {}) {
 }
 
 async function joinByCode(page: Page, name: string, code: string) {
-  await page.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await page.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await page.getByRole('button', { name: 'Join by Code' }).click();
   await page.getByLabel('Full name').fill(name);
   await page.getByLabel('Student / roll number').fill(`R-${name}`);
@@ -44,7 +44,7 @@ it('Host again over Direct (mock): code → BLE bootstrap → Wi-Fi package → 
   const host = H.page;
   host.on('dialog', (d) => d.accept());
   // an existing Study Group (hosted once on the existing network, then ended)
-  await host.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await host.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await host.getByRole('button', { name: 'Create CLAN' }).click();
   await host.getByLabel('Name', { exact: true }).fill('OS Study Group');
   await host.getByRole('button', { name: 'Start CLAN' }).click();
@@ -52,7 +52,7 @@ it('Host again over Direct (mock): code → BLE bootstrap → Wi-Fi package → 
   await host.getByRole('button', { name: 'End CLAN' }).click();
 
   // Host again → Direct Network + Peer Assisted
-  await host.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await host.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await host.locator('.clan-card', { hasText: 'OS Study Group' }).click();
   await host.getByRole('button', { name: 'Host again' }).click();
   await host.getByText('Host OS Study Group again').waitFor();

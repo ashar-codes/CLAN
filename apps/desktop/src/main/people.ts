@@ -4,7 +4,7 @@
 // transport in people-runtime.ts; WebRTC media runs in the renderer with signaling relayed here (signed, live-only).
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { constants } from 'node:fs';
-import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { basename, extname, join } from 'node:path';
@@ -20,6 +20,7 @@ import { keyFingerprint, PROFILE_FIELDS, safetyNumber, TEMP_TTLS, VOICE_MIME, ty
 import { startPeopleRuntime } from './people-runtime.ts';
 import { canOpen } from './student.ts';
 import { windowsOpenWith } from './open-with.ts';
+import { armMedia } from './tape.ts';
 import type { Keystore } from './keystore.ts';
 import type { Trust } from './trust.ts';
 
@@ -33,12 +34,18 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   if (p.myProfile().name === 'CLAN user' && o.displayName()) p.updateProfile({ name: o.displayName()!.slice(0, 80) });
   const send = (ch: string, v: unknown) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send(ch, v); };
   const loopback = process.env.CLAN_TEST_LOOPBACK === '1' && !(await import('electron')).app.isPackaged; // development/E2E only
-  const rt = await startPeopleRuntime({
-    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true,
+  // The same port across restarts, so friends' saved routes keep working; a fresh one only if it is taken.
+  const portFile = join(o.dataDir, 'people', 'port');
+  await mkdir(join(o.dataDir, 'people'), { recursive: true });
+  const saved = Number(await readFile(portFile, 'utf8').catch(() => '')) || undefined;
+  const start = (port?: number) => startPeopleRuntime({
+    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port,
     endpoints: (port) => [...candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${port}`), ...(loopback ? [`127.0.0.1:${port}`] : [])].slice(0, 3),
     onLive: (e) => send('people:live', { from: e.from, body: e.body }),
     onChange: (what) => send('people:changed', { what }),
   });
+  const rt = await start(saved).catch((e: NodeJS.ErrnoException) => { if (saved && e.code === 'EADDRINUSE') return start(); throw e; });
+  if (rt.port !== saved) await writeFile(portFile, String(rt.port));
   c.bus.subscribe('desktop.people', PeopleChanged, (e) => send('people:changed', e.payload));
   setInterval(() => void p.sweep().catch((e) => logError('people', e)), 60_000).unref();
   void p.sweep();
@@ -105,7 +112,13 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     await writeFile(path, buf);
     try { return await offer(convId, path, 'Voice message', m, z.number().int().positive().parse(ms)); } finally { await rm(path, { force: true }); }
   });
-  handle('people:file', (action, tid) => { const id = Id.parse(tid), a = z.enum(['accept', 'decline', 'cancel', 'retry']).parse(action); if (a === 'accept') p.acceptFile(id); else if (a === 'decline') p.declineFile(id); else if (a === 'retry') p.retryDownload(id); else return p.cancelFile(id).then(() => void rt.tick()); void rt.tick(); });
+  /** Receiving needs room for the file plus a margin; refuse up front instead of failing half-way. */
+  const roomFor = async (id: string) => {
+    const t = p.transfer(id); if (!t || t.direction !== 'in') return;
+    const s = await statfs(o.dataDir).catch(() => null), free = s ? s.bavail * s.bsize : Infinity, need = t.size - t.received + 64 * 1024 * 1024;
+    if (free < need) throw new Error(`Not enough free disk space to receive “${t.name}” (needs ${Math.ceil(need / 1e6)} MB, ${Math.floor(free / 1e6)} MB free). Free some space and try again.`);
+  };
+  handle('people:file', async (action, tid) => { const id = Id.parse(tid), a = z.enum(['accept', 'decline', 'cancel', 'retry']).parse(action); if (a === 'accept' || a === 'retry') await roomFor(id); if (a === 'accept') p.acceptFile(id); else if (a === 'decline') p.declineFile(id); else if (a === 'retry') p.retryDownload(id); else return p.cancelFile(id).then(() => void rt.tick()); void rt.tick(); });
   /** Re-verified on every use: the stored bytes must still hash to what was agreed. */
   const verified = async (tid: string) => {
     const t = p.transfer(Id.parse(tid)), path = t && (t.direction === 'out' ? p.outgoingBytesLocal(t.id) : p.filePath(t.id));
@@ -146,6 +159,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     if (!b.kind.startsWith('call.')) throw new Error('Not a call signal.');
     return rt.sendLive(p.callSignal(key, b as Extract<PeerBody, { kind: `call.${string}` }>));
   });
+  handle('people:armMedia', (kind) => armMedia(z.enum(['microphone', 'camera']).parse(kind)));
   handle('people:logCall', (raw) => p.logCall(z.object({ id: z.string().max(64), peerKey: Key, direction: z.enum(['in', 'out']), connectedAt: z.number().int().nullable().optional(), endedAt: z.number().int().nullable().optional(), outcome: z.string().max(40).optional() }).parse(raw)));
   return { rt, close: () => rt.stop() };
 }

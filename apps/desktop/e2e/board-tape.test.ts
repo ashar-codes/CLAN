@@ -26,9 +26,9 @@ async function launch(env: Record<string, string> = {}, userData = mkdtempSync(j
   return { app, page, userData };
 }
 async function joinByCode(page: Page, name: string, code: string) {
-  await page.getByRole('button', { name: 'CLANs', exact: true }).or(page.locator('.code-input')).first().waitFor();
-  if (await page.getByRole('button', { name: 'CLANs', exact: true }).isVisible()) { // from the world; after Leave we're already on the join screen
-    await page.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await page.getByRole('button', { name: 'My CLANs', exact: true }).or(page.locator('.code-input')).first().waitFor();
+  if (await page.getByRole('button', { name: 'My CLANs', exact: true }).isVisible()) { // from the world; after Leave we're already on the join screen
+    await page.getByRole('button', { name: 'My CLANs', exact: true }).click();
     await page.getByRole('button', { name: 'Join by Code' }).click();
   }
   await page.getByLabel('Full name').or(page.locator('.code-input')).first().waitFor();
@@ -58,7 +58,7 @@ async function dragShape(p: Page, tool: string, x: number, y: number) {
 
 it('Study Group board: concurrent drawing, text/sticky/file card, rejoin restores, host again persists', async () => {
   const { app: hostApp, page: host } = await launch();
-  await host.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await host.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await host.getByRole('button', { name: 'Create CLAN' }).click();
   await host.getByLabel('Name', { exact: true }).fill('Board Group');
   await host.getByRole('button', { name: 'Start CLAN' }).click();
@@ -104,7 +104,7 @@ it('Study Group board: concurrent drawing, text/sticky/file card, rejoin restore
 
   // host again: new session, same CLAN board
   await host.getByRole('button', { name: 'End CLAN' }).click();
-  await host.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await host.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await host.locator('.clan-card', { hasText: 'Board Group' }).click();
   await host.getByRole('button', { name: 'Host again' }).click();
   await host.getByRole('button', { name: 'Host again' }).click();

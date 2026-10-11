@@ -29,14 +29,14 @@ it('moves hosting between the owner\'s linked computers with explicit confirmati
   await joining;
 
   // A creates and hosts a Study Group, then ends the live session
-  await a.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await a.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await a.getByRole('button', { name: 'Create CLAN' }).click();
   await a.getByLabel('Name', { exact: true }).fill('Movable group');
   await a.getByRole('button', { name: 'Start CLAN' }).click();
   await a.getByLabel('Join code').waitFor();
   a.once('dialog', (d) => d.accept());
   await a.getByRole('button', { name: 'End CLAN', exact: true }).click();
-  await a.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await a.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await a.locator('.clan-card', { hasText: 'Movable group' }).click();
   const panel = a.getByRole('region', { name: 'Hosting' });
   await panel.getByRole('button', { name: 'Allow moving hosting…' }).click();
@@ -52,7 +52,7 @@ it('moves hosting between the owner\'s linked computers with explicit confirmati
   await panel.getByText(/Hosted by /).waitFor(); // the source learned the new head and is a standby
 
   // B now holds the CLAN as its host
-  await b.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await b.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await b.locator('.clan-card', { hasText: 'Movable group' }).click({ timeout: 20_000 });
   await b.getByRole('region', { name: 'Hosting' }).getByText('This computer hosts this CLAN.').waitFor();
 
@@ -64,7 +64,7 @@ it('moves hosting between the owner\'s linked computers with explicit confirmati
 
   // the owner stops B hosting: B refuses changes from then on
   await a.getByRole('button', { name: '← Back' }).click();
-  await a.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await a.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await a.locator('.clan-card', { hasText: 'Movable group' }).click();
   const ap = a.getByRole('region', { name: 'Hosting' });
   await ap.getByRole('button', { name: /^Stop .+ hosting…$/ }).click();

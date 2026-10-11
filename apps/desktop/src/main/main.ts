@@ -26,7 +26,7 @@ import { registerData } from './data.ts';
 import { registerFeedback } from './feedback.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
 import { registerBoards } from './board.ts';
-import { micArmed, registerMediaScheme, registerTapes } from './tape.ts';
+import { camArmed, micArmed, registerMediaScheme, registerTapes } from './tape.ts';
 import { DesktopDirect } from './direct.ts';
 import { mediaBinary, mediaWorkDir, registerScreen } from './screen.ts';
 import { ScreenShareEvents } from '@clan/core';
@@ -104,6 +104,8 @@ function registerIpc() {
     let legacy: unknown;
     try { legacy = JSON.parse(readFileSync(profilePath(), 'utf8')).deviceId ?? JSON.parse(readFileSync(profilePath(), 'utf8')).legacyDeviceId; } catch {}
     writeFileSync(profilePath(), JSON.stringify({ fullName: parsed.fullName, rollNo: parsed.rollNo, deviceName: parsed.deviceName, ...(legacy ? { legacyDeviceId: legacy } : {}) }));
+    // the people profile starts from the student's name until they choose a different one there
+    try { if (clan.people.myProfile().name === 'CLAN user' && parsed.fullName.trim()) clan.people.updateProfile({ name: parsed.fullName.trim().slice(0, 80) }); } catch (e) { logError('people', e); }
     return loadProfile();
   });
 
@@ -407,8 +409,12 @@ app.whenReady().then(() => {
   trust.installVerifyProc(session.defaultSession);
   // Nothing needs camera/mic/notifications yet; grant capabilities explicitly as features land.
   // Only screen capture (display-capture) may be requested, and only after the user picked a source in CLAN. No mic/camera.
-  // Microphone only right after the student started a Study Tape with “Microphone” ticked (audio only, never camera).
-  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb, details) => cb(perm === 'display-capture' || (perm === 'media' && micArmed() && !!(details as { mediaTypes?: string[] }).mediaTypes?.length && (details as { mediaTypes: string[] }).mediaTypes.every((t) => t === 'audio'))));
+  // Microphone only right after the student started a Study Tape with “Microphone” ticked, recorded a voice note or
+  // placed/answered a call (audio only). Camera only right after “Scan with camera” (video only), for reading a QR code.
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb, details) => {
+    const types = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
+    cb(perm === 'display-capture' || (perm === 'media' && types.length > 0 && ((micArmed() && types.every((t) => t === 'audio')) || (camArmed() && types.every((t) => t === 'video')))));
+  });
   process.on('uncaughtException', (e) => logError('main', e));
   process.on('unhandledRejection', (e) => logError('main', e)); // a failed startup step must be visible, not silent
   direct = new DesktopDirect();

@@ -97,8 +97,9 @@ export async function startPeopleServer(o: PeopleServerOptions) {
       return { results };
     } catch (e) { return fail(reply, e); }
   });
-  // Bytes of a file we offered, only to the conversation peer that accepted it (resumable by Range).
-  app.post('/peer/file/:id', async (req, reply) => {
+  // Bytes of a file we offered, only to the conversation peer that accepted it (resumable by Range). GET is the same
+  // request for native downloaders that cannot send a body (the signature covers the method and an empty body).
+  const fileBytes = async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       const b = body(req), key = authed(req, b.raw, o.host.myKey());
       const id = z.string().uuid().parse((req.params as { id: string }).id);
@@ -110,7 +111,9 @@ export async function startPeopleServer(o: PeopleServerOptions) {
       if (range) { reply.code(206).header('content-range', `bytes ${range.start}-${range.end}/${size}`).header('content-length', range.end - range.start + 1); return reply.send(createReadStream(f.path, range)); }
       reply.header('content-length', size); return reply.send(createReadStream(f.path));
     } catch (e) { return fail(reply, e); }
-  });
+  };
+  app.post('/peer/file/:id', fileBytes);
+  app.get('/peer/file/:id', fileBytes);
   // A phone (no server) pushes the bytes of a file it offered, in chunks at the offset we report.
   app.put('/peer/file/:id', async (req, reply) => {
     try {

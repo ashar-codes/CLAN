@@ -105,7 +105,11 @@ export async function startPeopleRuntime(o: {
           try {
             for (const c of clients) {
               try { await c.download(t.id, dest, t.size, (n) => p.progress(t.id, n)); await p.completeDownload(t.id, dest); changed('transfers'); return; }
-              catch (e) { if (e instanceof PeerHttpError && e.status === 404) { p.failDownload(t.id, 'The sender no longer offers this file.'); return; } if ((e as { code?: string }).code === 'corrupt') return; }
+              catch (e) {
+                if (e instanceof PeerHttpError && e.status === 404) { p.failDownload(t.id, 'The sender no longer offers this file.'); return; }
+                if ((e as { code?: string }).code === 'ENOSPC') { p.failDownload(t.id, 'The disk is full. Free some space, then retry.'); return; }
+                if ((e as { code?: string }).code === 'corrupt') return;
+              }
             }
           } finally { downloadsNow.delete(t.id); await rm(dest, { force: true }).catch(() => {}); }
         })();

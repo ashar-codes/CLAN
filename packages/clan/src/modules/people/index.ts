@@ -426,6 +426,8 @@ export class People {
   outgoingServed(id: string) { const t = this.xfer(id); if (t.direction === 'out' && t.state !== 'complete') this.setXfer(id, 'transferring'); }
   /** Receiver side, what to fetch next. */
   pendingDownloads() { return (this.db.prepare("SELECT id FROM people_transfers WHERE direction = 'in' AND state IN ('accepted','transferring')").all() as { id: string }[]).map((r) => ({ ...this.transfer(r.id)!, peerKey: this.must(this.xfer(r.id).conv_id).peer_key })); }
+  /** Sender side, for a device that pushes (a phone): offered files the other person accepted and has not confirmed yet. */
+  pendingUploads() { return (this.db.prepare("SELECT id FROM people_transfers WHERE direction = 'out' AND state IN ('accepted','transferring')").all() as { id: string }[]).map((r) => ({ ...this.transfer(r.id)!, peerKey: this.must(this.xfer(r.id).conv_id).peer_key, path: this.outgoingBytesLocal(r.id) })); }
   progress(id: string, received: number) { const t = this.xfer(id); if (t.direction === 'in' && ['accepted', 'transferring'].includes(t.state)) this.setXfer(id, 'transferring', { received: Math.min(received, t.size) }); }
   /** Receiver: bytes fully arrived at `path`. Verified (size + SHA-256) and moved into the store, or rejected. */
   async completeDownload(id: string, path: string) {
@@ -440,6 +442,7 @@ export class People {
       tx(this.db, () => {
         const ref = this.store.ref(object.id, { module: 'people', entity: 'transfer', entityId: id, scope: { kind: 'personal', ownerId: this.me() }, name: t.name, createdBy: this.me() });
         this.setXfer(id, 'complete', { received: t.size, objectId: object.id, refId: ref.id });
+        this.queue(this.must(t.conv_id).peer_key, { kind: 'file.done', transferId: id });
       });
     } finally { release(); }
     return this.transfer(id)!;
@@ -597,6 +600,11 @@ export class People {
           const t = this.db.prepare('SELECT * FROM people_transfers WHERE id = ?').get(body.transferId) as XferRow | undefined;
           if (!t || t.direction !== 'out' || this.must(t.conv_id).peer_key !== e.from) throw new PeerError('refused', 'Unknown transfer.');
           if (t.state === 'offered') this.setXfer(t.id, 'accepted'); break;
+        }
+        case 'file.done': {
+          const t = this.db.prepare('SELECT * FROM people_transfers WHERE id = ?').get(body.transferId) as XferRow | undefined;
+          if (!t || t.direction !== 'out' || this.must(t.conv_id).peer_key !== e.from) throw new PeerError('refused', 'Unknown transfer.');
+          if (['accepted', 'transferring'].includes(t.state)) this.setXfer(t.id, 'complete'); break;
         }
         case 'file.decline': case 'file.cancel': {
           const t = this.db.prepare('SELECT * FROM people_transfers WHERE id = ?').get(body.transferId) as XferRow | undefined;

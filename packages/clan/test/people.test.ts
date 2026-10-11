@@ -179,6 +179,9 @@ describe('people: files, voice notes, calls', () => {
     copyFileSync(bytes.path, part);
     expect(await b.p.completeDownload(t.id, part)).toMatchObject({ state: 'complete' });
     expect(b.p.filePath(t.id)).toBeTruthy();
+    expect(a.p.transfer(t.id)?.state).not.toBe('complete');
+    flush(b, a); // the receiver's signed receipt: verified on their side
+    expect(a.p.transfer(t.id)?.state).toBe('complete');
     clock.t += 86_400_001;
     await b.p.sweep(); await a.p.sweep();
     expect(b.p.transfer(t.id)).toBeNull();

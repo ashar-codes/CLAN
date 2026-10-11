@@ -78,6 +78,8 @@ export const PeerBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('file.accept'), transferId: Id }).strict(),
   z.object({ kind: z.literal('file.decline'), transferId: Id }).strict(),
   z.object({ kind: z.literal('file.cancel'), transferId: Id }).strict(),
+  /** Receiver → sender: the bytes arrived and matched the offered SHA-256 and size. */
+  z.object({ kind: z.literal('file.done'), transferId: Id }).strict(),
   z.object({ kind: z.literal('call.invite'), callId: Id, sdp: z.string().max(20_000) }).strict(),
   z.object({ kind: z.literal('call.answer'), callId: Id, sdp: z.string().max(20_000) }).strict(),
   z.object({ kind: z.literal('call.ice'), callId: Id, candidate: z.string().max(2000), mid: z.string().max(64).nullable(), index: z.number().int().min(0).max(64).nullable() }).strict(),
