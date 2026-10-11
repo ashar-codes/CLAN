@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ClassroomConnection, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
+import { ClassroomConnection, leaveClanSession, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
 import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type DirectPackage, type ClassroomInfo, type ClientMessage, type MemberStatus, type PresentationView, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
+import { pauseSession } from './transfers';
 import { ChatSection, useMobileChat } from './Chat';
 import { MobileBoard, useMobileBoard } from './board/Board';
 import { me as meP, openPhoneClan, phoneClan } from './core/clan';
@@ -191,6 +192,7 @@ function recordJoined(j: PairedJoin, info: ClassroomInfo) {
 }
 
 function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
+  const [leaving, setLeaving] = useState(false);
   const [joined, setJoined] = useState(first);
   const [status, setStatus] = useState<MemberStatus>(joined.status);
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
@@ -268,6 +270,21 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
           <ChatSection c={c} chat={chat} conn={conn} people={people} canSendFiles={info.clanType !== 'CLASSROOM' || (info.fileSharingPolicy ?? 'teacher') !== 'teacher'} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
+          <Button c={c} label={leaving ? 'Leaving membership…' : 'Leave membership'} onPress={() => {
+            if (leaving) return;
+            Alert.alert('Leave CLAN membership?', 'Personal data and stored copies stay. If the host is unavailable, remote revocation cannot be confirmed.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: () => { void (async () => {
+              const clanId = info.clanId ?? info.sessionId;
+              try { phoneClan().clans.leave(clanId, phoneClan().me); bump(); }
+              catch (e) { Alert.alert('Cannot leave', (e as Error).message); return; }
+              setLeaving(true); ref.current?.close(); pauseSession(conn.sessionId);
+              let confirmed = false, timer: ReturnType<typeof setTimeout> | undefined;
+              // Limit the UI wait. The small native request may finish later; it can only revoke this caller.
+              try { const ack = await Promise.race([leaveClanSession(joined.transport, joined.url, joined.token, clanId), new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 5000); })]); confirmed = ack?.left === true && ack.clanId === clanId && ack.sessionId === info.sessionId; } catch { /* local leave remains valid; never claim remote revocation */ }
+              finally { if (timer) clearTimeout(timer); }
+              if (!confirmed) Alert.alert('Left on this phone', 'The host did not confirm remote revocation. It may retain your session rights until they expire.');
+              onLeave();
+            })(); } }]);
+          }} />
         </>
       )}
     </ScrollView>

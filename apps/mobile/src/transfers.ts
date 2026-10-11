@@ -60,7 +60,7 @@ function uniqueFile(dir: Directory, name: string): File {
   }
 }
 
-const active = new Map<string, AbortController>();
+const active = new Map<string, { sessionId: string; ctl: AbortController }>();
 
 export function fileStates(c: Conn, resources: ResourceView[]): FileState[] {
   const idx = readJson<Index>(indexFile(), {});
@@ -153,7 +153,7 @@ export async function download(c: Conn, r: ResourceView, onState: (s: FileState)
   if (active.has(r.id) || !r.sha256) return;
   if (c.peerAssist && c.device && MOBILE_PEER_CAPABILITIES.canDownload && r.size > SMALL_FILE_BYTES) {
     const ctl = new AbortController();
-    active.set(r.id, ctl);
+    active.set(r.id, { sessionId: c.sessionId, ctl });
     try {
       const { dest } = await swarmDownload(c, r, onState, ctl.signal);
       const idx = readJson<Index>(indexFile(), {});
@@ -173,7 +173,7 @@ export async function download(c: Conn, r: ResourceView, onState: (s: FileState)
   if (!part.exists) part.create();
   const have = part.size ?? 0;
   const ctl = new AbortController();
-  active.set(r.id, ctl);
+  active.set(r.id, { sessionId: c.sessionId, ctl });
   report('downloading', have, { resumedFrom: have || undefined });
   try {
     const headers: Record<string, string> = { authorization: `Bearer ${c.token}`, ...(have ? { range: `bytes=${have}-`, 'if-range': `"${r.sha256}"` } : {}) };
@@ -199,7 +199,8 @@ export async function download(c: Conn, r: ResourceView, onState: (s: FileState)
   }
 }
 
-export function pause(r: ResourceView) { active.get(r.id)?.abort(); }
+export function pause(r: ResourceView) { active.get(r.id)?.ctl.abort(); }
+export function pauseSession(sessionId: string) { for (const job of active.values()) if (job.sessionId === sessionId) job.ctl.abort(); }
 
 /** Stable idempotency key per intended submission, persisted before upload starts. */
 export function idempotencyKeyFor(k: string, newKey: () => string): string {

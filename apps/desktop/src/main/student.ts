@@ -88,6 +88,12 @@ export class StudentFiles {
 
   async stopAll() { await Promise.all([...this.agents.values()].map((a) => a.stop())); this.agents.clear(); }
 
+  async stopSession(sessionId: string) {
+    for (const job of this.jobs.values()) if (job.conn.sessionId === sessionId) { job.ctl?.abort(); if (['queued', 'downloading', 'verifying'].includes(job.state.state)) this.set(job, { state: 'paused' }); }
+    await this.agents.get(sessionId)?.stop(); this.agents.delete(sessionId); this.tokens.delete(sessionId);
+    for (const key of this.offeredCompleted) if (key.startsWith(sessionId + ':')) this.offeredCompleted.delete(key);
+  }
+
   /** The paired session's own URL + pinned transport; renderer-supplied URLs are never used. */
   private route(c: Conn) {
     const s = this.trust.session(c.sessionId);

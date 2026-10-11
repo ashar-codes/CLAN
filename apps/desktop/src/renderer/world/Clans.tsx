@@ -52,6 +52,7 @@ function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experi
   const [d] = useLoad<ClanDetail>(useCallback(() => api.clan.detail(id), [id]));
   const [tab, setTab] = useState<(typeof TABS)[number]>('Overview');
   const [archiveConfirm, setArchiveConfirm] = useState(false), [archiveError, setArchiveError] = useState('');
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
   if (!d) return null;
   const host = d.members.find((m) => m.role === 'owner');
   return (
@@ -76,6 +77,7 @@ function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experi
         {tab === 'Saved' && (d.saved.length ? d.saved.map((s) => <a key={s.id} className="line" href={s.url} target="_blank" rel="noreferrer noopener">{s.title}<span className="muted">{s.source}</span></a>) : <p className="muted">Share a link from Saved.</p>)}
       </section>
       <section className="card"><button onClick={() => setArchiveConfirm(true)}>Archive on this device</button>{archiveConfirm && <div role="group" aria-label="Confirm archive"><p>Hide this CLAN from My CLANs on this device? Files and membership remain available in Archived CLANs.</p><div className="row"><button onClick={() => { void api.clan.archiveLocal(id, true).then(onBack, (e) => setArchiveError(errText(e))); }}>Confirm archive</button><button onClick={() => setArchiveConfirm(false)}>Cancel</button></div></div>}{archiveError && <p role="alert">{archiveError}</p>}</section>
+      {!d.mine && <section className="card"><button onClick={() => setLeaveConfirm(true)}>Leave CLAN</button>{leaveConfirm && <div role="group" aria-label="Confirm leave"><p>Leave this CLAN on this device? Personal study data and stored copies stay. This offline action cannot confirm that the host revoked your session. Join again through the host's current approval policy.</p><div className="row"><button onClick={() => { void api.clan.leaveLocal(id).then(onBack, (e) => setArchiveError(errText(e))); }}>Confirm leave</button><button onClick={() => setLeaveConfirm(false)}>Cancel</button></div></div>}</section>}
     </div>
   );
 }

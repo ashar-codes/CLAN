@@ -141,6 +141,8 @@ export type ClanApi = {
   list(): Promise<Clan[]>;
   archived(): Promise<Clan[]>;
   archiveLocal(id: string, on: boolean): Promise<void>;
+  leaveLocal(id: string): Promise<void>;
+  leaveMembership(conn: Conn, id: string): Promise<{ confirmed: boolean }>;
   places(): Promise<ClanPlaceView[]>;
   personalFiles(): Promise<FileView[]>;
   addPersonalFile(): Promise<number>;

@@ -89,7 +89,9 @@ function LocalClans() {
   const change = (id: string, on: boolean) => setErr(act(() => phoneClan().clans.setLocalArchive(id, phoneClan().me, on)));
   return <Card title="My CLANs">
     <Muted small>Membership and stored files remain available when archived on this phone. Live rooms require an online authorized host.</Muted>
-    {active.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn label={`Archive ${clan.name}`} onPress={() => Alert.alert('Archive on this phone?', 'Hide this CLAN from My CLANs. Files and membership remain available; restore it below.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive', onPress: () => change(clan.id, true) }])} /></View>)}
+    {active.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn label={`Archive ${clan.name}`} onPress={() => Alert.alert('Archive on this phone?', 'Hide this CLAN from My CLANs. Files and membership remain available; restore it below.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive', onPress: () => change(clan.id, true) }])} />
+      {!phoneClan().clans.members(clan.id).some((member) => member.userId === phoneClan().me && member.role === 'owner') && <Btn label={`Leave ${clan.name}`} onPress={() => Alert.alert('Leave on this phone?', 'Personal data and stored copies stay. This offline action cannot confirm host revocation. Joining again follows the host’s current approval policy.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Leave', style: 'destructive', onPress: () => setErr(act(() => phoneClan().clans.leave(clan.id, phoneClan().me))) }])} />}
+    </View>)}
     {archived.length > 0 && <Muted>Archived on this phone</Muted>}
     {archived.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn label={`Restore ${clan.name}`} onPress={() => change(clan.id, false)} /></View>)}
     {err && <Muted>{err}</Muted>}

@@ -117,6 +117,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
   const [quality, setQuality] = useState<Quality>('disconnected');
   const [closed, setClosed] = useState('');
+  const [leaving, setLeaving] = useState(false), [leaveError, setLeaveError] = useState('');
   const [teacherWarn, setTeacherWarn] = useState(joined.teacherTrust === 'changed');
   const [resources, setResources] = useState<ResourceView[]>([]);
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
@@ -190,7 +191,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
 
   const over = info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
     : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
-  if (over) return <main className="center narrow"><h2>{info.title}</h2><p>{over}</p><button className="primary" onClick={onLeave}>OK</button></main>;
+  if (over && !leaving) return <main className="center narrow"><h2>{info.title}</h2><p>{over}</p><button className="primary" onClick={onLeave}>OK</button></main>;
 
   const banner = teacherWarn && (
     <div className="warning-banner" role="alert">
@@ -217,8 +218,14 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       ) : null}
       <header className="bar">
         <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.hostName && <p className="muted small-text" data-testid="host-name">Hosted by {info.hostName}</p>}{info.description && <p className="muted small-text">{info.description}</p>}</div>
-        <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button></div>
+        <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button><button disabled={leaving} onClick={async () => {
+          if (!confirm('Leave this CLAN membership? Personal data and stored copies stay. If the host is unavailable, remote revocation cannot be confirmed.')) return;
+          setLeaving(true); setLeaveError(''); connRef.current?.close();
+          try { const result = await api.clan.leaveMembership(conn, info.clanId ?? info.sessionId); if (!result.confirmed) alert('Left on this device. The host did not confirm remote revocation; it may still retain your session rights until they expire.'); onLeave(); }
+          catch (e) { setLeaveError(errText(e)); setLeaving(false); }
+        }}>Leave membership</button></div>
       </header>
+      {leaving && <p role="status">Leaving on this device and requesting host revocation…</p>}{leaveError && <p role="alert">{leaveError}</p>}
       <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost={false} boardOnWall={board.view?.wall === 'WHITEBOARD'} />
       <BoardControls board={board} pres={pres} send={send} clanType={info.clanType} me={null} />
       {experience === 'minimal' && pres.live && <RoomSurface mode="SCREEN_SHARE" screen={{ pres, live: pres.live }}>{null}</RoomSurface>}

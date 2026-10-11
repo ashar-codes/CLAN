@@ -120,3 +120,14 @@ controls and new targeted tests passed typecheck, 26 targeted units and the desk
 coordination remain unfinished. See `docs/CLAN_LIFECYCLE_PHASE_14_2.md` before extending this work.
 Xcode rechecked: Command Line Tools only, no Xcode.app. User agreed to install Xcode and complete first launch;
 recheck later before marking iOS unavailable. Preserve signing and original profiles as before.
+
+Latest continuation: `7d16b04` file actions pushed; `d636ecd` local archive/restore committed. Member leave increment
+has passed 50 targeted security/lifecycle units, desktop live/offline leave E2E, typecheck and the complete native
+Android lifecycle regression. New `apps/mobile/e2e/android_lifecycle.py` refuses physical devices and requires a
+DISPOSABLE emulator/profile (it clears the test app data). It tests actual native controls and production transport.
+Leave only removes this device's membership and requests authenticated caller-only host revocation; unavailable
+hosts produce an explicit unconfirmed result. Signing identities, personal notes and receipt anchors are retained.
+Next: finish remove-copy/owner delete with shared-file protection and durable tombstones, then P1 notifications/Raise
+Hand and the gated hosting work. Android reliability/final full suites and candidate packaging remain pending.
+Windows user reports Codex is installing, not a tested-commit/result report yet. Xcode installation was approved by
+user and is pending; recheck availability later. Never interpret these setup reports as hardware PASS.

@@ -7,7 +7,7 @@ import { basename, isAbsolute, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ClanType, JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
-import { pairAndJoin, reconnect, type Candidate } from '@classroom/client';
+import { leaveClanSession, pairAndJoin, reconnect, type Candidate } from '@classroom/client';
 import { pinnedTransport } from '@classroom/client/node';
 import { backupDb, logError, openDbSafely } from '@classroom/server';
 import { Keystore } from './keystore.ts';
@@ -133,7 +133,7 @@ function registerIpc() {
       candidates, code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName }, device: trust.device(),
       opaque: opaque.client, transportFor: (b) => pinnedTransport(b), carriers, associate: direct.associator(),
     }).catch((e) => { logError('join', (e as { cause?: unknown }).cause ?? e); throw joinError(e); });
-    trust.remember({ sessionId: r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });
+    trust.remember({ sessionId: r.classroom.sessionId, clanId: r.classroom.clanId ?? r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });
     return joined(r, r.binding.teacherPublicKey);
   });
   /** QR fallback: the QR gives the network; the six-digit code still decides membership. */
@@ -148,7 +148,7 @@ function registerIpc() {
     await opaque.ready;
     const r = await pairAndJoin({ candidates: [{ url: `http://${pkg.host}:${pkg.bootstrapPort}`, sid: pkg.sessionId }], code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName },
       device: trust.device(), opaque: opaque.client, transportFor: (b) => pinnedTransport(b), associate }).catch((e) => { throw joinError(e); });
-    trust.remember({ sessionId: r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });
+    trust.remember({ sessionId: r.classroom.sessionId, clanId: r.classroom.clanId ?? r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });
     return joined(r, r.binding.teacherPublicKey);
   });
   /** Topology probe: can this member open a TCP connection to other members' peer servers on this network? */
@@ -179,10 +179,14 @@ function registerIpc() {
   ipcMain.handle('student:rejoin', async (_e, sid: unknown): Promise<Joined> => {
     const s = trust.session(z.uuid().parse(sid));
     if (!s) throw new Error('This class is no longer paired on this device. Join with the code.');
+    const known = clan.clans.get(s.clanId ?? s.sessionId);
+    if (known && !clan.clans.isActiveMember(known.id, clan.me)) throw new Error('You left this CLAN. Join with the code and the host’s current approval policy.');
     const r = await reconnect({ url: s.url, transport: s.transport, sessionId: s.sessionId, device: trust.device() }).catch((e) => { throw new Error((e as Error).message); });
+    const actual = clan.clans.get(r.classroom.clanId ?? r.classroom.sessionId);
+    if (actual && !clan.clans.isActiveMember(actual.id, clan.me)) throw new Error('You left this CLAN. Join with the code and the host’s current approval policy.');
     return joined({ ...r, url: s.url }, s.binding.teacherPublicKey);
   });
-  ipcMain.handle('student:lastSession', () => { const s = trust.lastSession(); return s && { sessionId: s.sessionId, title: s.title, savedAt: s.savedAt }; });
+  ipcMain.handle('student:lastSession', () => { const s = trust.lastSession(); if (!s) return null; const c = clan.clans.get(s.clanId ?? s.sessionId); return c && !clan.clans.isActiveMember(c.id, clan.me) ? null : { sessionId: s.sessionId, title: s.title, savedAt: s.savedAt }; });
   ipcMain.handle('student:trustTeacher', (_e, title: unknown, key: unknown) => {
     const t = z.string().max(200).parse(title), k = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(key);
     // Only a key we actually paired with (PAKE-authenticated) can be accepted.
@@ -300,6 +304,22 @@ function registerIpc() {
 
   const files = (studentFiles = new StudentFiles(() => BrowserWindow.getAllWindows()[0], trust, (sid, id) => server?.classroom.id === sid ? server.resources.openForDownload({ role: 'teacher' }, id) : null));
   const conn = (c: unknown): Conn => ConnArgs.parse(c);
+  ipcMain.handle('clan:leaveLocal', (_e, raw) => { const id = z.uuid().parse(raw); clan.clans.leave(id, clan.me); trust.forgetClanSessions(id); });
+  ipcMain.handle('clan:leaveMembership', async (_e, raw, id) => {
+    const c = conn(raw), clanId = z.uuid().parse(id);
+    clan.clans.leave(clanId, clan.me); // local authorization and owner guard, before asynchronous work
+    try {
+      await files.stopSession(c.sessionId);
+      const route = trust.session(c.sessionId); if (!route) return { confirmed: false };
+      const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(), 5000);
+      try {
+        const transport = { ...route.transport, fetch: (url: string, init?: RequestInit) => route.transport.fetch(url, { ...init, signal: timeout.signal }) };
+        const ack = await leaveClanSession(transport, route.url, c.token, clanId);
+        return { confirmed: ack.left === true && ack.clanId === clanId && ack.sessionId === c.sessionId };
+      } finally { clearTimeout(timer); }
+    } catch { return { confirmed: false }; }
+    finally { trust.forgetSession(c.sessionId); trust.forgetClanSessions(clanId); }
+  });
   const res = (r: unknown): ResourceView => ResourceArgs.parse(r) as ResourceView;
   ipcMain.handle('student:fileStatus', (_e, c, list: unknown) => files.status(conn(c), z.array(ResourceArgs).max(1000).parse(list) as ResourceView[]));
   ipcMain.handle('student:download', (_e, c, r, hostOnly) => files.download(conn(c), res(r), hostOnly === true));

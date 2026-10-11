@@ -9,7 +9,7 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | IMPLEMENTED; desktop + Android emulator PASS | see git log | 4 desktop E2Es + 17 targeted unit tests + full emulator cross-device run PASS; physical Android NOT TESTED |
 | P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | IMPLEMENTED; host + desktop PASS, native UI pending | see git log | 70 targeted units + 5 desktop chat/sharing E2Es PASS |
 | P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | `7d16b04` | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
-| P0-5 | CLAN archive / remove from device / leave / delete | IN PROGRESS; archive/restore desktop PASS, native archive UI pending | see git log | Typecheck + 26 targeted units + archive restart E2E PASS; removal/delete and live leave coordination remain |
+| P0-5 | CLAN archive / remove from device / leave / delete | IN PROGRESS; archive/restore + leave PASS on desktop and Android emulator | see git log | Typecheck, 50 targeted security/lifecycle units, archive + leave desktop E2Es and native lifecycle PASS; removal/delete remain |
 | P1-6…10 | Notifications + Raise Hand, persistent mobile CLANs (standby hosts, epochs), Android hosting, iOS parity, installers | NOT STARTED | — | — |
 
 ## P0-1 root cause and fix
@@ -145,3 +145,26 @@ PASS: typecheck `/tmp/clan-142-lifecycle-typecheck1.log`; **26/26 targeted units
 (`/tmp/clan-142-lifecycle-e2e2.log`, 7.40 s). First unit run caught a missing SQL conjunction in the new archive query
 (two failures); fixed before rerun. First E2E used unsupported Playwright matchers with Vitest (automation failure);
 replaced with this repository's existing polling assertions, without changing timeouts. See lifecycle boundary doc.
+
+### P0-5 member leave increment
+
+Authenticated `/api/member/leave` revokes only the caller through existing removal checks, including tokens,
+WSS, peers and media. Strict CLAN match and body validation prevent targeted removal of another member. New desktop/
+mobile Leave membership confirmations are separate from session disconnect. Local membership becomes left;
+only this session's downloads/peer activity stop. Desktop discards scoped reconnect routes, retains receipt anchors
+and signing identities, and checks left membership before reconnect. Existing paired records remain readable;
+new records optionally retain canonical CLAN ID. Five-second UI wait is for offline responsiveness, not an increase
+to test deadlines: failed/delayed acknowledgement reports remote revocation unconfirmed. Offline leave warns explicitly.
+
+PASS: typecheck (`/tmp/clan-142-leave-typecheck3.log`); final **50/50** security/lifecycle units, 23.13 s
+(`/tmp/clan-142-leave-unit-final.log`); desktop live/offline leave, retained private notes, restart and approval on
+rejoin **1/1 PASS**, 11.98 s (`/tmp/clan-142-leave-e2e2.log`; earlier live case also passed, 20.31 s).
+Android signed build/install passed with the existing identity; native `android_lifecycle.py` **PASS**, exit 0,
+covering archive confirmation/restore after restart, host revocation on membership leave, retained personal note,
+restart and OPAQUE rejoin under host approval. Log `/tmp/clan-142-native-lifecycle.log`, approximately five minutes;
+load approximately 26–29. Dedicated emulator only. A preceding focused archive observation failed on Android's
+uppercase ARCHIVE label; corrected label check then passed, with no timeout increase. Physical Android remains
+NOT TESTED. No project-owned test peers remained after teardown.
+
+Remaining P0-5 work: remove local copies and owner deletion with durable markers, scoped cleanup and last-copy
+warnings. Shared blob references must protect personal files and other CLANs. Neither destructive control is exposed yet.

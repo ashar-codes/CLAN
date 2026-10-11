@@ -234,6 +234,15 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     if (p.role !== 'student') throw new ApiError(403, 'forbidden', 'Students only.');
     return p.memberId;
   };
+  // A member can relinquish only its own session rights. No caller-chosen member ID or host privilege.
+  app.post('/api/member/leave', async (req) => {
+    const memberId = studentOnly(auth(req));
+    const body = parse(z.object({ clanId: z.uuid() }).strict(), req.body);
+    const clanId = classroom.clan.id ?? classroom.id;
+    if (body.clanId !== clanId) throw new ApiError(403, 'wrong_clan', 'This connection belongs to another CLAN.');
+    classroom.setStatus(memberId, 'removed'); // existing removal path revokes tokens, peer/media rights and WSS
+    return { clanId, sessionId: classroom.id, left: true };
+  });
   const uuidParam = (req: FastifyRequest) => {
     const id = (req.params as { id: string }).id;
     if (!UUID_RE.test(id)) throw new ApiError(404, 'not_found', 'Not found.');

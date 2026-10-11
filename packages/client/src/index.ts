@@ -162,6 +162,10 @@ export const resourceContentPath = (id: string) => `/api/resources/${encodeURICo
 export const initUpload = (t: Transport, base: string, token: string, req: UploadInit) => api<UploadStatus>(t, base, token, '/api/uploads', { method: 'POST', body: JSON.stringify(req) });
 export const uploadStatus = (t: Transport, base: string, token: string, uploadId: string) => api<UploadStatus>(t, base, token, `/api/uploads/${encodeURIComponent(uploadId)}`);
 
+/** Only the authenticated caller leaves. Uses the existing pinned transport and server-side removal checks. */
+export const leaveClanSession = (t: Transport, base: string, token: string, clanId: string) =>
+  api<{ clanId: string; sessionId: string; left: true }>(t, base, token, '/api/member/leave', { method: 'POST', body: JSON.stringify({ clanId }) });
+
 /** Bytes as "4.2 MB". */
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;

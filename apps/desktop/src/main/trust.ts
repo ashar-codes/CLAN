@@ -11,7 +11,7 @@ import { newEd25519, nodeSigner, pinnedTransport } from '@classroom/client/node'
 import type { TeacherIdentity } from '@classroom/server';
 import type { Keystore } from './keystore.ts';
 
-export type PairedSession = { sessionId: string; url: string; title: string; binding: Pick<TlsBinding, 'certificate' | 'spkiSha256' | 'teacherPublicKey'>; savedAt: number };
+export type PairedSession = { sessionId: string; clanId?: string; url: string; title: string; binding: Pick<TlsBinding, 'certificate' | 'spkiSha256' | 'teacherPublicKey'>; savedAt: number };
 export type TeacherTrust = 'first' | 'known' | 'changed';
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60_000; // classroom certificates live 24 h
@@ -83,6 +83,18 @@ export class Trust {
     writeFileSync(this.anchorsFile(), JSON.stringify([...keys]));
   }
   private anchorsFile() { return join(this.dir, 'paired-teacher-keys.json'); }
+
+  /** Forget this session's reconnect route after leaving; receipt anchors and signing identities stay intact. */
+  forgetSession(sessionId: string) {
+    const all = readJson<Record<string, PairedSession>>(this.sessionsFile(), {});
+    delete all[sessionId]; writeFileSync(this.sessionsFile(), JSON.stringify(all));
+    this.transports.delete(sessionId);
+  }
+  forgetClanSessions(clanId: string) {
+    const all = readJson<Record<string, PairedSession>>(this.sessionsFile(), {});
+    for (const s of Object.values(all)) if ((s.clanId ?? s.sessionId) === clanId) { delete all[s.sessionId]; this.transports.delete(s.sessionId); }
+    writeFileSync(this.sessionsFile(), JSON.stringify(all));
+  }
 
   /** A paired session's URL + pinned transport. Never re-pins: a session id always keeps the key it was paired with. */
   session(sessionId: string): (PairedSession & { transport: Transport }) | null {

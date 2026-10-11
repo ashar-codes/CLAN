@@ -7,12 +7,27 @@ presentation on this device. Canonical CLAN identity, membership, files and perm
 An archived CLAN stays readable and can be restored. This preference is not a global host-authorization or personal
 cloud-sync event. The old canonical archive operation for ended Temporary CLANs retains its original meaning.
 
+## Member leave
+
+Desktop/mobile provide a separate Leave membership action with confirmation; the existing session-exit action still
+disconnects without deleting membership. Only the local member may leave; owners are rejected before network work.
+The local membership becomes `left`, session downloads/peer activity stop, and desktop forgets this CLAN's reconnect
+routes while preserving receipt anchors and signing identities. New paired-session records retain the authenticated
+canonical CLAN ID (optional for existing profiles), so offline leave clears only the correct CLAN's routes.
+
+`POST /api/member/leave` accepts a canonical CLAN ID and authenticated member token. The host verifies approval and
+CLAN match, then invokes the existing removal path for the caller only. Pending members, hosts, wrong CLANs and
+caller-selected member IDs are refused. This revokes the token, socket, peer and media rights; retries with the old
+token are unauthorized. A subsequent join uses the existing pairing/approval policy.
+
+UI wait is bounded to five seconds so an unavailable host cannot trap a local leave. Desktop aborts its HTTP request;
+the mobile native request may finish later within its existing transport deadline and can only revoke the caller.
+Failure/delayed acknowledgement is explicitly shown as **remote revocation unconfirmed**, never a promise that the
+offline host revoked rights. An offline room's Leave action has the same local-only warning. Private study data and
+stored copies are retained; leave does not claim to erase files already downloaded.
+
 ## Remaining actions (implementation pending)
 
-* **Leave:** only an active member may leave. The owner cannot leave while retaining the sole hosting authority.
-  The local membership becomes `left`; personal data is retained. A live-session leave must revoke the caller's own
-  host token and peer role through an authenticated operation, then disconnect. Offline leave cannot promise remote
-  revocation while the host is unavailable. A subsequent join goes through the existing pairing and approval policy.
 * **Remove local copy:** confirmation must describe exactly which local cached CLAN data is removed. Modules remove
   their own rows through public APIs; the resource store releases scoped references and preserves blobs referenced
   by personal data or another CLAN. Externally exported files are not CLAN's cache. Never delete personal courses,
