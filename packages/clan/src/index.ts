@@ -162,6 +162,7 @@ export type { Board, BoardOwner } from './modules/whiteboard/index.ts';
 export type { Tape, TapeEvent, TapeEventKind } from './modules/recordings/index.ts';
 export { PersonalSync, SyncAuthError, contentHash, verifyEd25519, linkProof, fpOf, SMALL_FILE, type SyncSettings, type DeviceView, type ConflictView, type SelfDevice } from './modules/sync/index.ts';
 export { People, PeerError, PeopleChanged, type Contact, type Conversation, type Message as PeopleMessage, type Transfer as PeopleTransfer } from './modules/people/index.ts';
+export { ConnectionManager, LinkSession, type LinkFiles, type LinkTransport, type LinkState } from './modules/people/link.ts';
 export { HostAuthority, HostingError, CLAN_TABLES, classifyTable, type HostState, type HostStatus } from './modules/hosting/index.ts';
 export { clock as tapeClock } from './modules/recordings/index.ts';
 export * as ScreenShareEvents from './modules/screenshare/index.ts';

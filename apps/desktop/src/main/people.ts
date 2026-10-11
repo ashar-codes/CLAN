@@ -38,14 +38,16 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   const portFile = join(o.dataDir, 'people', 'port');
   await mkdir(join(o.dataDir, 'people'), { recursive: true });
   const saved = Number(await readFile(portFile, 'utf8').catch(() => '')) || undefined;
+  const linkPortFile = join(o.dataDir, 'people', 'link-port'), savedLink = Number(await readFile(linkPortFile, 'utf8').catch(() => '')) || undefined;
   const start = (port?: number) => startPeopleRuntime({
-    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port, allowLoopback: loopback,
+    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port, linkPort: savedLink, allowLoopback: loopback,
     endpoints: (port) => [...candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${port}`), ...(loopback ? [`127.0.0.1:${port}`] : [])].slice(0, 3),
     onLive: (e) => send('people:live', { from: e.from, body: e.body }),
     onChange: (what) => send('people:changed', { what }),
   });
   const rt = await start(saved).catch((e: NodeJS.ErrnoException) => { if (saved && e.code === 'EADDRINUSE') return start(); throw e; });
   if (rt.port !== saved) await writeFile(portFile, String(rt.port));
+  if (rt.linkPort !== savedLink) await writeFile(linkPortFile, String(rt.linkPort));
   c.bus.subscribe('desktop.people', PeopleChanged, (e) => send('people:changed', e.payload));
   setInterval(() => void p.sweep().catch((e) => logError('people', e)), 60_000).unref();
   void p.sweep();
@@ -56,7 +58,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     return { key: signer.publicKey, fingerprint: keyFingerprint(signer.publicKey), profile: prof, qr, port: rt.port };
   };
   handle('people:me', () => me());
-  handle('people:qrImage', async () => QRCode.toDataURL(rt.myQr(), { errorCorrectionLevel: 'M', margin: 1, width: 280 }));
+  handle('people:qrImage', async (intent) => QRCode.toDataURL(rt.myQr(z.enum(['profile', 'friend', 'chat']).optional().parse(intent)), { errorCorrectionLevel: 'M', margin: 1, width: 280 }));
   handle('people:resetQr', () => { p.inviteToken(true); return me(); });
   handle('people:update', (raw) => p.updateProfile(z.object({ name: z.string().optional(), ...Object.fromEntries(PROFILE_FIELDS.map((f) => [f, f === 'interests' ? z.array(z.string()).optional() : z.string().optional()])),
     fieldVisibility: z.record(z.string(), z.enum(['everyone', 'friends', 'nobody'])).optional() }).parse(raw) as never));

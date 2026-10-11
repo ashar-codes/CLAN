@@ -76,7 +76,7 @@ const bin = (s: unknown, len: number) => { if (typeof s !== 'string' || !/^[A-Za
 
 /** Pull frames one at a time from a ByteLink during the handshake (then hand the stream to the session). */
 function framesOf(link: ByteLink) {
-  const reader = new FrameReader(64 * 1024), queue: Uint8Array[] = [];
+  const reader = new FrameReader(LINK_MAX_FRAME), queue: Uint8Array[] = [];
   let waiting: { res(f: Uint8Array): void; rej(e: Error): void } | null = null, ended: Error | null = null, sink: ((f: Uint8Array) => void) | null = null, closeSink: ((r?: string) => void) | null = null;
   const fail = (e: Error) => { ended = e; waiting?.rej(e); waiting = null; };
   link.onData((chunk) => {

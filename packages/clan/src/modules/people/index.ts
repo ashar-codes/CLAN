@@ -49,6 +49,9 @@ export const schema: ModuleSchema = {
   `, `
     -- Secret carried only by this device's profile QR: whoever scanned it may reach us even in Friends Only mode.
     ALTER TABLE people_profile ADD COLUMN invite TEXT;
+  `, `
+    -- Where the person's secure link listener was last reachable ("tcp:host:port"), for router-free and hotspot links.
+    ALTER TABLE people_contacts ADD COLUMN link_addrs TEXT NOT NULL DEFAULT '[]';
   `],
 };
 
@@ -193,6 +196,13 @@ export class People {
   private touch(key: string) {
     const at = this.now();
     this.db.prepare('INSERT INTO people_contacts (key, first_seen, last_seen) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET last_seen = excluded.last_seen').run(key, at, at);
+  }
+  /** Link listener addresses a peer told us over an authenticated session (or a scanned code). */
+  linkAddrs(key: string): string[] { const r = this.db.prepare('SELECT link_addrs FROM people_contacts WHERE key = ?').get(key) as { link_addrs: string } | undefined; return r ? JSON.parse(r.link_addrs) as string[] : []; }
+  setLinkAddrs(key: string, addrs: string[]) {
+    const ok = z.array(z.string().max(80).regex(/^tcp:(\[[0-9a-fA-F:.%a-z0-9]+\]|[0-9.]{7,15}):\d{2,5}$/)).max(6).parse(addrs);
+    this.touch(key);
+    this.db.prepare('UPDATE people_contacts SET link_addrs = ? WHERE key = ?').run(JSON.stringify(ok), key);
   }
   markVerified(key: string) { this.db.prepare('UPDATE people_contacts SET verified = 1 WHERE key = ?').run(key); this.changed('contacts', { key }); }
   contact(key: string): Contact | null {

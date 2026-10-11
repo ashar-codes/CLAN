@@ -78,6 +78,7 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
   let ticking: Promise<void> | null = null;
   const inflight = new Set<string>();
   const tick = (): Promise<void> => ticking ??= (async () => {
+    await null; // never settle synchronously (see LinkSession.flush)
     try {
       const byPeer = new Map<string, ReturnType<People['due']>>();
       for (const d of p.due(now())) byPeer.set(d.to, [...(byPeer.get(d.to) ?? []), d]);
