@@ -1,7 +1,7 @@
 import { Bonjour } from 'bonjour-service';
-import { SERVICE_TYPE, type Advertisement } from '@classroom/protocol';
+import { lanUrls, SERVICE_TYPE, type Advertisement } from '@classroom/protocol';
 
-export type DiscoveredClassroom = { sid: string; title: string; url: string; type: string };
+export type DiscoveredClassroom = { sid: string; title: string; url: string; type: string; alt?: string[] };
 
 /** Opt-in discovery diagnostics (CLAN_DEBUG_DISCOVERY=1): advertise/browse lifecycle and endpoints, to stderr. */
 export const dlog = (...a: unknown[]) => { if (process.env.CLAN_DEBUG_DISCOVERY === '1') console.error(`[discovery ${new Date().toISOString().slice(11, 23)}]`, ...a); };
@@ -17,7 +17,7 @@ export function advertise(o: { host: string; port: number; sid: string; title: s
   dlog('advertise start', { interface: o.host, port: o.port, sid: o.sid });
   // `interface`/`bind` are forwarded to multicast-dns at runtime; the bundled typings omit them.
   const bonjour = new Bonjour({ interface: o.host, bind: '0.0.0.0' } as object, (e: Error) => console.warn('[mdns]', e.message));
-  const txt: Advertisement = { v: '1', sid: o.sid, title: o.title, type: o.type };
+  const txt: Advertisement = { v: '1', sid: o.sid, title: o.title, type: o.type, a: o.host };
   const svc = bonjour.publish({ name: `CLAN ${o.sid.slice(0, 8)}`, type: SERVICE_TYPE, port: o.port, txt, disableIPv6: true });
   const ready = new Promise<void>((r) => { svc.once('up', () => { dlog('advertise ready', o.sid); r(); }); svc.once('error', () => r()); setTimeout(r, 5000).unref(); });
   const stop = () => new Promise<void>((resolve) => bonjour.unpublishAll(() => { bonjour.destroy(); dlog('advertise stop', o.sid); resolve(); }));
@@ -33,10 +33,10 @@ export function browse(onChange: (list: DiscoveredClassroom[]) => void): () => v
   const emit = () => onChange([...found.values()]);
   browser.on('up', (s) => {
     const txt = (s.txt ?? {}) as Partial<Advertisement>;
-    const addr = s.addresses?.find((a) => a.includes('.')) ?? s.referer?.address;
-    if (!txt.sid || !addr || txt.v !== '1') return;
-    dlog('browse up', { sid: txt.sid, addr, port: s.port });
-    found.set(txt.sid, { sid: txt.sid, title: String(txt.title ?? 'CLAN'), type: /^[A-Z_]{3,20}$/.test(String(txt.type)) ? String(txt.type) : 'CLASSROOM', url: `http://${addr}:${s.port}` });
+    const [url, ...alt] = lanUrls(s.port, s.addresses ?? [], [txt.a, s.referer?.address]);
+    if (!txt.sid || !url || txt.v !== '1') return;
+    dlog('browse up', { sid: txt.sid, url, alt, port: s.port });
+    found.set(txt.sid, { sid: txt.sid, title: String(txt.title ?? 'CLAN'), type: /^[A-Z_]{3,20}$/.test(String(txt.type)) ? String(txt.type) : 'CLASSROOM', url, alt });
     emit();
   });
   browser.on('down', (s) => {

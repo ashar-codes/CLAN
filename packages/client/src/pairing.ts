@@ -65,6 +65,30 @@ export function httpCarrier(url: string, sid?: string, f: (u: string, i?: Reques
   };
 }
 
+/**
+ * One carrier for a host advertised at several addresses (mDNS lists all of them): the first address whose
+ * GET /api/info answers with the expected session wins, so the code is tried against the host once, not once per address.
+ * The address that answers is still untrusted — OPAQUE and the pinned TLS binding decide.
+ */
+export function lanCarrier(urls: readonly string[], sid?: string, f: (u: string, i?: RequestInit) => Promise<Response> = (u, i) => fetch(u, i), probeMs = 8000): BootstrapCarrier {
+  if (urls.length <= 1) return httpCarrier(urls[0] ?? '', sid, f);
+  const probe = async (u: string) => {
+    const r = await Promise.race([f(`${u}/api/info`), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), probeMs))]);
+    const id = String(((await r.json()) as { sessionId?: unknown }).sessionId ?? '');
+    if (!r.ok || !id || (sid && id !== sid)) throw new Error('not this CLAN');
+    return httpCarrier(u, id, f);
+  };
+  let chosen: Promise<BootstrapCarrier> | null = null, host: string | null = null;
+  const pick = () => (chosen ??= Promise.any(urls.map(probe)).then((c) => { host = c.hostHint; return c; }, () => { throw new TransferError('unreachable', 'Could not reach the classroom securely.'); }));
+  return {
+    get hostHint() { return host; }, // the address that answered (pair() reads it after finish(), when it is known)
+    sessionId: async () => (await pick()).sessionId(),
+    start: async (b) => (await pick()).start(b),
+    finish: async (b) => (await pick()).finish(b),
+    abort: async (b) => { if (chosen) await (await chosen.catch(() => null))?.abort(b); },
+  };
+}
+
 /** A GATT connection to a host advertising the CLAN bootstrap service (platform BLE code implements this). */
 export type BleLink = { write(frame: Uint8Array): Promise<void>; onFrame(cb: (frame: Uint8Array) => void): () => void; close(): void };
 
@@ -162,7 +186,7 @@ export async function pairAndJoin(o: {
   if (o.candidates.length === 0 && !o.carriers?.length) throw new TransferError('none_found', 'No classrooms found on this network yet. Make sure you are on the same Wi-Fi as the teacher.');
   const f = o.plainFetch ?? ((u, i) => fetch(u, i));
   const errors: TransferError[] = [];
-  const carriers = [...o.candidates.map((c) => httpCarrier(c.url, c.sid, f)), ...(o.carriers ?? [])];
+  const carriers = [...o.candidates.map((c) => lanCarrier([c.url, ...(c.alt ?? [])], c.sid, f)), ...(o.carriers ?? [])];
   const attempts = carriers.map(async (carrier) => {
     try {
       const sid = await carrier.sessionId();

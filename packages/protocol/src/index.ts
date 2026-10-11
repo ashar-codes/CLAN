@@ -138,7 +138,19 @@ export type PresentationView = { id: string; presenter: 'host' | string; present
 export type MediaJoin = { url: string; token: string; identity: string; expiresAt: number };
 
 /** DNS-SD TXT. Untrusted hint only: name + type, nothing else before pairing. */
-export type Advertisement = { v: string; sid: string; title: string; type?: string };
+/** `a`: the address the host's server is bound to (added in 14.2; older hosts omit it). Discovery is untrusted either way. */
+export type Advertisement = { v: string; sid: string; title: string; type?: string; a?: string };
+
+/**
+ * Every IPv4 URL a discovered host might be reachable at, preferred addresses first. mDNS records list all of the host's
+ * IPv4 addresses (on Windows also WSL/Hyper-V/VMware/hotspot adapters), so trying only the first one can miss the real
+ * LAN address. Joining tries them all; OPAQUE + pinned TLS decide which one is the real CLAN.
+ */
+export function lanUrls(port: number, addresses: readonly string[] = [], preferred: readonly (string | undefined)[] = []): string[] {
+  const ipv4 = (a: unknown): a is string => typeof a === 'string' && /^(\d{1,3})(\.\d{1,3}){3}$/.test(a) && a.split('.').every((n) => +n <= 255) && !a.startsWith('127.') && !a.startsWith('0.');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return [];
+  return [...new Set([...preferred, ...addresses].filter(ipv4))].slice(0, 8).map((a) => `http://${a}:${port}`);
+}
 
 // ---- Files & assignments ----
 export const TransferState = z.enum(['not_started', 'queued', 'downloading', 'paused', 'verifying', 'completed', 'failed']);

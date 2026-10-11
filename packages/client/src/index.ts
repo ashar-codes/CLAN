@@ -3,7 +3,8 @@
 import { WS_CLOSE, type ClientMessage, type JoinResponse, type ServerMessage } from '@classroom/protocol';
 
 export type Quality = 'excellent' | 'good' | 'poor' | 'disconnected';
-export type Candidate = { url: string; title?: string; sid?: string };
+/** `alt`: other addresses the same host advertised; tried in parallel with `url`. */
+export type Candidate = { url: string; title?: string; sid?: string; alt?: string[] };
 export type JoinResult = JoinResponse & { url: string };
 
 /** Minimal WebSocket surface used by ClassroomConnection (browser WebSocket, `ws`, React Native). */
