@@ -26,6 +26,7 @@ import { verifyStatement } from './people.ts';
 export const LINK_VERSION = 'clan-link/1';
 export const LINK_MAX_FRAME = 1024 * 1024 + 64;
 export const LINK_HANDSHAKE_MS = 10_000;
+const MAX_PENDING_FRAMES = 64, MAX_PENDING_BYTES = 2 * LINK_MAX_FRAME;
 const te = new TextEncoder(), td = new TextDecoder();
 const KEY = /^[A-Za-z0-9_-]{43}$/;
 
@@ -63,6 +64,7 @@ export class FrameReader {
       const n = new DataView(this.buf.buffer, this.buf.byteOffset, 4).getUint32(0);
       if (n > this.max) throw new LinkError('too_large', 'Frame exceeds the limit.');
       if (this.buf.length < 4 + n) break;
+      if (out.length >= MAX_PENDING_FRAMES * 4) throw new LinkError('too_large', 'Too many frames in one chunk.');
       out.push(this.buf.slice(4, 4 + n)); this.buf = this.buf.slice(4 + n);
     }
     return out;
@@ -77,19 +79,32 @@ const bin = (s: unknown, len: number) => { if (typeof s !== 'string' || !/^[A-Za
 /** Pull frames one at a time from a ByteLink during the handshake (then hand the stream to the session). */
 function framesOf(link: ByteLink) {
   const reader = new FrameReader(LINK_MAX_FRAME), queue: Uint8Array[] = [];
+  let queuedBytes = 0;
   let waiting: { res(f: Uint8Array): void; rej(e: Error): void } | null = null, ended: Error | null = null, sink: ((f: Uint8Array) => void) | null = null, closeSink: ((r?: string) => void) | null = null;
   const fail = (e: Error) => { ended = e; waiting?.rej(e); waiting = null; };
   link.onData((chunk) => {
+    if (ended) return;
     let frames: Uint8Array[];
     try { frames = reader.push(chunk); } catch (e) { fail(e as Error); link.close(); return; }
-    for (const f of frames) { if (sink) sink(f); else if (waiting) { const w = waiting; waiting = null; w.res(f); } else queue.push(f); }
+    for (const f of frames) {
+      if (sink) sink(f);
+      else if (waiting) { const w = waiting; waiting = null; w.res(f); }
+      else {
+        if (queue.length >= MAX_PENDING_FRAMES || queuedBytes + f.length > MAX_PENDING_BYTES) {
+          queue.length = 0; queuedBytes = 0;
+          fail(new LinkError('too_large', 'Too many pending link frames.')); link.close(); return;
+        }
+        queue.push(f); queuedBytes += f.length;
+      }
+    }
   });
   link.onClose((r) => { if (closeSink) closeSink(r); else fail(new LinkError('closed', r ? `Connection closed (${r}).` : 'Connection closed.')); });
   return {
-    next: () => new Promise<Uint8Array>((res, rej) => { const f = queue.shift(); if (f) return res(f); if (ended) return rej(ended); waiting = { res, rej }; }),
+    next: () => new Promise<Uint8Array>((res, rej) => { if (ended) return rej(ended); const f = queue.shift(); if (f) { queuedBytes -= f.length; return res(f); } waiting = { res, rej }; }),
     /** After the handshake: deliver every further frame (and the backlog) to `f`. */
     attach(f: (frame: Uint8Array) => void, onClose: (r?: string) => void) {
       sink = f; closeSink = onClose;
+      queuedBytes = 0;
       for (const q of queue.splice(0)) f(q);
       if (ended) onClose(ended.message);
     },
@@ -100,13 +115,18 @@ function framesOf(link: ByteLink) {
 function session(link: ByteLink, frames: ReturnType<typeof framesOf>, role: SecureLink['role'], peerKey: string, sendKey: Uint8Array, recvKey: Uint8Array): SecureLink {
   let sendN = 0n, recvN = 0n, closed = false;
   const msgSubs: ((m: Uint8Array) => void)[] = [], closeSubs: ((r?: string) => void)[] = [], backlog: Uint8Array[] = [];
+  let backlogBytes = 0;
   const end = (reason?: string) => { if (closed) return; closed = true; link.close(); for (const c of closeSubs) c(reason); };
   frames.attach((f) => {
     if (closed) return;
     let m: Uint8Array;
     try { m = chacha20poly1305(recvKey, nonce(recvN)).decrypt(f); } catch { return end('A message failed authentication.'); }
     recvN++;
-    if (msgSubs.length) for (const s of msgSubs) s(m); else backlog.push(m);
+    if (msgSubs.length) for (const s of msgSubs) s(m);
+    else {
+      if (backlog.length >= MAX_PENDING_FRAMES || backlogBytes + m.length > MAX_PENDING_BYTES) return end('Too many pending link messages.');
+      backlog.push(m); backlogBytes += m.length;
+    }
   }, (r) => end(r));
   return {
     peerKey, role,
@@ -116,7 +136,7 @@ function session(link: ByteLink, frames: ReturnType<typeof framesOf>, role: Secu
       if (m.length > LINK_MAX_FRAME - 16) throw new LinkError('too_large', 'Message too large.');
       link.send(frame(chacha20poly1305(sendKey, nonce(sendN++)).encrypt(m)));
     },
-    onMessage(cb) { msgSubs.push(cb); for (const m of backlog.splice(0)) cb(m); },
+    onMessage(cb) { msgSubs.push(cb); backlogBytes = 0; for (const m of backlog.splice(0)) cb(m); },
     onClose(cb) { if (closed) cb(); else closeSubs.push(cb); },
     close: (reason) => end(reason),
   };
