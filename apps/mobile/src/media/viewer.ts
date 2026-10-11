@@ -76,7 +76,7 @@ export async function watch(c: { url: string; token: string; transport: PinnedNa
     .on(RoomEvent.Reconnecting, () => emit({ state: 'reconnecting' })).on(RoomEvent.Reconnected, () => { emit({ state: 'connected' }); screen(); })
     .on(RoomEvent.Disconnected, () => emit({ state: 'disconnected', track: null }))
     .on(RoomEvent.ConnectionQualityChanged, (q, p) => { if (p.isLocal) emit({ quality: Q[q] ?? 'unknown' }); });
-  await room.connect(`${origin}/media`, token, { autoSubscribe: true });
+  await room.connect(`${origin}/media`, token, { autoSubscribe: true, rtcConfig: { iceServers: [] } });
   emit({ state: 'connected' }); screen();
   return {
     /** Small view → low layer; fullscreen → the sharp layer (text on slides). */

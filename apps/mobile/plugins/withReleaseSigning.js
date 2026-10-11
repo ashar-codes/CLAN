@@ -15,7 +15,7 @@ const SIGNING = `
 const GUARD = `
 // CLAN: refuse to produce a release APK/AAB that isn't signed with the upload key.
 gradle.taskGraph.whenReady { graph ->
-    if (graph.allTasks.any { it.name.toLowerCase().contains('release') && (it.name.startsWith('assemble') || it.name.startsWith('bundle') || it.name.startsWith('package')) } && !findProperty('CLAN_UPLOAD_STORE_FILE')) {
+    if (graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') && (it.name.startsWith('assemble') || it.name.startsWith('bundle') || it.name.startsWith('package')) } && !findProperty('CLAN_UPLOAD_STORE_FILE')) {
         throw new GradleException('CLAN release signing: set CLAN_UPLOAD_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD in ~/.gradle/gradle.properties (see docs/BUILDING.md).')
     }
 }
@@ -28,6 +28,18 @@ module.exports = (config) => withAppBuildGradle(config, (c) => {
     g = g.replace(/(release \{\n(?:\s*\/\/.*\n)*\s*)signingConfig signingConfigs\.debug/, '$1signingConfig signingConfigs.release');
     g += GUARD;
     if (!g.includes('signingConfig signingConfigs.release') || !g.includes("storeFile file(findProperty('CLAN_UPLOAD_STORE_FILE'))")) throw new Error('withReleaseSigning: build.gradle layout changed; update the plugin');
+  }
+  // Internal emulator QA uses release-mode libraries (no Expo development launcher), with the disposable debug key.
+  // This variant is opt-in and never changes the release signing configuration or its guard.
+  g = g.replace("graph.allTasks.any { it.name.toLowerCase()", "graph.allTasks.any { it.project == project && it.name.toLowerCase()");
+  if (process.env.CLAN_INTERNAL_QA === '1' && !/\bqa\s*\{/.test(g)) {
+    g = g.replace('    buildTypes {', `    buildTypes {
+        // CLAN internal QA variant: TEST/UNVERIFIED, debug-signed, never for beta updates.
+        qa {
+            initWith release
+            matchingFallbacks = ['release']
+            signingConfig signingConfigs.debug
+        }`);
   }
   c.modResults.contents = g;
   return c;

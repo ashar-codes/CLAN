@@ -42,6 +42,7 @@ public class PeerLinkModule: Module {
     }
 
     AsyncFunction("listen") { (port: Int, promise: Promise) in
+      guard (0...65535).contains(port) else { return promise.reject("LISTEN", "Bad port.") }
       self.queue.async {
         if let l = self.listener, let p = l.port { return promise.resolve(Int(p.rawValue)) }
         do {
@@ -68,7 +69,7 @@ public class PeerLinkModule: Module {
     Function("stopListening") { self.queue.async { self.listener?.cancel(); self.listener = nil } }
 
     AsyncFunction("connect") { (host: String, port: Int, net: String?, promise: Promise) in
-      guard let p = NWEndpoint.Port(rawValue: UInt16(clamping: port)), port > 0 else { return promise.reject("CONNECT", "Bad port.") }
+      guard (1...65535).contains(port), let p = NWEndpoint.Port(rawValue: UInt16(port)) else { return promise.reject("CONNECT", "Bad port.") }
       self.open(NWConnection(host: NWEndpoint.Host(host), port: p, using: self.params()), promise)
     }
     /** Connect to a Bonjour service found by `browse` (works over Apple peer-to-peer Wi-Fi as well as a shared network). */
@@ -77,9 +78,12 @@ public class PeerLinkModule: Module {
       self.open(NWConnection(to: .service(name: name, type: serviceType, domain: "local.", interface: nil), using: self.params()), promise)
     }
     Function("write") { (id: String, b64: String) -> Bool in
-      guard let c = self.conns[id], let d = Data(base64Encoded: b64) else { return false }
-      c.send(content: d, completion: .contentProcessed { err in if err != nil { self.close(id) } })
-      return true
+      guard b64.count <= 1_400_000, let d = Data(base64Encoded: b64) else { return false }
+      return self.queue.sync {
+        guard let c = self.conns[id] else { return false }
+        c.send(content: d, completion: .contentProcessed { err in if err != nil { self.close(id) } })
+        return true
+      }
     }
     Function("close") { (id: String) in self.close(id) }
 
@@ -176,6 +180,7 @@ public class PeerLinkModule: Module {
 
   private func open(_ c: NWConnection, _ promise: Promise) {
     queue.async {
+      guard self.conns.count < 32 else { c.cancel(); return promise.reject("CONNECT", "Too many connections.") }
       var settled = false
       let id = self.adopt(c, ready: { ok, err in
         if settled { return }; settled = true

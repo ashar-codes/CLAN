@@ -84,7 +84,8 @@ class Nearby {
     const sdk = typeof Platform.Version === 'number' ? Platform.Version : 0;
     const want = sdk >= 33 ? [PermissionsAndroid.PERMISSIONS.NEARBY_WIFI_DEVICES, PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS] : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
     const r = await PermissionsAndroid.requestMultiple(want.filter(Boolean) as never);
-    return Object.values(r).every((v) => v === 'granted' || v === 'never_ask_again') && Object.values(r).some((v) => v === 'granted');
+    const required = sdk >= 33 ? PermissionsAndroid.PERMISSIONS.NEARBY_WIFI_DEVICES : PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
+    return r[required] === PermissionsAndroid.RESULTS.GRANTED;
   }
 
   async start() {
