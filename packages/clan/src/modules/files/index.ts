@@ -49,15 +49,15 @@ export class Files {
   /** Adds a file to the caller's Personal Space or a CLAN they belong to (CLAN must have the `files` capability). */
   async add(p: Principal, path: string, name: string, scope: Scope, mime?: string): Promise<FileView> {
     this.assertWrite(p, scope);
-    const { object } = await this.store.put(path, mime);
-    return this.attach(p, object.id, NAME.parse(name), scope);
+    const { object, release } = await this.store.put(path, mime);
+    try { return this.attach(p, object.id, NAME.parse(name), scope); } finally { release(); }
   }
 
   /** Like add, but moves an app-produced file into the store instead of copying it (recordings, captures). */
   async ingest(p: Principal, path: string, name: string, scope: Scope, mime?: string): Promise<FileView> {
     this.assertWrite(p, scope);
-    const { object } = await this.store.ingest(path, mime);
-    return this.attach(p, object.id, NAME.parse(name), scope);
+    const { object, release } = await this.store.ingest(path, mime);
+    try { return this.attach(p, object.id, NAME.parse(name), scope); } finally { release(); }
   }
 
   /** Shares content the caller can already read into another scope: a new reference, never a copy. */
@@ -92,7 +92,24 @@ export class Files {
   /** Registers classroom files (already on disk, already hashed + manifested) as references of their CLAN. Idempotent. */
   adoptClassroomFiles(storageRoot: string) { return adoptClassroomResources(this.db, this.store, this.clans, storageRoot); }
 
+  /** Lifecycle coordinator: release this CLAN's references. Bytes shared with personal data/other CLANs remain. */
+  forgetClan(clanId: string, retain?: { ownerId: string; refIds: string[] }) {
+    const refs = this.store.refsIn({ kind: 'clan', clanId }, 'files');
+    const kept = new Set(retain?.refIds);
+    for (const ref of refs) {
+      if (retain && kept.has(ref.id)) {
+        // Keep the stable ref ID used by a personal Course; only its scope changes on this device.
+        this.db.prepare("UPDATE resources_refs SET scope_kind = 'personal', scope_id = ?, entity = 'file', entity_id = ?, name = ?, created_by = ? WHERE id = ?")
+          .run(retain.ownerId, `retained:${ref.id}`, this.nameOf(ref), retain.ownerId, ref.id);
+      } else this.store.unref(ref.id);
+    }
+    return [...new Set(refs.map((r) => r.objectId))];
+  }
+
   private attach(p: Principal, objectId: string, name: string, scope: Scope) {
+    // Copying/hashing yields: membership may have been revoked while bytes were being stored.
+    // Recheck at publication, including shares and future lifecycle cleanup.
+    this.assertWrite(p, scope);
     const ref = this.store.ref(objectId, { module: 'files', entity: 'file', entityId: `${objectId}:${userOf(p)}`, scope, name, createdBy: userOf(p) });
     this.bus.publish(ResourceShared, 'files', { refId: ref.id, objectId, scope, by: userOf(p) });
     return this.view(ref, new Map());

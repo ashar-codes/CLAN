@@ -86,6 +86,10 @@ export class Courses {
   }
   /** Owner of a course (for modules that attach their own data to it, e.g. a Course board). */
   ownerOf(courseId: string) { return (this.db.prepare('SELECT owner_id o FROM courses_courses WHERE id = ? AND archived_at IS NULL').get(courseId) as { o: string } | undefined)?.o ?? null; }
+  /** Lifecycle retention includes archived personal courses; their file links must keep working. */
+  fileReferences(ownerId: string): string[] {
+    return (this.db.prepare("SELECT DISTINCT l.entity_id id FROM courses_links l JOIN courses_courses c ON c.id = l.course_id WHERE c.owner_id = ? AND l.module = 'files'").all(ownerId) as { id: string }[]).map((r) => r.id);
+  }
   list(p: Principal): Course[] {
     return (this.db.prepare('SELECT * FROM courses_courses WHERE owner_id = ? AND archived_at IS NULL ORDER BY name LIMIT 200').all(userOf(p)) as CRow[]).map(toCourse);
   }

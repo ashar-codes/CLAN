@@ -28,6 +28,18 @@ stored copies are retained; leave does not claim to erase files already download
 
 ## Remaining actions (implementation pending)
 
+The core cleanup foundation is implemented, but destructive controls are **not exposed yet**. An appended migration
+records authorized remove/delete intent, candidate object IDs and completion separately. Pending intent fences reads,
+membership restoration and host capabilities; owner deletion cannot be undone by startup classroom imports. Only a
+completed member-copy removal may be cleared by the authenticated join coordinator. The composition root calls each
+module's scoped cleanup API in one transaction. Private notes/Saved items, personal boards and other CLAN references
+survive. File references used by personal Courses (including archived Courses) retain their stable IDs in Personal Space.
+
+Owned object collection uses exact hash-store paths, refuses referenced or in-flight content, and is retryable after
+unlink-before-metadata crashes. Adopted classroom objects still require server-owned cleanup and preservation of
+referenced bytes. Cleanup completion must wait for host/download cleanup; clearing projections is not physical erasure.
+The implementation also rechecks file-sharing membership at publication after asynchronous storage.
+
 * **Remove local copy:** confirmation must describe exactly which local cached CLAN data is removed. Modules remove
   their own rows through public APIs; the resource store releases scoped references and preserves blobs referenced
   by personal data or another CLAN. Externally exported files are not CLAN's cache. Never delete personal courses,

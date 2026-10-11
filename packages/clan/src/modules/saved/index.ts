@@ -133,6 +133,13 @@ export class Saved {
     const it = this.full(r);
     return it.ownerId === userOf(p) || it.sharedWith.some((c) => this.perms.canRead(p, { kind: 'clan', clanId: c })) ? it : null;
   }
+
+  /** Lifecycle coordinator only: unlink this CLAN without deleting private Saved items. */
+  forgetClan(clanId: string) {
+    const ids = this.db.prepare('SELECT item_id id FROM saved_shares WHERE clan_id = ?').all(clanId) as { id: string }[];
+    this.db.prepare('DELETE FROM saved_shares WHERE clan_id = ?').run(clanId);
+    for (const { id } of ids) this.bus.publish(SavedItemShared, 'saved', { itemId: id, clanId, shared: false });
+  }
   items(p: Principal, collectionId?: string): SavedItem[] {
     if (!this.perms.agentMay(p, 'saved')) return [];
     return (this.db.prepare(`SELECT * FROM saved_items WHERE owner_id = ? ${collectionId ? 'AND collection_id = ?' : ''} ORDER BY created_at DESC LIMIT 500`)

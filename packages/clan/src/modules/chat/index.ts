@@ -60,6 +60,20 @@ export class Chat {
   }
 
   // ---- threads ----
+  /** Lifecycle coordinator only; attachment bytes belong to Files, not Chat. */
+  forgetClan(clanId: string) {
+    const ids = (this.db.prepare('SELECT id FROM chat_threads WHERE clan_id = ?').all(clanId) as { id: string }[]).map((r) => r.id);
+    tx(this.db, () => {
+      for (const id of ids) {
+        this.db.prepare('DELETE FROM chat_reactions WHERE message_id IN (SELECT id FROM chat_messages WHERE thread_id = ?)').run(id);
+        this.db.prepare('DELETE FROM chat_cursors WHERE thread_id = ?').run(id);
+        this.db.prepare('DELETE FROM chat_messages WHERE thread_id = ?').run(id);
+        this.db.prepare('DELETE FROM chat_threads WHERE id = ?').run(id);
+      }
+      for (const table of ['chat_names', 'chat_me', 'chat_outbox']) this.db.prepare(`DELETE FROM ${table} WHERE clan_id = ?`).run(clanId);
+    });
+    return ids;
+  }
   thread(id: string): Thread | null { const r = this.db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(id) as TRow | undefined; return r ? toThread(r) : null; }
   groupThread(clanId: string, id?: string): Thread { return this.ensureThread(clanId, 'group', '', id); }
   directThread(clanId: string, a: string, b: string, id?: string): Thread {

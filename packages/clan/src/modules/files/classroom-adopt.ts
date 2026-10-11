@@ -17,7 +17,7 @@ export function adoptClassroomResources(db: Db, store: ResourceStore, clans: Cla
     AND NOT EXISTS (SELECT 1 FROM resources_refs r WHERE r.module = 'files' AND r.entity = 'classroom-resource' AND r.entity_id = resources.id)`).all() as Res[];
   for (const r of rows) {
     const clanId = clans.clanOfSession(r.session_id);
-    if (!clanId || !UUID.test(r.id)) continue;
+    if (!clanId || clans.cleanup(clanId) || !UUID.test(r.id)) continue;
     const owner = clans.get(clanId)!.createdBy;
     const o = store.adopt({ sha256: r.sha256, size: r.size, mime: r.mime, location: join(storageRoot, 'resources', r.id) });
     store.ref(o.id, { module: 'files', entity: 'classroom-resource', entityId: r.id, scope: { kind: 'clan', clanId }, name: null, createdBy: owner });

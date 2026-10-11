@@ -135,6 +135,15 @@ export class Notifications implements NotificationsContract {
   /** Opening a conversation clears its notices. */
   markThreadRead(p: Principal, threadId: string) { this.db.prepare('UPDATE notify_notices SET read_at = ? WHERE thread_id = ? AND user_id = ? AND read_at IS NULL').run(this.now(), threadId, userOf(p)); }
 
+  /** Lifecycle coordinator supplies exactly the threads removed by Chat. Personal study notices stay. */
+  forgetThreads(threadIds: string[]) {
+    for (const id of threadIds) {
+      this.db.prepare('DELETE FROM notify_notices WHERE thread_id = ?').run(id);
+      this.lastAlert.delete(id);
+      if (this.context.viewing === id) this.context.viewing = null;
+    }
+  }
+
   private onMessage(messageId: string) {
     const user = this.localUser();
     const hit = user && this.chat.concernsLocal(messageId); // null unless this person is a participant

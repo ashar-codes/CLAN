@@ -1,7 +1,7 @@
 // Core services: module migrations, typed/versioned events, idempotent consumers, Resource Store dedupe + references.
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { migrateModules } from '../src/core/db.ts';
@@ -78,6 +78,35 @@ describe('events', () => {
 });
 
 describe('Resource Store', () => {
+  it('scoped collection retains referenced and in-flight content, deletes only managed orphan bytes, and retries after a crash', async () => {
+    const { app, db, storageDir } = setup();
+    try {
+      const source = file(storageDir, 'original.txt', 'Keep the user original');
+      const stored = await app.store.put(source);
+      expect(() => app.store.collectOwned(stored.object.id)).toThrow('still in progress');
+      const again = await app.store.put(source);
+      stored.release(); stored.release(); // idempotent; a second writer still holds its own reservation
+      expect(() => app.store.collectOwned(stored.object.id)).toThrow('still in progress');
+      const ref = app.store.ref(stored.object.id, { module: 'files', entity: 'file', entityId: 'test', scope: { kind: 'personal', ownerId: app.me }, createdBy: app.me });
+      again.release();
+      expect(app.store.collectOwned(stored.object.id)).toBe('retained');
+      expect(await app.store.verify(stored.object.id)).toBe(true);
+      app.store.unref(ref.id);
+      expect(app.store.collectOwned(stored.object.id)).toBe('removed');
+      expect(app.store.collectOwned(stored.object.id)).toBe('absent');
+      expect(existsSync(source)).toBe(true);
+      expect(existsSync(stored.object.location)).toBe(false);
+      const next = await app.store.put(source); next.release();
+      unlinkSync(next.object.location); // crash after unlink, before the orphan metadata was committed
+      expect(app.store.collectOwned(next.object.id)).toBe('removed');
+      const external = app.store.adopt({ sha256: 'a'.repeat(64), size: 1, mime: 'text/plain', location: source });
+      expect(app.store.collectOwned(external.id)).toBe('adopted');
+      expect(existsSync(source)).toBe(true);
+      db.prepare("UPDATE resources_objects SET origin = 'store' WHERE id = ?").run(external.id);
+      expect(() => app.store.collectOwned(external.id)).toThrow('outside the managed');
+      expect(existsSync(source)).toBe(true);
+    } finally { db.close(); }
+  });
   it('stores identical content once; each use is a reference; SHA-256 is verified', async () => {
     const { app, storageDir } = setup();
     const dir = tmp();

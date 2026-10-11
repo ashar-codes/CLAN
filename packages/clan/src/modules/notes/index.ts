@@ -98,6 +98,13 @@ export class Notes {
     return (this.db.prepare('SELECT n.* FROM notes_notes n JOIN notes_shares s ON s.note_id = n.id WHERE s.clan_id = ? AND n.deleted_at IS NULL ORDER BY n.updated_at DESC').all(clanId) as Raw[]).map((r) => this.full(r));
   }
 
+  /** Lifecycle coordinator only: discard CLAN shares, retaining every personal note and other share. */
+  forgetClan(clanId: string) {
+    const ids = this.db.prepare('SELECT note_id id FROM notes_shares WHERE clan_id = ?').all(clanId) as { id: string }[];
+    this.db.prepare('DELETE FROM notes_shares WHERE clan_id = ?').run(clanId);
+    for (const { id } of ids) this.bus.publish(NoteShared, 'notes', { noteId: id, clanId, shared: false });
+  }
+
   searchProvider(): SearchProvider {
     const doc = (r: Raw) => { const n = this.full(r); return { entityId: n.id, title: n.title, body: n.body, updatedAt: n.updatedAt, scopes: [{ kind: 'personal', ownerId: n.ownerId } as Scope, ...n.sharedWith.map((clanId): Scope => ({ kind: 'clan', clanId }))] }; };
     return {

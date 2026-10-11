@@ -2,7 +2,7 @@
 // other only through public APIs (modules/<name>/index.ts), events and the core services.
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { migrateModules, type Db, type ModuleSchema } from './core/db.ts';
+import { migrateModules, tx, type Db, type ModuleSchema } from './core/db.ts';
 import { EventBus, eventsSchema } from './core/events.ts';
 import { Identity, identitySchema } from './core/identity.ts';
 import { Permissions, permissionsSchema } from './core/permissions.ts';
@@ -99,7 +99,22 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const tick = (t = now()) => { reminders.fire(t); notifications.tick(t); };
   syncClassrooms();
 
-  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, me, syncClassrooms, tick };
+  /** Internal lifecycle step. Requires durable authorized intent; filesystem/server cleanup still must succeed
+   * before completeCleanup. It deliberately never deletes private study rows, signing identities or other CLANs. */
+  const purgeClanProjection = (clanId: string) => {
+    const intent = clans.cleanup(clanId);
+    if (!intent || intent.userId !== me) throw new Error('Authorized cleanup intent is required.');
+    return tx(db, () => {
+      const candidates = files.forgetClan(clanId, { ownerId: me, refIds: courses.fileReferences(me) });
+      clans.recordCleanupObjects(clanId, candidates);
+      notes.forgetClan(clanId); saved.forgetClan(clanId);
+      notifications.forgetThreads(chat.forgetClan(clanId));
+      assignments.forgetClan(clanId); whiteboard.purgeOwner('clan', clanId); search.forgetClan(clanId);
+      return clans.cleanupObjects(clanId);
+    });
+  };
+
+  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, me, syncClassrooms, tick, purgeClanProjection };
 }
 
 export type { Principal, Scope } from './core/permissions.ts';

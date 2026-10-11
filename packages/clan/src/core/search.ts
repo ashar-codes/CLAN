@@ -53,6 +53,9 @@ export class SearchIndex {
     for (const [m, p] of this.providers) for (const d of p.all()) this.write(m, d);
   }
 
+  /** Lifecycle cleanup; private projections of shared notes/links remain indexed. */
+  forgetClan(clanId: string) { this.db.prepare("DELETE FROM search_docs WHERE scope_kind = 'clan' AND scope_id = ?").run(clanId); }
+
   private write(module: string, d: IndexDoc) {
     const ins = this.db.prepare('INSERT OR REPLACE INTO search_docs (module, entity_id, scope_kind, scope_id, title, body, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
     for (const s of d.scopes) ins.run(module, d.entityId, s.kind, s.kind === 'personal' ? s.ownerId : s.clanId, d.title.slice(0, 300), d.body.slice(0, 20_000), d.updatedAt);

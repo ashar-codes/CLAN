@@ -36,6 +36,24 @@ function legacyDb(storage: string) {
 }
 
 describe('classroom → CLAN migration', () => {
+  it('does not resurrect deleted authority or re-adopt files from retained legacy history', () => {
+    const storage = tmp(), L = legacyDb(storage);
+    try {
+      const { app } = setup({ db: L.db, storageDir: storage });
+      app.clans.requestCleanup(L.s1, app.me, 'delete'); app.purgeClanProjection(L.s1);
+      const newSession = randomUUID(), newMember = randomUUID();
+      L.db.prepare("INSERT INTO sessions (id, title, join_code, network_mode, started_at) VALUES (?, 'Operating Systems', '', 'lan', 10000)").run(newSession);
+      L.db.prepare(`INSERT INTO members (id, session_id, device_id, full_name, roll_no, device_name, status, token_hash, token_expires, joined_at, last_seen)
+        VALUES (?, ?, 'fresh', 'Fresh', 'R9', 'Mac', 'approved', ?, 0, 10001, 10001)`).run(newMember, newSession, randomUUID());
+      const reopened = setup({ db: L.db, storageDir: storage }).app;
+      expect(reopened.clans.clanOfSession(newSession)).toBe(L.s1); // retained identity blocks fresh legacy title recreation
+      expect(reopened.clans.list(app.me).map((c) => c.id)).toEqual([L.s3]);
+      expect(reopened.store.refsIn({ kind: 'clan', clanId: L.s1 })).toEqual([]);
+      expect(reopened.clans.members(L.s1).every((m) => m.status === 'removed')).toBe(true);
+      expect(reopened.clans.members(L.s1).some((m) => m.displayName === 'Fresh')).toBe(false);
+      expect(reopened.clans.cleanup(L.s1)?.completedAt).toBeNull();
+    } finally { L.db.close(); }
+  });
   it('maps courses to CLASSROOM CLANs, keeping ids, members and history; legacy tables are untouched', () => {
     const storage = tmp();
     const L = legacyDb(storage);

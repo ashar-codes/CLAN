@@ -131,3 +131,10 @@ Next: finish remove-copy/owner delete with shared-file protection and durable to
 Hand and the gated hosting work. Android reliability/final full suites and candidate packaging remain pending.
 Windows user reports Codex is installing, not a tested-commit/result report yet. Xcode installation was approved by
 user and is pending; recheck availability later. Never interpret these setup reports as hardware PASS.
+
+Cleanup foundation continuation: durable intents + scoped projection APIs + managed orphan collection are implemented
+and tested (51 targeted units/typecheck PASS). Destructive controls remain hidden until adopted server bytes, scoped
+downloads and stop-host cleanup are coordinated and tested. See lifecycle/progress docs. Candidate IDs persist in
+`clans_cleanup`; never mark cleanup complete based on projection cleanup alone. File publication rechecks membership.
+Xcode 26.6 is installed/selected but license is not accepted; user asked to complete first launch. Windows actual tested
+commit/results still pending. No Phase 14.2 candidate packaging or completion tag yet.

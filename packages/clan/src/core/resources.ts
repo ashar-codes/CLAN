@@ -2,7 +2,7 @@
 // references (refs) that say who uses it, under which scope. Identical content is stored once; legacy classroom files are
 // adopted in place (no copy) so the classroom protocol's paths, manifests and SHA checks stay valid.
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, unlinkSync } from 'node:fs';
 import { copyFile, mkdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -45,16 +45,21 @@ const toRef = (r: RawRef): RefRow => ({ id: r.id, objectId: r.object_id, module:
 
 export class ResourceStore {
   private db: Db; private bus: EventBus; private dir: string; private now: () => number;
+  private activeWrites = 0;
+  // A returned object may be awaiting attachment in another module. Never collect it in that interval.
+  private unattachedWrites = new Map<string, number>();
   constructor(db: Db, bus: EventBus, storageDir: string, now = () => Date.now()) { this.db = db; this.bus = bus; this.dir = join(storageDir, 'objects'); this.now = now; }
 
   object(id: string) { return this.db.prepare('SELECT id, sha256, size, mime, location, origin FROM resources_objects WHERE id = ?').get(id) as ObjectRow | undefined; }
   bySha(sha256: string) { return this.db.prepare('SELECT id, sha256, size, mime, location, origin FROM resources_objects WHERE sha256 = ?').get(sha256) as ObjectRow | undefined; }
 
   /** Stores a copy of `srcPath` (never moves or deletes the user's file). Same bytes → the existing object. */
-  async put(srcPath: string, mime = 'application/octet-stream'): Promise<{ object: ObjectRow; deduped: boolean }> {
+  async put(srcPath: string, mime = 'application/octet-stream') {
+    this.activeWrites++;
+    try {
     const { sha256, size } = await sha256File(srcPath);
     const hit = this.bySha(sha256);
-    if (hit) return { object: hit, deduped: true };
+    if (hit) return this.written(hit, true);
     const dest = join(this.dir, sha256.slice(0, 2), sha256);
     await mkdir(join(this.dir, sha256.slice(0, 2)), { recursive: true });
     const tmp = `${dest}.${randomUUID()}.tmp`;
@@ -63,22 +68,35 @@ export class ResourceStore {
     if (check.sha256 !== sha256) { await rm(tmp, { force: true }); throw new Error('File changed while it was being added; try again.'); }
     await rename(tmp, dest);
     const again = this.bySha(sha256); // a concurrent put of the same bytes won the race
-    if (again) return { object: again, deduped: true };
-    return { object: this.insert({ sha256, size, mime: mime.slice(0, 120), location: dest, origin: 'store' }), deduped: false };
+    if (again) return this.written(again, true);
+    return this.written(this.insert({ sha256, size, mime: mime.slice(0, 120), location: dest, origin: 'store' }), false);
+    } finally { this.activeWrites--; }
   }
 
   /**
    * Moves a file the app itself produced (e.g. a finished recording) into the store: hashed once, renamed (atomic on the
    * same filesystem, so multi-hour media is never copied a second time). Same bytes already stored → the source is removed.
    */
-  async ingest(srcPath: string, mime = 'application/octet-stream'): Promise<{ object: ObjectRow; deduped: boolean }> {
+  async ingest(srcPath: string, mime = 'application/octet-stream') {
+    this.activeWrites++;
+    try {
     const { sha256, size } = await sha256File(srcPath);
     const hit = this.bySha(sha256);
-    if (hit) { await rm(srcPath, { force: true }); return { object: hit, deduped: true }; }
+    if (hit) { await rm(srcPath, { force: true }); return this.written(hit, true); }
     const dest = join(this.dir, sha256.slice(0, 2), sha256);
     await mkdir(join(this.dir, sha256.slice(0, 2)), { recursive: true });
     try { await rename(srcPath, dest); } catch { await copyFile(srcPath, dest); await rm(srcPath, { force: true }); } // other volume
-    return { object: this.insert({ sha256, size, mime: mime.slice(0, 120), location: dest, origin: 'store' }), deduped: false };
+    return this.written(this.insert({ sha256, size, mime: mime.slice(0, 120), location: dest, origin: 'store' }), false);
+    } finally { this.activeWrites--; }
+  }
+  private written(object: ObjectRow, deduped: boolean) {
+    this.unattachedWrites.set(object.id, (this.unattachedWrites.get(object.id) ?? 0) + 1);
+    let held = true;
+    return { object, deduped, release: () => {
+      if (!held) return; held = false;
+      const count = (this.unattachedWrites.get(object.id) ?? 1) - 1;
+      if (count) this.unattachedWrites.set(object.id, count); else this.unattachedWrites.delete(object.id);
+    } };
   }
 
   /** Registers an existing file in place (legacy classroom storage). The caller vouches for sha256/size; verify() rechecks. */
@@ -115,6 +133,21 @@ export class ResourceStore {
   }
   /** Objects nothing refers to any more (garbage-collection candidates; adopted files are never deleted here). */
   orphans() { return this.db.prepare('SELECT o.id, o.sha256, o.size, o.mime, o.location, o.origin FROM resources_objects o WHERE NOT EXISTS (SELECT 1 FROM resources_refs r WHERE r.object_id = o.id)').all() as ObjectRow[]; }
+
+  /** Scoped lifecycle GC, never a broad directory sweep. Synchronous unlink + metadata deletion cannot interleave
+   * with ref/put on this device's JS runtime. A crash after unlink is idempotently resumed through the cleanup journal.
+   * In-flight storage and returned-but-unattached objects force a retry; adopted classroom bytes need server cleanup. */
+  collectOwned(objectId: string): 'absent' | 'retained' | 'removed' | 'adopted' {
+    const object = this.object(objectId);
+    if (!object) return 'absent';
+    if (this.refsOf(objectId).length) return 'retained';
+    if (this.activeWrites || this.unattachedWrites.has(objectId)) throw new Error('File storage is still in progress; retry cleanup when it finishes or after restart.');
+    if (object.origin === 'adopted') return 'adopted';
+    if (!/^[0-9a-f]{64}$/.test(object.sha256) || object.location !== join(this.dir, object.sha256.slice(0, 2), object.sha256)) throw new Error('Refusing cleanup outside the managed resource store.');
+    try { unlinkSync(object.location); } catch (e) { if ((e as { code?: string }).code !== 'ENOENT') throw e; }
+    this.db.prepare('DELETE FROM resources_objects WHERE id = ? AND NOT EXISTS (SELECT 1 FROM resources_refs WHERE object_id = ?)').run(objectId, objectId);
+    return 'removed';
+  }
 
   /** Re-hashes the stored bytes. */
   async verify(objectId: string) {

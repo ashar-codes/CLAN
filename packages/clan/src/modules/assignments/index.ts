@@ -40,6 +40,9 @@ export class Assignments {
     } catch (e) { this.db.exec('ROLLBACK TO assign_seen'); this.db.exec('RELEASE assign_seen'); throw e; }
   }
 
+  /** Lifecycle coordinator: discard only this CLAN's received projection. */
+  forgetClan(clanId: string) { this.db.prepare('DELETE FROM assign_seen WHERE clan_id = ?').run(clanId); }
+
   /** Assignments of the Classroom CLANs this person belongs to (or one of them). */
   list(p: Principal, o: { clanId?: string; dueBefore?: number } = {}): AssignmentItem[] {
     const u = userOf(p);

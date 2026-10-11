@@ -168,3 +168,17 @@ NOT TESTED. No project-owned test peers remained after teardown.
 
 Remaining P0-5 work: remove local copies and owner deletion with durable markers, scoped cleanup and last-copy
 warnings. Shared blob references must protect personal files and other CLANs. Neither destructive control is exposed yet.
+
+### P0-5 cleanup foundation (software only)
+
+Durable remove/delete intents now fence authority and restart imports; pending cleanup cannot be cleared by joining.
+Scoped module cleanup retains private data, other CLAN shares and stable file references in personal/archived Courses.
+Candidate object IDs are journaled for retries. Exact managed-orphan collection protects referenced and in-flight bytes
+and resumes unlink-before-metadata crashes. Adopted server files/download cleanup and destructive UI remain pending;
+this increment does not claim completed erasure. File publication now rechecks membership after storage (add/ingest
+regressions pass). Targeted **51/51** units including module boundaries PASS, 3.92 s
+(`/tmp/clan-142-cleanup-unit4.log`); typecheck PASS (`/tmp/clan-142-cleanup-typecheck5.log`).
+Earlier targeted run failed because the new test called the personal board creation API for a CLAN board; corrected
+to the existing host API, no production permission bypass. Xcode 26.6 now exists/selected; native SDK commands report
+unaccepted license. User has been asked to complete Xcode's license/first-launch setup. Windows feedback is still setup
+only; branch pushed through `385c623`, native Windows PASS remains unverified.

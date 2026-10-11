@@ -39,7 +39,7 @@ export function importClassrooms(db: Db, clans: Clans, identity: Identity, owner
       WHERE NOT EXISTS (SELECT 1 FROM clans_classroom_members x WHERE x.member_id = m.id) ORDER BY m.joined_at`).all() as Member[];
     for (const m of members) {
       const clanId = clans.clanOfSession(m.session_id);
-      if (!clanId) continue;
+      if (!clanId || clans.cleanup(clanId)) continue;
       const device = m.device_key ? keyFingerprint(m.device_key) : `legacy-device:${m.device_id}`;
       const userId = identity.userForDevice(device, m.full_name, m.device_key ?? undefined);
       db.prepare('INSERT INTO clans_classroom_members (member_id, clan_id, user_id) VALUES (?, ?, ?)').run(m.id, clanId, userId);

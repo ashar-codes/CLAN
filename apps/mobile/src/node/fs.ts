@@ -24,6 +24,13 @@ async function* chunks(p: string, start = 0) {
 }
 export function createReadStream(p: string, o?: { start?: number }) { return chunks(p, o?.start ?? 0); }
 
+/** Resource Store's scoped orphan cleanup: file only, no recursive deletion and no swallowed native failure. */
+export function unlinkSync(p: string) {
+  if (isDir(p)) throw fail('EISDIR', p);
+  const f = new File(p); if (!f.exists) throw fail('ENOENT', p);
+  f.delete();
+}
+
 /** `open(path, 'a' | 'r')`: append writes for resumable downloads, reads for hashing. */
 export async function open(p: string, mode: 'a' | 'r' = 'r') {
   const f = new File(p);
