@@ -64,6 +64,7 @@ export function serverCheckpointSection(db: Db, storageDir: string): CheckpointP
 
   return {
     section: 'server',
+    optional: true, // phones (no host-server tables) hand over without it; nothing on the destination is removed
     preflight(clanId) {
       const n = (sql: string) => (db.prepare(sql).get(clanId) as { n: number }).n;
       const issues = [];

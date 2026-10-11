@@ -15,9 +15,9 @@ import { setup, user } from './helpers.ts';
 const closers: (() => Promise<unknown>)[] = [];
 afterAll(async () => { for (const c of closers) await c(); });
 
-async function device(name: string) {
+async function device(name: string, o: { hostServer?: boolean } = {}) {
   const s = setup();
-  s.app.hosting.register(serverCheckpointSection(s.db, s.storageDir));
+  if (o.hostServer !== false) s.app.hosting.register(serverCheckpointSection(s.db, s.storageDir)); // a phone has no host-server tables
   const tls = await createClassroomTls(`sync-${name}`, Date.now(), 5 * 365 * 86_400_000);
   const signer = nodeSigner(newEd25519().privatePkcs8); // the device key: sync identity and hosting key
   const fp = s.app.sync.setup({ publicKey: signer.publicKey, name, platform: 'test', tlsCa: tls.certificate, tlsSpki: tls.spkiSha256 }, signer);
@@ -117,7 +117,7 @@ function bind(h: HostingDestination): HostingDestination {
 
 describe('persistent hosting hand-over pushed by the phone', () => {
   it('the phone pushes its CLAN to the linked computer: resumable, only by the current host, re-deliverable, revocable', async () => {
-    const phone = await device('Phone'), desk = await device('Desktop'), other = await device('Other laptop');
+    const phone = await device('Phone', { hostServer: false }), desk = await device('Desktop'), other = await device('Other laptop');
     await link(desk, phone); await link(desk, other);
     const clan = phone.app.clans.create({ type: 'PROJECT_TEAM', name: 'Robotics', createdBy: phone.app.me });
     phone.app.hosting.establish(clan.id, phone.app.me, phone.signer);

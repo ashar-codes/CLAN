@@ -641,8 +641,9 @@ export class HostAuthority {
     });
   }
   private async verifyStaged(clanId: string, header: CheckpointHeader) {
-    const names = Object.keys(header.sections).sort(), mine = [...this.providers.keys()].sort();
-    if (names.join() !== mine.join()) throw new HostingError('incomplete', `Checkpoint sections differ (received ${names.join(', ') || 'none'}).`);
+    const names = Object.keys(header.sections);
+    const unknown = names.filter((n) => !this.providers.has(n)), absent = [...this.providers.values()].filter((p) => !p.optional && !names.includes(p.section)).map((p) => p.section);
+    if (unknown.length || absent.length) throw new HostingError('incomplete', `Checkpoint sections differ (unexpected: ${unknown.join(', ') || 'none'}; missing: ${absent.join(', ') || 'none'}).`);
     for (const b of checkpointBlobs(header)) {
       const path = join(this.inDir(clanId), b.sha256);
       const got = await hashFile(path).catch(() => null);

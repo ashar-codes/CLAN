@@ -412,3 +412,16 @@ unprivileged user (Chromium refuses root without `--no-sandbox`; the sandbox was
 cleared for local LAN traffic, `CLASSROOM_DEV_INSECURE_KEYSTORE=1` (no OS keychain in the container; disposable
 profiles only). PASS: `e2e/hosting.test.ts` (two app instances: link, allow, ask, confirm pause, hand over, destination
 hosts, source refuses "Host again" with the fence reason) and the existing `e2e/lifecycle.test.ts`.
+
+### P1-7 checkpoint K: phone owner → linked computer (cloud; native NOT TESTED)
+
+Phone `Me › Hosting` (`apps/mobile/src/screens/Hosting.tsx`, `src/sync/hosting.ts`): create a CLAN this phone owns
+(epoch 0 signed by the phone's keystore-held sync key) and hand it to a chosen linked computer with a confirmation,
+progress and retry; finish an interrupted hand-over; ask the current host computer to move it; stop a computer from
+hosting (owner-signed revocation pushed to linked computers, unreached ones listed). Transport: `callComputer` over
+the existing native pinned transport with the phone's signed sync headers; blobs read with expo-file-system at offsets.
+The phone states plainly that it does not host and a CLAN is available only while its host computer is on
+(`PHONE_HOSTING_BLOCKED`). The `server` checkpoint section is optional (phones have no host-server tables); all other
+sections stay mandatory. Desktop resolves conflicts (the phone shows the alert and points there). PASS: typecheck
+(desktop + mobile), push test now from a phone-shaped device without host-server storage. Native Android/iOS execution
+NOT TESTED (no emulator in this container).

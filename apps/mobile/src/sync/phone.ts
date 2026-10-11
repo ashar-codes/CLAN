@@ -138,6 +138,26 @@ export function syncNow(): Promise<{ ok: number; error: string | null }> {
 }
 export const isSyncing = () => !!running;
 
+/** One signed JSON POST to a linked computer over the native pinned transport, trying its known addresses (hosting). */
+export async function callComputer(fp: string, path: string, body: unknown) {
+  const sync = phoneClan().sync, d = sync.devices().find((x) => x.fp === fp && !x.current && !x.revoked);
+  if (!d || d.tlsSpki === 'none') throw new Error('That device is not one of your linked computers.');
+  await syncSigner(); // the engine signs with this phone's keystore-held sync key
+  const t = pinnedNativeTransport({ certificate: d.tlsCa, spkiSha256: d.tlsSpki }), raw = JSON.stringify(body);
+  let last: Error = new Error('Your computer could not be reached. Open CLAN on it and keep both on the same Wi-Fi.');
+  for (const ep of [...new Set([...d.endpoints, ...accountEndpoints()])]) {
+    let r: Response;
+    try { r = await t.fetch(`https://${ep}${path}`, { method: 'POST', headers: { ...sync.authHeaders('POST', path, raw), 'content-type': 'application/json' }, body: raw }); }
+    catch (e) { last = e as Error; continue; }
+    const json = await r.json().catch(() => ({})) as { error?: string; message?: string };
+    if (!r.ok) throw Object.assign(new Error(json.message ?? `Your computer refused (${r.status}).`), { code: json.error });
+    sync.setEndpoints(d.fp, [ep, ...d.endpoints.filter((e) => e !== ep)]);
+    return json;
+  }
+  throw last;
+}
+export const hostingSigner = syncSigner;
+
 /** Foreground-only schedule: no background polling (battery); discovery stops when the app is in the background. */
 export function startSyncSchedule() {
   let t: ReturnType<typeof setInterval> | null = null;

@@ -9,6 +9,9 @@ export type SectionExport = { rows: unknown[]; files: (CheckpointFile & { path: 
 export type PreflightIssue = { section: string; code: string; count: number; blocking: boolean; message: string };
 export interface CheckpointProvider {
   readonly section: string;
+  /** A source without this storage at all (a phone has no host-server tables) omits the section; the destination then
+   *  imports nothing for it and keeps its own rows. Every other section must be present. */
+  readonly optional?: boolean;
   /** Before export: every reason this section cannot carry the CLAN completely. Nothing is ever dropped silently. */
   preflight?(clanId: string): Omit<PreflightIssue, 'section'>[];
   /** Synchronous, consistent read of one CLAN's rows on the frozen host. */
