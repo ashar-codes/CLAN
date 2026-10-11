@@ -29,3 +29,17 @@ neither visible on a Mac host:
 Not yet ruled out on real hardware: Windows Defender Firewall when running `pnpm dev` (no installer rules: Windows
 asks once per program — "Allow" on Private networks is required; a dismissed prompt blocks inbound), and Wi-Fi
 profile set to *Public*. See the retest procedure in `docs/CODEX_HANDOFF_PHASE_14_2.md`.
+
+## Codex continuation (2026-10-11)
+
+Preflight confirmed clean isolated worktree on `phase-14.2` at `4a7dcaa`; original staged checkout, release tags,
+signing material and application profiles preserved. Reviewed both Windows fixes. `phase-14.2` is on GitHub;
+`40fa357` adds [the exact native Windows retest](WINDOWS_RETEST_PHASE_14_2.md). Physical Windows connectivity is
+**NOT TESTED** pending Windows Codex feedback.
+
+Baseline: typecheck PASS; complete serial unit suite **327/327 PASS**, 36 files, 242.46 s.
+Desktop E2E **22/22 active PASS**, two opt-in performance cases skipped, 269.50 s. The first unit invocation was interrupted after command-line arguments were incorrectly
+placed after `--` and Vitest started parallel workers; the corrected full serial run above passed.
+Logs: `/tmp/clan-142-typecheck.log`, `/tmp/clan-142-unit-baseline-serial.log`, `/tmp/clan-142-e2e-baseline.log`.
+No timeouts were increased. The [P1 hosting design](PHASE_14_2_HOSTING_DESIGN.md) defines authorization, durable
+relinquishment, replication and fencing gates before implementation.

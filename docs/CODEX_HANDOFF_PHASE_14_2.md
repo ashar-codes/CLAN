@@ -6,7 +6,7 @@ early). Progress table: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md).
 ## 1. Where things are
 * Repo worktree: `/Users/ashar/clan-astra-phase12` (isolated). **Do not touch** the original checkout
   `/Users/ashar/Desktop/My Projects/untitled folder` (branch `main` @ `2a6d854` with 226 staged files).
-* Branch: `phase-14.2` (local only, **not pushed**). HEAD: see `git log -1` (handoff docs on top of `a833dd1`).
+* Branch: `phase-14.2`, pushed to GitHub. HEAD: see `git log -1`. `40fa357` adds the native Windows retest procedure.
 * Baseline: tag `clan-beta-v0.1.0-rc1` = `6b86e7f`; integration branch `clan-astra-phase12` @ `1994793` (docs).
 * Remote: `https://github.com/ashar-codes/CLAN` (PRIVATE). Pushed so far: branch `clan-astra-phase12`, tag
   `clan-beta-v0.1.0-rc1`. The Mac's active `gh` account is `ryvostudios`; use `GH_TOKEN=$(gh auth token -u ashar-codes)`
@@ -27,7 +27,8 @@ ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffect
 ## 4. Tests actually run (macOS arm64, 2026-10-11)
 * PASS: `pnpm typecheck`; `packages/server/test/multi-address.test.ts` (3); `unit`, `clan`, `discovery`, `direct`
   (58); `security`, `mobile`, `integration` (60); `discovery` + `direct` re-run after the netinfo change (20).
-* NOT RUN in 14.2: full unit suite, desktop E2E, Android emulator suites, installers. Run them before tagging
+* Codex baseline 2026-10-11: full serial unit 327/327 PASS (36 files, 242.46 s), desktop E2E 22 active PASS / 2 opt-in performance skips (269.50 s), typecheck PASS. See progress record for logs.
+* NOT RUN in 14.2: Android emulator suites, installers. Run them before tagging
   (`pnpm test`, `pnpm test:e2e`, `python3 apps/mobile/e2e/android_cross_device.py` — see docs/TESTING.md).
 * Windows / physical Android / iOS: **NOT TESTED**.
 
@@ -70,7 +71,7 @@ ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffect
 Run long suites on macOS with normal QoS (e.g. `launchctl submit`); background shells time out.
 
 ## 8. Pushing
-Not pushed. To publish: review `git log -p clan-astra-phase12..phase-14.2` (no keys, no binaries), then
+Pushed through `40fa357` after review; native Windows feedback is pending. Exact retest: [WINDOWS_RETEST_PHASE_14_2.md](WINDOWS_RETEST_PHASE_14_2.md). For subsequent commits, review the diff (no keys, no binaries), then
 `git push https://github.com/ashar-codes/CLAN.git refs/heads/phase-14.2:refs/heads/phase-14.2` with the ashar-codes
 credential. Never force-push; never move `clan-beta-v0.1.0-rc1`.
 
