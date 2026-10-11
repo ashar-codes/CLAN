@@ -82,3 +82,25 @@ present but the call UI is unvalidated, so not shipped).
 | Desktop E2E full suite (Phase 14.2 regression: hosting, classroom, join, chat, sync, lifecycle, sharing…) | 30 passed, 2 skipped, 6 failed — the same 6 as the untouched Phase 14.2 baseline: screen sharing ×3 (no capture in Xvfb), Astra canvas/world ×2 (WebGL blocklisted), board-tape (pre-existing `Leave` vs `Leave membership` selector clash). None in code this phase touched. |
 | Mobile: Metro Android bundle (`expo export`) | PASS (People screen included) |
 | macOS / Windows / Android / iOS hardware | NOT TESTED — `PHASE_14_3_HARDWARE_TESTS.md` |
+
+---
+
+## Phase 14.3 C+D (branch `claude/phase-14.3-cd`, draft PR #3 → `claude/phase-14.3-ab`)
+Stages (each committed with tests): C1 clan-link/1 · C2 link sessions + connection manager + TCP transport + desktop ·
+presence keys + anonymous probing · C3 phone native peer transport (Kotlin/Swift) + nearby service · D1 clan-qrx/1 ·
+D2 phone QR/optical UI, desktop optical UI, device-link/Wi-Fi codes · A+B gaps: shared call engine, phone calls and
+voice notes, profile pictures, a friend's other devices · hostile-peer tests · docs. Design: PHASE_14_3_ARCHITECTURE.md.
+
+### Verification (cloud, Linux) — final run
+| Check | Result |
+|---|---|
+| `pnpm typecheck` (root, desktop, mobile, visual-lab) | PASS |
+| `pnpm test` (unit + integration) | PASS — 417 passed, 14 skipped (LAN/hardware-gated), 0 failed (56 files) |
+| Link protocol / people link sessions / presence / LAN discovery privacy | PASS (part of the above: link 6, people-link 6, people 12, transport 6, phone runtime 1) |
+| Animated QR round trips through real QR images (drops, dupes, reorder, damage, forged, private, receipts) | PASS — 4 |
+| QR formats, call engine | PASS — 3 + 3 |
+| Desktop E2E full suite | 32 passed, 2 skipped, 6 failed — the same 6 pre-existing Linux failures (screen sharing ×3, WebGL ×2, board-tape `Leave` selector). People 5/5 and optical 2/2 (fake-camera Y4M receive; on-screen frames decode to the exact file) PASS |
+| Android Kotlin (pinned-transport, direct-join, share-intake, peer-link) | type-check PASS against Android 16 API surface — NOT a Gradle build |
+| iOS Swift | NOT COMPILED (no Xcode in the cloud) |
+| Metro bundles (`expo export` Android + iOS) | PASS |
+| Any phone, Mac, Windows, radio, camera or microphone on hardware | NOT TESTED |
