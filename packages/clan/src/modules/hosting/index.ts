@@ -7,7 +7,7 @@ import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   authorityHash, b64u, CheckpointHeader, HostSessionAuthority, sessionAuthorityProblem, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
-  signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointProvider, type HostSigner,
+  signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointProvider, type HostSigner, type PreflightIssue,
 } from '@classroom/protocol';
 import { z } from 'zod';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
@@ -39,9 +39,29 @@ export const schema: ModuleSchema = {
   `],
 };
 
+/** Every CLAN-core table, by how a hosting hand-over treats it (the coverage test fails on an unclassified table). */
+export const CLAN_TABLES: Record<string, string> = {
+  clans_clans: 'carried', clans_classroom_sessions: 'carried', chat_threads: 'carried', chat_messages: 'carried', chat_reactions: 'carried',
+  chat_cursors: 'carried', chat_names: 'carried', wb_boards: 'carried (CLAN boards)', wb_ops: 'carried (CLAN boards)', wb_snapshots: 'carried (CLAN boards)',
+  resources_refs: 'carried (CLAN files; other CLAN-scoped refs block the hand-over)', resources_objects: 'carried (bytes of carried refs)',
+  clans_memberships: 'derived: the destination owner becomes the active owner; members are carried as host-server members',
+  clans_classroom_members: 'derived: rebuilt from carried host-server members after activation',
+  clans_local_preferences: 'device-local', clans_cleanup: 'device-local', clans_local_sessions: 'device-local (member routes)',
+  chat_me: 'device-local', chat_outbox: 'device-local', assign_seen: 'device-local (member cache)', search_docs: 'derived index', core_events: 'device-local',
+  core_consumed: 'device-local', core_grants: 'personal', identity_users: 'device-local', identity_devices: 'device-local', identity_local: 'device-local',
+  hosting_authority: 'hosting control', hosting_transitions: 'hosting control', hosting_revocations: 'hosting control', hosting_staging: 'hosting control',
+  hosting_anchors: 'hosting control', hosting_checkpoints: 'hosting control',
+  ...Object.fromEntries(['ai_', 'reminders_', 'tasks_', 'rec_', 'notes_', 'notify_', 'exams_', 'courses_', 'flashcards_', 'sync_', 'capture_', 'diary_', 'saved_', 'study_']
+    .map((p) => [p, 'personal: the owner\'s own data, carried between their devices by personal sync, never by CLAN hosting'])),
+};
+export const classifyTable = (t: string) => CLAN_TABLES[t] ?? Object.entries(CLAN_TABLES).find(([k]) => k.endsWith('_') && t.startsWith(k))?.[1] ?? null;
+
 export type HostState = 'active' | 'frozen' | 'relinquished' | 'standby' | 'conflict';
 export type HostStatus = { clanId: string; epoch: number; hostKey: string; ownerKey: string; state: HostState; writable: boolean; reason: string | null };
-export class HostingError extends Error { readonly code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
+export class HostingError extends Error {
+  readonly code: string; readonly issues?: PreflightIssue[];
+  constructor(code: string, m: string, issues?: PreflightIssue[]) { super(m); this.code = code; this.issues = issues; }
+}
 
 type Row = { clan_id: string; owner_key: string; epoch: number; head_hash: string; chain: string; state: HostState; conflict: string | null };
 type Staged = { epoch: number; prev_hash: string; checkpoint_hash: string; delegation: string; state: 'staging' | 'verified'; header: string | null };
@@ -54,6 +74,9 @@ export class HostAuthority {
   private dir: string; private me: () => string;
   private providers = new Map<string, CheckpointProvider>();
   private busy = new Set<string>();
+  private activated: ((clanId: string) => void)[] = [];
+  /** Runs after this device became a CLAN's host (e.g. rebuild derived indexes from the imported rows). */
+  onActivated(f: (clanId: string) => void) { this.activated.push(f); }
   /** `linkedDeviceKey`: true only for a verified, unrevoked personal-sync device key of this account. `dir`: hosting
    *  blobs (outgoing checkpoints, incoming staging). `me`: the local user, owner of an activated CLAN copy. */
   constructor(db: Db, clans: Clans, o: { now?: () => number; linkedDeviceKey?: (publicKey: string) => boolean; dir: string; me?: () => string }) {
@@ -206,13 +229,22 @@ export class HostAuthority {
    * Builds (once per frozen epoch) a consistent, content-addressed checkpoint: section rows are exported synchronously
    * from the frozen database, every file is re-hashed, and the header is stored durably before it is offered.
    */
-  async prepareCheckpoint(clanId: string, localKey: string): Promise<{ header: CheckpointHeader; hash: string }> {
+  /** Everything a hand-over could not carry intact (all sections). Shown to the owner before anything is paused. */
+  preflight(clanId: string): PreflightIssue[] {
+    return [...this.providers.values()].flatMap((p) => (p.preflight?.(clanId) ?? []).map((i) => ({ ...i, section: p.section })));
+  }
+  /** `acknowledge`: codes of non-blocking issues the owner explicitly accepted. Blocking issues always stop it. */
+  async prepareCheckpoint(clanId: string, localKey: string, o: { acknowledge?: string[] } = {}): Promise<{ header: CheckpointHeader; hash: string }> {
     return this.exclusive(clanId, async () => {
       const r = this.must(clanId);
       if (r.state !== 'frozen' || this.head(r).hostKey !== localKey) throw new HostingError('bad_state', 'Pause hosting on the current host before preparing a hand-over.');
       const have = this.checkpointOf(clanId);
       if (have && have.header.epoch === r.epoch) return have;
       if (!this.providers.size) throw new HostingError('unavailable', 'No checkpoint sections are registered.');
+      const issues = this.preflight(clanId);
+      const blocking = issues.filter((i) => i.blocking), unacked = issues.filter((i) => !i.blocking && !o.acknowledge?.includes(i.code));
+      if (blocking.length) throw new HostingError('incomplete_data', blocking.map((i) => i.message).join(' '), blocking);
+      if (unacked.length) throw new HostingError('needs_acknowledgment', unacked.map((i) => i.message).join(' '), unacked);
       const exported = [...this.providers.values()].map((p) => ({ name: p.section, ...p.export(clanId) }));
       const out = this.outDir(clanId);
       await rm(out, { recursive: true, force: true }); // section blobs of a discarded earlier checkpoint
@@ -511,6 +543,7 @@ export class HostAuthority {
       for (const [name, rows] of sections) await this.providers.get(name)!.materialize?.(peek.clanId, rows, blob);
       const head = this.learn(chain, localKey, sections);
       void rm(this.inDir(peek.clanId), { recursive: true, force: true });
+      for (const f of this.activated) { try { f(peek.clanId); } catch { /* derived data is rebuilt again at next startup */ } }
       return this.status(head.clanId, localKey)!;
     });
   }

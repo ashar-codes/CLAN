@@ -31,6 +31,11 @@ export class Files {
     const parse = (raw: unknown[]) => z.array(Row).max(100_000).parse(raw);
     return {
       section: 'files',
+      // Any other CLAN-scoped reference would have no section to carry it: stop rather than lose it.
+      preflight: (clanId) => {
+        const n = (this.db.prepare("SELECT count(*) n FROM resources_refs WHERE scope_kind = 'clan' AND scope_id = ? AND NOT (module = 'files' AND entity IN ('file','classroom-resource'))").get(clanId) as { n: number }).n;
+        return n ? [{ code: 'unsupported_data', count: n, blocking: true, message: 'This CLAN holds items a hand-over cannot carry yet.' }] : [];
+      },
       export: (clanId) => {
         const rs = this.db.prepare(SQL).all(clanId) as { id: string; sha256: string; size: number; mime: string; location: string; name: string | null; created_by: string; created_at: number }[];
         return { rows: rs.map((r) => ({ id: r.id, sha256: r.sha256, size: r.size, mime: r.mime, name: r.name, createdBy: r.created_by, createdAt: r.created_at })), files: rs.map((r) => ({ sha256: r.sha256, size: r.size, path: r.location })) };

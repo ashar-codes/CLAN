@@ -356,3 +356,18 @@ hosting units 11 + session verification 1, fence 3 (Linux).
 Cloud gate after checkpoints A–F: typecheck PASS; full serial unit **367 PASS / 14 skipped / 0 FAIL** (44 files + 3
 skipped, 292.85 s; skips = no LAN mDNS / no SFU binary). Desktop Electron E2E, Android emulator, iOS, Windows and
 physical devices NOT RUN. Android runtime re-check and remaining hosting work: see the hosting design doc.
+
+### P1-7 checkpoint G: complete CLAN data and explicit preflight (cloud)
+
+Audit of every table (CLAN core + host server). The `server` section now also carries presence and timeline logs,
+transfer states, assignments, upload attempts, submissions with their bytes and teacher-signed receipts, share uploads
+including quarantined bytes awaiting review (`tmp/<id>.part`) and presentation history. `SERVER_TABLES`/`CLAN_TABLES`
+classify every table (carried, derived, device-local, personal-sync, hosting control, or excluded with reason — only
+legacy UUID `known_devices`, by the existing migration-3 security decision); a coverage test fails on any new
+unclassified table. `preflight` reports what cannot be carried: blocking (`live_session`, `missing_files`,
+`unsupported_data` CLAN-scoped refs) or acknowledgeable (`interrupted_uploads`, `interrupted_imports`, carried as
+recorded); `prepareCheckpoint` refuses unless every non-blocking issue is explicitly acknowledged. Activation rebuilds
+derived classroom links. Pre-existing bug fixed: the host's startup sweep deleted quarantined share bytes awaiting
+review on every restart (regression test fails without the fix). PASS: coverage, real hosted Classroom hand-over
+(assignments, submission bytes + receipt, pending review bytes surviving the destination's own restart, logs, chat,
+old host refuses to host again), preflight block/acknowledge test; clan suite + fence tests green (Linux).

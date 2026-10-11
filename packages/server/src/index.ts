@@ -17,4 +17,4 @@ export { ChatRelay, chatHandle, type ChatStore } from './chat.ts';
 export { Shares } from './shares.ts';
 export { startSyncServer, advertiseSync, browseSync, SYNC_SERVICE, type SyncHost, type ReplicationHost, type ReplicationSink } from './sync-server.ts';
 export { purgeStoppedSessions } from './lifecycle.ts';
-export { serverCheckpointSection } from './hosting-sections.ts';
+export { serverCheckpointSection, SERVER_TABLES } from './hosting-sections.ts';

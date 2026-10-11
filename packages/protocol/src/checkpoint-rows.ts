@@ -5,8 +5,12 @@
 // transaction. Structural database type so the server (node:sqlite) and the CLAN core share it.
 export type CheckpointFile = { sha256: string; size: number };
 export type SectionExport = { rows: unknown[]; files: (CheckpointFile & { path: string })[] };
+/** Something a hand-over would not carry intact. Blocking issues stop it; others need the user's explicit acknowledgment. */
+export type PreflightIssue = { section: string; code: string; count: number; blocking: boolean; message: string };
 export interface CheckpointProvider {
   readonly section: string;
+  /** Before export: every reason this section cannot carry the CLAN completely. Nothing is ever dropped silently. */
+  preflight?(clanId: string): Omit<PreflightIssue, 'section'>[];
   /** Synchronous, consistent read of one CLAN's rows on the frozen host. */
   export(clanId: string): SectionExport;
   /** Strict parse of received rows; returns every file they require. Throws on anything malformed or out of scope. */

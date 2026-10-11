@@ -104,6 +104,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   /** Reminders due → events; due-soon checks → notices. Call about once a minute. */
   const tick = (t = now()) => { reminders.fire(t); notifications.tick(t); };
   syncClassrooms();
+  hosting.onActivated(() => { syncClassrooms(); }); // member links and adopted classroom files of the imported CLAN
 
   /** Internal lifecycle step. Requires durable authorized intent; filesystem/server cleanup still must succeed
    * before completeCleanup. It deliberately never deletes private study rows, signing identities or other CLANs. */
@@ -153,6 +154,6 @@ export { AGENTS } from './modules/ai/index.ts';
 export type { Board, BoardOwner } from './modules/whiteboard/index.ts';
 export type { Tape, TapeEvent, TapeEventKind } from './modules/recordings/index.ts';
 export { PersonalSync, SyncAuthError, contentHash, verifyEd25519, linkProof, fpOf, SMALL_FILE, type SyncSettings, type DeviceView, type ConflictView, type SelfDevice } from './modules/sync/index.ts';
-export { HostAuthority, HostingError, type HostState, type HostStatus } from './modules/hosting/index.ts';
+export { HostAuthority, HostingError, CLAN_TABLES, classifyTable, type HostState, type HostStatus } from './modules/hosting/index.ts';
 export { clock as tapeClock } from './modules/recordings/index.ts';
 export * as ScreenShareEvents from './modules/screenshare/index.ts';
