@@ -21,6 +21,7 @@ import { registerChat } from './chat.ts';
 import { registerStudy } from './study.ts';
 import { registerSync } from './sync.ts';
 import { registerHosting } from './hosting.ts';
+import { registerPeople } from './people.ts';
 import { registerData } from './data.ts';
 import { registerFeedback } from './feedback.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
@@ -426,6 +427,9 @@ app.whenReady().then(() => {
   registerFeedback(clan, keystore);
   const syncReady = registerSync(clan, keystore, () => loadProfile().deviceName);
   syncReady.then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
+  // Nearby People, friends, private chats, direct files/voice notes and call signaling (Phase 14.3 A+B).
+  void registerPeople(clan, { keystore, trust, dataDir: app.getPath('userData'), displayName: () => loadProfile().fullName })
+    .then((pp) => app.on('will-quit', () => void pp.close()), (e) => logError('people', e));
   registerHosting(clan, { sync: syncReady, liveClanId: () => (server && !server.classroom.info().ended ? server.classroom.clan.id ?? null : null) });
   // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).
   const backup = () => { try { backupDb(db(), backupsDir(), { keep: 3 }); } catch (e) { logError('backup', e); } };

@@ -63,6 +63,16 @@ const api: DesktopApi = {
     now: inv('sync:now'), unlink: inv('sync:unlink'), conflicts: inv('sync:conflicts'), resolve: inv('sync:resolve'), setSettings: inv('sync:setSettings'),
     onChanged: (cb) => listen('sync:changed', () => cb()), onData: (cb) => listen('sync:data', () => cb()),
   } as DesktopApi['sync'],
+  people: {
+    me: inv('people:me'), qrImage: inv('people:qrImage'), resetQr: inv('people:resetQr'), update: inv('people:update'), pickAvatar: inv('people:pickAvatar'), avatar: inv('people:avatar'),
+    visibility: inv('people:visibility'), nearby: inv('people:nearby'), contacts: inv('people:contacts'), contact: inv('people:contact'), connectQr: inv('people:connectQr'), friend: inv('people:friend'),
+    conversations: inv('people:conversations'), invite: inv('people:invite'), chat: inv('people:chat'), page: inv('people:page'), send: inv('people:send'), retry: inv('people:retry'),
+    read: inv('people:read'), clear: inv('people:clear'), remove: inv('people:remove'),
+    sendFile: (c, files) => ipcRenderer.invoke('people:sendFile', c, files ? files.slice(0, 10).map((f) => webUtils.getPathForFile(f)).filter(Boolean) : undefined),
+    sendVoice: inv('people:sendVoice'), file: inv('people:file'), voiceBytes: inv('people:voiceBytes'), preview: inv('people:preview'), save: inv('people:save'), openWith: inv('people:openWith'),
+    signal: inv('people:signal'), logCall: inv('people:logCall'),
+    onChanged: (cb) => listen('people:changed', cb), onLive: (cb) => listen('people:live', cb),
+  } as DesktopApi['people'],
   hosting: {
     status: inv('hosting:status'), enable: inv('hosting:enable'), request: inv('hosting:request'), decline: inv('hosting:decline'), revoke: inv('hosting:revoke'), handover: inv('hosting:handover'),
     cancel: inv('hosting:cancel'), resolve: inv('hosting:resolve'), exportCopy: inv('hosting:exportCopy'), acknowledgeSuperseded: inv('hosting:acknowledgeSuperseded'),

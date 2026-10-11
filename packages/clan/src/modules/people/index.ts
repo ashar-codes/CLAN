@@ -421,6 +421,8 @@ export class People {
     const o = this.store.object(t.object_id);
     return o ? { path: o.location, size: t.size, sha256: t.sha256, mime: t.mime, name: t.name } : null;
   }
+  /** This device's own copy of a file it sent (for preview/save on the sender's side). */
+  outgoingBytesLocal(id: string) { const t = this.xfer(id); return t.direction === 'out' && t.object_id && !['cancelled', 'expired'].includes(t.state) ? this.store.object(t.object_id)?.location ?? null : null; }
   outgoingServed(id: string) { const t = this.xfer(id); if (t.direction === 'out' && t.state !== 'complete') this.setXfer(id, 'transferring'); }
   /** Receiver side, what to fetch next. */
   pendingDownloads() { return (this.db.prepare("SELECT id FROM people_transfers WHERE direction = 'in' AND state IN ('accepted','transferring')").all() as { id: string }[]).map((r) => ({ ...this.transfer(r.id)!, peerKey: this.must(this.xfer(r.id).conv_id).peer_key })); }
