@@ -132,4 +132,21 @@ describe('people over clan-link/1 (no TLS server, no router needed)', () => {
     await wait(() => d.app.people.isFriend(phone.key));
     expect(pc.links.connected(phone.key)).toBe(true);
   }, 30_000);
+
+  it('profile pictures: fetched over the link only when shown to us, verified against the signed profile', async () => {
+    const a = await device('PicA'), b = await device('PicB'), m = await device('PicM');
+    // a minimal valid PNG header + payload, as a file
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(2000)]);
+    const pngPath = join(a.storageDir, 'me.png'); writeFileSync(pngPath, png);
+    await a.p.setAvatar(pngPath, 'image/png');
+    await b.cm.connect(a.addr(), { expectKey: a.key, invite: a.p.inviteToken() });
+    await wait(() => !!b.p.avatarOf(a.key));
+    expect(Buffer.from(b.p.avatarOf(a.key)!.data)).toEqual(png);
+    // a forged picture (wrong bytes for the announced hash) is never cached
+    expect(() => m.p.storeAvatar(a.key, 'image/png', png)).toThrow(); // m does not even have a's profile
+    const fake = Buffer.from(png); fake[100]! ^= 1;
+    expect(() => b.p.storeAvatar(a.key, 'image/png', fake)).toThrow(/does not match/);
+    // someone who may not see the profile gets no picture
+    expect(await a.p.avatarFor(m.key)).toBeNull();
+  }, 30_000);
 });

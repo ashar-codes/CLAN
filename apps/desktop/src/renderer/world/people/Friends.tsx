@@ -5,7 +5,7 @@ import type { PeopleContact } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import { useCall } from './Call.tsx';
 import { ChatInvite } from './Chats.tsx';
-import { ago, errText, Initials, REL, usePeople } from './common.tsx';
+import { ago, errText, Avatar, Initials, REL, usePeople } from './common.tsx';
 
 const FIELDS = [['university', 'University'], ['department', 'Department'], ['course', 'Course'], ['interests', 'Interests'], ['bio', 'About you']] as const;
 const WHO = { everyone: 'Everyone nearby', friends: 'Friends', nobody: 'Only me' } as const;
@@ -20,7 +20,7 @@ export function Friends({ onChat }: { onChat(convId: string): void }) {
   const run = (f: () => Promise<unknown>) => { setErr(''); void f().catch((e) => setErr(errText(e))); };
   const row = (c: PeopleContact, actions: React.ReactNode) => (
     <li key={c.key} className="row between person-row">
-      <button className="link row" onClick={() => setSel(c.key)} aria-label={`Open ${c.name}`}><Initials name={c.name} /><span><b>{c.name}</b>{c.verified && <span className="chip"> ✓</span>}<br /><small className="muted">{REL[c.relation] || (c.blocked ? 'Blocked' : '')}{c.lastSeen ? ` · seen ${ago(c.lastSeen)}` : ''}</small></span></button>
+      <button className="link row" onClick={() => setSel(c.key)} aria-label={`Open ${c.name}`}><Avatar k={c.key} name={c.name} /><span><b>{c.name}</b>{c.verified && <span className="chip"> ✓</span>}<br /><small className="muted">{REL[c.relation] || (c.blocked ? 'Blocked' : '')}{c.lastSeen ? ` · seen ${ago(c.lastSeen)}` : ''}</small></span></button>
       <span className="row">{actions}</span>
     </li>
   );
@@ -57,7 +57,7 @@ function PersonCard({ k, onChat, onClose, onError }: { k: string; onChat(id: str
   const p = c.profile;
   return (
     <section className="card stack" aria-label={`Profile of ${c.name}`}>
-      <div className="row between"><div className="row"><Initials name={c.name} size={52} /><div><h2 className="title">{c.name}</h2>
+      <div className="row between"><div className="row"><Avatar k={c.key} name={c.name} size={52} /><div><h2 className="title">{c.name}</h2>
         <small className="muted">{REL[c.relation] || (c.blocked ? 'Blocked' : 'Not connected')}{c.verified ? ' · identity verified' : ' · not verified yet'}</small></div></div>
         <button className="small" onClick={onClose}>Close</button></div>
       {p ? <dl className="profile-dl">{FIELDS.map(([f, l]) => { const v = p[f as keyof typeof p]; return v && (Array.isArray(v) ? v.length : true) ? <div key={f}><dt>{l}</dt><dd>{Array.isArray(v) ? v.join(', ') : String(v)}</dd></div> : null; })}</dl>

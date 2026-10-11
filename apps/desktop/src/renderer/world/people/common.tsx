@@ -23,3 +23,8 @@ export function Initials({ name, size = 36 }: { name: string; size?: number }) {
   return <span className="person-avatar" aria-hidden style={{ width: size, height: size, lineHeight: `${size}px`, fontSize: size / 2.6 }}>{i}</span>;
 }
 export const REL: Record<string, string> = { friend: 'Friend', incoming: 'Asked to be friends', outgoing: 'Request sent', none: '' };
+/** A person's picture once fetched and verified against their signed profile; initials until then. */
+export function Avatar({ k, name, size = 36 }: { k: string; name: string; size?: number }) {
+  const [src] = usePeople(() => api.people.avatar(k), [k]);
+  return src ? <img src={src} alt="" aria-hidden className="person-avatar" width={size} height={size} style={{ width: size, height: size }} /> : <Initials name={name} size={size} />;
+}

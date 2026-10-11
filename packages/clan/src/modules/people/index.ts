@@ -4,7 +4,7 @@
 // consent) here; transports (desktop people server, phone client) only move signed envelopes and bytes. Calls are
 // live signaling only (never stored beyond a call log line). No private key is stored: a keystore-backed signer is
 // set at startup.
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { z } from 'zod';
 import {
@@ -56,6 +56,9 @@ export const schema: ModuleSchema = {
     -- Presence: our secret for friends to recognise our anonymous adverts, and each friend's.
     ALTER TABLE people_profile ADD COLUMN presence TEXT;
     ALTER TABLE people_contacts ADD COLUMN presence_key TEXT;
+  `, `
+    -- Other people's pictures, fetched only when their profile (as shown to us) has one; verified by SHA-256.
+    CREATE TABLE people_avatar_cache (sha256 TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL, used_at INTEGER NOT NULL);
   `],
 };
 
@@ -135,6 +138,40 @@ export class People {
     } finally { release(); }
     this.changed('profile');
     return this.myProfile().avatar;
+  }
+  /** Our picture for `viewer`, only if the profile they may see includes it. */
+  async avatarFor(viewer: string, invite?: string | null): Promise<{ mime: string; data: Uint8Array } | null> {
+    const view = this.profileFor(viewer, invite).profile?.profile;
+    const a = this.myProfile().avatar;
+    if (!view?.avatar || !a) return null;
+    const loc = this.store.object(a.objectId)?.location;
+    if (!loc) return null;
+    const { readFile } = await import('node:fs/promises');
+    return { mime: a.mime, data: new Uint8Array(await readFile(loc)) };
+  }
+  /** People whose shown profile has a picture we have not cached yet (to fetch while connected). */
+  wantedAvatar(key: string): string | null {
+    const sha = this.contact(key)?.profile?.avatar?.sha256;
+    if (!sha || this.isBlocked(key)) return null;
+    return this.db.prepare('SELECT 1 FROM people_avatar_cache WHERE sha256 = ?').get(sha) ? null : sha;
+  }
+  /** Keep a fetched picture only if it is exactly the one their signed profile announced (PNG/JPEG, ≤ 512 KB). */
+  storeAvatar(key: string, mime: string, data: Uint8Array) {
+    const a = this.contact(key)?.profile?.avatar;
+    if (!a || data.length > 512 * 1024 || data.length !== a.size || !['image/png', 'image/jpeg'].includes(mime)) throw new PeerError('invalid', 'Unexpected picture.');
+    const png = data[0] === 0x89 && data[1] === 0x50, jpg = data[0] === 0xff && data[1] === 0xd8;
+    if (!(png || jpg) || createHash('sha256').update(data).digest('hex') !== a.sha256) throw new PeerError('invalid', 'Picture does not match the profile.');
+    this.db.prepare('INSERT OR REPLACE INTO people_avatar_cache (sha256, mime, data, used_at) VALUES (?, ?, ?, ?)').run(a.sha256, mime, data, this.now());
+    // bounded cache: at most 300 pictures (≈ 150 MB worst case, far less in practice); least recently used go first
+    this.db.prepare('DELETE FROM people_avatar_cache WHERE sha256 IN (SELECT sha256 FROM people_avatar_cache ORDER BY used_at DESC LIMIT -1 OFFSET 300)').run();
+    this.changed('contacts', { key });
+  }
+  /** Cached picture for a contact (current profile only). */
+  avatarOf(key: string): { mime: string; data: Uint8Array } | null {
+    const sha = this.contact(key)?.profile?.avatar?.sha256; if (!sha || this.isBlocked(key)) return null;
+    const r = this.db.prepare('SELECT mime, data FROM people_avatar_cache WHERE sha256 = ?').get(sha) as { mime: string; data: Uint8Array } | undefined;
+    if (r) this.db.prepare('UPDATE people_avatar_cache SET used_at = ? WHERE sha256 = ?').run(this.now(), sha);
+    return r ? { mime: r.mime, data: new Uint8Array(r.data) } : null;
   }
   avatarPath(objectId: string) { const p = this.myProfile().avatar; return p && p.objectId === objectId ? this.store.object(objectId)?.location ?? null : null; }
   /** Everyone Nearby is opt-in and temporary (default 1 h); it falls back to Friends Only when it expires. */

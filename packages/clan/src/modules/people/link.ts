@@ -96,6 +96,15 @@ export class LinkSession {
     return true;
   }
 
+  /** Their picture, if their profile shows one we have not cached (verified against the signed profile). */
+  private async fetchAvatar() {
+    if (!this.p.wantedAvatar(this.peerKey)) return;
+    try {
+      const r = await this.ask({ t: 'avatar' });
+      const c = Array.isArray(r.chunks) ? r.chunks[0] : null;
+      if (r.t === 'data' && typeof c === 'string' && typeof r.mime === 'string') this.p.storeAvatar(this.peerKey, r.mime, b64u.decode(c));
+    } catch { /* no picture this time */ }
+  }
   private async download(id: string, size: number) {
     this.downloads.add(id);
     const part = this.files.partPath(id);
@@ -136,7 +145,13 @@ export class LinkSession {
       if (Array.isArray(m.addrs)) { try { this.p.setLinkAddrs(this.peerKey, (m.addrs as unknown[]).filter((a): a is string => typeof a === 'string').slice(0, 6)); } catch { /* malformed: ignored */ } }
       this.hooks.onChange?.('contacts');
       void this.flush();
+      void this.fetchAvatar();
       return;
+    }
+    if (m.t === 'avatar') {
+      const a = await this.p.avatarFor(this.peerKey, this.invite).catch(() => null);
+      if (!a) return this.post({ t: 'err', id, code: 'not_found' });
+      return this.post({ t: 'data', id, mime: a.mime, chunks: [b64u.encode(a.data)] });
     }
     if (m.t === 'env') {
       const envs = Array.isArray(m.envelopes) ? (m.envelopes as unknown[]).slice(0, 100) : [];

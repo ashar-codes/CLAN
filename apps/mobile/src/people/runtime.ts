@@ -2,7 +2,7 @@
 // does not open one), so it is always the caller: it reaches computers by their verified code, sends with signed
 // requests over certificate-pinned TLS, keeps one authenticated socket per computer for what they send back, downloads
 // accepted files and pushes its own in chunks. Platform-agnostic: the app passes native transports, tests pass Node ones.
-import { parseProfileQr, PeerTlsBinding, peerBindingValid, type PeerEnvelope } from '@classroom/protocol';
+import { b64u, parseProfileQr, PeerTlsBinding, peerBindingValid, type PeerEnvelope } from '@classroom/protocol';
 import { peerAuthHeaders, peerSocketAuth, type WebSocketLike } from '@classroom/client';
 import type { People } from '@clan/core';
 
@@ -88,7 +88,7 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
 
   // ---- outbox ----
   let ticking: Promise<void> | null = null;
-  const inflight = new Set<string>();
+  const inflight = new Set<string>(), avatarTried = new Set<string>();
   const tick = (): Promise<void> => ticking ??= (async () => {
     await null; // never settle synchronously (see LinkSession.flush)
     try {
@@ -112,6 +112,13 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
       sockets();
       for (const t of p.pendingDownloads()) if (!inflight.has(t.id) && !o.links?.connected(t.peerKey)) void download(t.id, t.peerKey, t.size);
       for (const t of p.pendingUploads()) if (!inflight.has(t.id) && t.path && !o.links?.connected(t.peerKey)) void upload(t.id, t.peerKey, t.path, t.size);
+      // pictures of computers we reach over TLS (direct links fetch their own)
+      for (const c of p.contacts('all').slice(0, 30)) {
+        const want = p.wantedAvatar(c.key), r = p.route(c.key);
+        if (!want || !r?.tls || !r.endpoints[0] || o.links?.connected(c.key) || avatarTried.has(`${c.key}:${want}`)) continue;
+        avatarTried.add(`${c.key}:${want}`);
+        void call(r.endpoints[0], r.tls, c.key, 'POST', '/peer/avatar', '{}').then((x) => { const a = x as { mime?: string; data?: string }; if (a.mime && a.data) { p.storeAvatar(c.key, a.mime, b64u.decode(a.data)); changed('contacts'); } }, () => {});
+      }
       await p.sweep();
     } catch (e) { console.warn('[people]', (e as Error).message); }
     finally { ticking = null; }

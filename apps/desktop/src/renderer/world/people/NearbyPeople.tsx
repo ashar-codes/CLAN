@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 import type { NearbyPersonView, PeopleContact } from '../../../shared.ts';
 import { api } from '../../App.tsx';
-import { errText, Initials, REL, usePeople } from './common.tsx';
+import { errText, Avatar, Initials, REL, usePeople } from './common.tsx';
 import { ChatInvite } from './Chats.tsx';
 import { OpticalTransfer } from './Optical.tsx';
 
@@ -48,7 +48,7 @@ function NearbyCard({ n, onChat, onError }: { n: NearbyPersonView; onChat(id: st
   const run = (f: () => Promise<unknown>) => void f().catch((e) => onError(errText(e)));
   return (
     <article role="listitem" className="card person" aria-label={n.name}>
-      <div className="row"><Initials name={n.name} /><div><b>{n.name}</b>{n.verified && <span className="chip" title="Identity checked by QR code"> ✓ verified</span>}
+      <div className="row"><Avatar k={n.key} name={n.name} /><div><b>{n.name}</b>{n.verified && <span className="chip" title="Identity checked by QR code"> ✓ verified</span>}
         <br /><small className="muted">{[p.university, p.department, p.course].filter(Boolean).join(' · ') || 'CLAN user'}{REL[rel] ? ` · ${REL[rel]}` : ''}</small></div></div>
       {p.bio && <p className="small-text">{p.bio}</p>}
       {p.interests?.length ? <p className="muted small-text">Interests: {p.interests.join(', ')}</p> : null}

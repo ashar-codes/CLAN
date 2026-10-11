@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Linking, Platform, Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 import { parseProfileQr, profileQr, safetyNumber, TEMP_TTLS } from '@classroom/protocol';
@@ -16,7 +17,7 @@ import { QrImage, QrScanner } from '../ui/qr';
 import { OpticalScreen } from './Optical';
 import { usePhoneCall } from '../people/Call';
 import { VoiceNotePlayer, VoiceRecorder } from '../people/Voice';
-import { act, bump, Btn, Card, Err, Field, H1, Mate, Muted, Row, Screen, useC, useData, when } from '../ui/kit';
+import { act, bump, Btn, Card, Err, Field, H1, Muted, PersonPic, Row, Screen, useC, useData, when } from '../ui/kit';
 
 type Seg = 'nearby' | 'chats' | 'friends';
 const people = () => phoneClan().people;
@@ -133,7 +134,7 @@ function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): 
 
       {entries.map((e) => (
         <Card key={e.id}>
-          <Row><Mate name={e.name} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', color: c.text }}>{e.name}{e.friend ? ' · friend' : ''}</Text>
+          <Row><PersonPic pic={e.key ? people().avatarOf(e.key) : null} name={e.name} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', color: c.text }}>{e.name}{e.friend ? ' · friend' : ''}</Text>
             <Muted small>{e.via === 'direct' ? 'Wi-Fi Direct' : e.via === 'aware' ? 'Wi-Fi Aware' : e.via === 'apple' ? 'Apple peer-to-peer' : 'Same network'}{e.key && nearby.state(e.key) ? ` · ${STATE[nearby.state(e.key)!]}` : ''}{e.profile?.university ? ` · ${e.profile.university}` : ''}</Muted></View></Row>
           <Row gap={6}>
             {e.via === 'direct' && !e.key && <Btn small label="Connect directly" onPress={() => void run(() => nearby.connectDirect(e))} />}
@@ -151,6 +152,7 @@ const STATE: Record<string, string> = { connecting: 'Connecting…', connected: 
 
 function PersonCard({ c, onChat }: { c: Contact; onChat(id: string): void }) {
   const calls = usePhoneCall();
+  const pic = useData(() => people().avatarOf(c.key));
   const [err, setErr] = useState<string | null>(null), [invite, setInvite] = useState(false), [confirm, setConfirm] = useState<'remove' | 'block' | null>(null);
   const myKey = useData(() => people().myKey());
   const run = (f: () => unknown) => { setErr(act(f)); void phonePeople().then((r) => r.tick()); };
@@ -158,7 +160,7 @@ function PersonCard({ c, onChat }: { c: Contact; onChat(id: string): void }) {
   const chat = () => { const x = people().conversations().find((v) => v.peerKey === c.key && v.state === 'active'); if (x) onChat(x.id); else setInvite(true); };
   return (
     <Card>
-      <Row><Mate name={c.name} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', fontSize: 16 }}>{c.name}{c.verified ? ' ✓' : ''}</Text>
+      <Row><PersonPic pic={pic} name={c.name} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', fontSize: 16 }}>{c.name}{c.verified ? ' ✓' : ''}</Text>
         <Muted small>{[p?.university, p?.department, p?.course].filter(Boolean).join(' · ') || (REL[c.relation] || (c.blocked ? 'Blocked' : 'Not connected'))}{nearby.state(c.key) ? ` · ${STATE[nearby.state(c.key)!]}` : ''}</Muted></View></Row>
       {p?.bio ? <Muted>{p.bio}</Muted> : null}
       {myKey && <Muted small>Safety number: {safetyNumber(myKey, c.key)}{c.verified ? ' · verified' : ''}</Muted>}
@@ -205,6 +207,12 @@ function Friends({ onChat }: { onChat(id: string): void }) {
       <Card title="Your name for people">
         <Field label="Name" value={name} onChange={setName} maxLength={80} />
         <Btn small label="Save" disabled={!name.trim()} onPress={() => setErr(act(() => people().updateProfile({ name: name.trim() })))} />
+        <Btn small label="Change picture" onPress={() => void (async () => {
+          const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+          const a = !r.canceled && r.assets[0]; if (!a) return;
+          try { await people().setAvatar(a.uri, a.mimeType === 'image/png' ? 'image/png' : 'image/jpeg'); bump(); } catch (e) { setErr((e as Error).message); }
+        })()} />
+        <Muted small>Your picture is shown to people who can see your profile, and sent only to them.</Muted>
         <Err msg={err} />
       </Card>
     </>
@@ -216,7 +224,7 @@ function ChatList({ onOpen }: { onOpen(id: string): void }) {
   if (!convs.length) return <Muted>No chats yet. Start one from Friends or Nearby.</Muted>;
   return <>{convs.map((c) => (
     <Card key={c.id}>
-      <Row><Mate name={c.peerName} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700' }}>{c.peerName}{c.unread ? ` · ${c.unread} new` : ''}</Text>
+      <Row><PersonPic pic={people().avatarOf(c.peerKey)} name={c.peerName} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700' }}>{c.peerName}{c.unread ? ` · ${c.unread} new` : ''}</Text>
         <Muted small>{c.state === 'invited_in' ? 'Invites you to chat' : c.state === 'invited_out' ? 'Invitation sent' : c.state === 'ended' ? 'Ended' : c.state === 'declined' ? 'Declined' : (c.lastText ?? ttlText(c.ttlMs))}</Muted></View>
         <Btn small label="Open" a11y={`Open chat with ${c.peerName}`} onPress={() => onOpen(c.id)} /></Row>
     </Card>

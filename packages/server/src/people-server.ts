@@ -25,6 +25,7 @@ export type PeopleHost = {
   introduce?(fromKey: string, intro: unknown): void;
   /** Applies one signed envelope (throws a coded error when refused). */
   receive(envelope: unknown, fromKey: string): unknown;
+  avatar?(key: string, invite: string | null): Promise<{ mime: string; data: Uint8Array } | null>;
   outgoingBytes(transferId: string, peerKey: string): { path: string; size: number; sha256: string; mime: string; name: string } | null;
   /** A phone pushes bytes it offered: append at `offset` (the receiver's own state decides what is accepted). */
   incomingChunk?(transferId: string, peerKey: string, offset: number, bytes: Uint8Array): Promise<{ have: number }>;
@@ -79,6 +80,15 @@ export async function startPeopleServer(o: PeopleServerOptions) {
   // First contact: the caller proves its key bound to the SPKI it saw; we release our identity binding only if allowed.
   app.post('/peer/hello', async (req, reply) => {
     try { const b = body(req), key = authed(req, b.raw, o.tls.spkiSha256); reachable(key, req); return { binding: o.host.binding() }; } catch (e) { return fail(reply, e); }
+  });
+  // The caller's view of our picture (only if the profile it may see includes one).
+  app.post('/peer/avatar', async (req, reply) => {
+    try {
+      const b = body(req), key = authed(req, b.raw, o.host.myKey()); reachable(key, req);
+      const a = await o.host.avatar?.(key, invite(req));
+      if (!a) throw Object.assign(new Error('No picture.'), { code: 'not_found' });
+      return { mime: a.mime, data: Buffer.from(a.data).toString('base64url') };
+    } catch (e) { return fail(reply, e); }
   });
   app.post('/peer/profile', async (req, reply) => {
     try { const b = body(req), key = authed(req, b.raw, o.host.myKey()); reachable(key, req); const p = o.host.profileFor(key, invite(req)); if (!p.profile) throw Object.assign(new Error('Not shared.'), { code: 'hidden' }); return p; } catch (e) { return fail(reply, e); }

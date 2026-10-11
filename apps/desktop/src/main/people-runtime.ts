@@ -31,12 +31,14 @@ export async function startPeopleRuntime(o: {
   await mkdir(incoming, { recursive: true });
   const changed = (w: string) => o.onChange?.(w);
   const downloadsNow = new Set<string>();
+  const avatarTried = new Set<string>(); // key:sha — once per picture per run
 
   const server = await startPeopleServer({
     tls: o.tls, port: o.port, bind: o.bind, now,
     host: {
       myKey: () => o.signer.publicKey, binding: () => binding, visibility: () => p.visibility(),
       reachableBy: (k, i) => p.reachableBy(k, i), profileFor: (k, i) => p.profileFor(k, i),
+      avatar: (k, i) => p.avatarFor(k, i),
       introduce: (from, raw) => {
         const i = raw as { binding?: unknown; endpoints?: unknown; profile?: unknown };
         const b = PeerTlsBinding.safeParse(i?.binding);
@@ -135,6 +137,14 @@ export async function startPeopleRuntime(o: {
             }
           } finally { downloadsNow.delete(t.id); await rm(dest, { force: true }).catch(() => {}); }
         })();
+      }
+      // pictures of people we can reach over TLS (link sessions fetch their own)
+      for (const c of p.contacts('all').slice(0, 50)) {
+        const want = p.wantedAvatar(c.key);
+        if (!want || cm.connected(c.key) || avatarTried.has(`${c.key}:${want}`)) continue;
+        avatarTried.add(`${c.key}:${want}`);
+        const clients = clientFor(c.key); if (!clients) continue;
+        void clients[0]!.avatar().then((a) => { if (a) { p.storeAvatar(c.key, a.mime, a.data); changed('contacts'); } }, () => {});
       }
       await p.sweep();
     } catch (e) { console.warn('[people]', (e as Error).message); }

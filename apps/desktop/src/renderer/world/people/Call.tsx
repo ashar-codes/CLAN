@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { CallEngine, type CallPhase, type CallView, type PeerLike } from '@classroom/client/call';
 import { api } from '../../App.tsx';
-import { errText, Initials } from './common.tsx';
+import { errText, Avatar, Initials } from './common.tsx';
 
 type Ctx = { call(peerKey: string, peerName: string): void; active: boolean };
 const CallCtx = createContext<Ctx>({ call: () => {}, active: false });
@@ -48,7 +48,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       <audio ref={audio} autoPlay aria-hidden />
       {call && (
         <div className="call-panel card" role={call.phase === 'ringing' ? 'alertdialog' : 'dialog'} aria-label={`${label[call.phase]}: ${call.peerName}`} data-phase={call.phase} data-rx={call.rx}>
-          <div className="row"><Initials name={call.peerName} size={44} /><div><b>{call.peerName}</b><br />
+          <div className="row"><Avatar k={call.peerKey} name={call.peerName} size={44} /><div><b>{call.peerName}</b><br />
             <span className="muted" role="status">{label[call.phase]}{call.phase === 'connected' ? ` · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : ''}{call.note ? ` · ${call.note}` : ''}</span>
             {call.phase === 'connected' && <><br /><small className="muted">{call.rx > 0 ? 'Receiving audio · encrypted, on this network' : 'Waiting for audio…'}</small></>}</div></div>
           <div className="row">

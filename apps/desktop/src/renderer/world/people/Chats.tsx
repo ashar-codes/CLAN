@@ -6,7 +6,7 @@ import type { FilePreview } from '@classroom/client';
 import type { PeopleConversation, PeopleMessage, PeopleTransfer } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import { useCall } from './Call.tsx';
-import { ago, clock, errText, Initials, mb, ttlLabel, until, usePeople } from './common.tsx';
+import { ago, clock, errText, Avatar, Initials, mb, ttlLabel, until, usePeople } from './common.tsx';
 
 const PAGE = 50;
 const TTLS: [number, string][] = [[3_600_000, '1 hour'], [86_400_000, '24 hours'], [7 * 86_400_000, '7 days']];
@@ -44,7 +44,7 @@ export function Chats({ openId, setOpenId }: { openId: string | null; setOpenId(
           {!convs?.length && <p className="muted">No chats yet.</p>}
           <ul className="people-list">{convs?.map((c) => (
             <li key={c.id}><button className={`conv ${c.id === openId ? 'on' : ''}`} aria-current={c.id === openId ? 'true' : undefined} onClick={() => setOpenId(c.id)}>
-              <Initials name={c.peerName} /><span className="grow"><b>{c.peerName}</b>{c.mode === 'temporary' && <span className="chip" title={ttlLabel(c.ttlMs)}> ⏱</span>}
+              <Avatar k={c.peerKey} name={c.peerName} /><span className="grow"><b>{c.peerName}</b>{c.mode === 'temporary' && <span className="chip" title={ttlLabel(c.ttlMs)}> ⏱</span>}
                 <br /><small className="muted">{STATE[c.state] || (c.lastText ?? 'No messages yet')}</small></span>
               <span className="conv-meta">{c.lastAt ? <small className="muted">{ago(c.lastAt)}</small> : null}{c.unread > 0 && <span className="badge" aria-label={`${c.unread} unread`}>{c.unread}</span>}</span>
             </button></li>))}</ul>
@@ -82,7 +82,7 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
   return (
     <section className="card chat-view stack" aria-label={`Chat with ${c.peerName}`}>
       <div className="row between">
-        <div className="row"><Initials name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
+        <div className="row"><Avatar k={c.peerKey} name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
         <div className="row">
           {(c.friend || c.state === 'active') && <button disabled={active} onClick={() => call(c.peerKey, c.peerName)}>Call</button>}
           {(c.state === 'active' || c.state === 'ended' || c.state === 'declined') && <ChatInvite peerKey={c.peerKey} onChat={() => {}} onError={setErr} label={c.state === 'active' ? 'Change terms…' : 'Invite again…'} terms />}

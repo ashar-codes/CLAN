@@ -73,7 +73,8 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   handle('people:avatar', async (raw) => {
     const key = raw === 'me' ? null : Key.parse(raw);
     if (!key) { const a = p.myProfile().avatar; if (!a) return null; const loc = p.avatarPath(a.objectId); return loc ? `data:${a.mime};base64,${(await readFile(loc)).toString('base64')}` : null; }
-    return null; // other people's pictures are shown once fetched (avatar transfer is a later increment)
+    const a = p.avatarOf(key); // fetched and verified against their signed profile
+    return a ? `data:${a.mime};base64,${Buffer.from(a.data).toString('base64')}` : null;
   });
   handle('people:visibility', async (v, ms) => { const r = p.setVisibility(z.enum(['everyone', 'friends', 'invisible']).parse(v), ms === undefined ? undefined : z.number().int().parse(ms)); await rt.refreshDiscovery(); return r; });
   handle('people:nearby', () => rt.nearby());
