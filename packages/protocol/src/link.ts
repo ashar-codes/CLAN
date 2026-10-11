@@ -52,7 +52,8 @@ export class LinkError extends Error { readonly code: string; constructor(code: 
 /** Splits a byte stream into length-prefixed frames (4-byte big-endian length). */
 export class FrameReader {
   private buf = new Uint8Array(0);
-  constructor(private readonly max = LINK_MAX_FRAME) {}
+  private readonly max: number;
+  constructor(max = LINK_MAX_FRAME) { this.max = max; }
   push(chunk: Uint8Array): Uint8Array[] {
     const merged = new Uint8Array(this.buf.length + chunk.length); merged.set(this.buf); merged.set(chunk, this.buf.length);
     this.buf = merged;
