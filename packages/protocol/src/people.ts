@@ -6,6 +6,7 @@
 // the owner's visibility settings.
 import { z } from 'zod';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { b64u, canonicalBytes, ed25519Verify, keyFingerprint } from './trust.ts';
 
 export const PEER_SERVICE = 'clanpeer';
@@ -109,18 +110,21 @@ export const conversationId = (a: string, b: string) => {
 
 // ---- QR (static profile / invitation) ----
 /** `clan://p/<key>?h=<host:port>&s=<spki>&n=<name>` — the key and certificate pin make a scanned connection verified. */
-export const profileQr = (o: { key: string; endpoints: string[]; spkiSha256: string; name: string }) =>
-  `clan://p/${o.key}?${new URLSearchParams([...o.endpoints.slice(0, 3).map((e) => ['h', e] as [string, string]), ['s', o.spkiSha256], ['n', o.name.slice(0, 40)]]).toString()}`;
-export function parseProfileQr(text: string): { key: string; endpoints: string[]; spkiSha256: string; name: string } | null {
+export const profileQr = (o: { key: string; endpoints: string[]; spkiSha256: string; name: string; invite: string }) =>
+  `clan://p/${o.key}?${new URLSearchParams([...o.endpoints.slice(0, 3).map((e) => ['h', e] as [string, string]), ['s', o.spkiSha256], ['i', o.invite], ['n', o.name.slice(0, 40)]]).toString()}`;
+export function parseProfileQr(text: string): { key: string; endpoints: string[]; spkiSha256: string; name: string; invite: string } | null {
   const m = /^clan:\/\/p\/([A-Za-z0-9_-]{43})\?(.*)$/.exec(text.trim());
   if (!m) return null;
   const q = new URLSearchParams(m[2]);
   const endpoints = q.getAll('h').filter((h) => /^[0-9.]{7,15}:\d{2,5}$/.test(h)).slice(0, 3), s = q.get('s') ?? '';
-  if (!endpoints.length || !/^[A-Za-z0-9+/=_-]{40,64}$/.test(s)) return null;
-  return { key: m[1]!, endpoints, spkiSha256: s, name: (q.get('n') ?? '').slice(0, 40) };
+  const invite = q.get('i') ?? '';
+  if (!endpoints.length || !/^[A-Za-z0-9+/=_-]{40,64}$/.test(s) || !/^[0-9a-f]{32}$/.test(invite)) return null;
+  return { key: m[1]!, endpoints, spkiSha256: s, name: (q.get('n') ?? '').slice(0, 40), invite };
 }
 /** Short fingerprint people compare to verify each other in person. */
 export const safetyNumber = (a: string, b: string) => {
   const h = sha256(new TextEncoder().encode(['clan-safety/v1', ...[keyFingerprint(a), keyFingerprint(b)].sort()].join('|')));
   return Array.from(h.slice(0, 10), (x) => String(x % 100).padStart(2, '0')).join('').match(/.{5}/g)!.join(' ');
 };
+/** Ed25519 over raw bytes (request statements); false on any malformed input. */
+export const verifyStatement = (key: string, bytes: Uint8Array, sig: string) => { try { return ed25519.verify(b64u.decode(sig), bytes, b64u.decode(key)); } catch { return false; } };

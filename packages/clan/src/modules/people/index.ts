@@ -46,6 +46,9 @@ export const schema: ModuleSchema = {
       object_id TEXT, ref_id TEXT, error TEXT, expires_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
     CREATE TABLE people_calls (id TEXT PRIMARY KEY, peer_key TEXT NOT NULL, direction TEXT NOT NULL CHECK (direction IN ('in','out')), started_at INTEGER NOT NULL,
       connected_at INTEGER, ended_at INTEGER, outcome TEXT);
+  `, `
+    -- Secret carried only by this device's profile QR: whoever scanned it may reach us even in Friends Only mode.
+    ALTER TABLE people_profile ADD COLUMN invite TEXT;
   `],
 };
 
@@ -141,24 +144,34 @@ export class People {
     return r.visibility === 'everyone' && (r.everyone_until ?? 0) <= at ? 'friends' : r.visibility;
   }
   /** What `viewer` may see. Strangers see a profile only while this device is visible to Everyone Nearby. */
-  profileFor(viewer: string | null): { profile: ReturnType<typeof signProfile> | null } {
+  profileFor(viewer: string | null, invite?: string | null): { profile: ReturnType<typeof signProfile> | null } {
     const rel = viewer ? this.rel(viewer) : null;
     if (rel?.blocked) return { profile: null };
     const friend = rel?.state === 'friend';
     const known = friend || (viewer ? this.hasConversation(viewer) || rel?.state === 'incoming' || rel?.state === 'outgoing' : false);
     const vis = this.visibility();
-    if (!known && vis !== 'everyone') return { profile: null };
+    if (!known && vis !== 'everyone' && !(invite && vis !== 'invisible' && invite === this.inviteToken())) return { profile: null };
     const p = this.myProfile(), view: Record<string, unknown> = { key: this.myKey(), name: p.name, avatar: p.avatar ? { sha256: p.avatar.sha256, size: p.avatar.size, mime: p.avatar.mime } : null, updatedAt: p.updatedAt };
     for (const k of PROFILE_FIELDS) { const v = p.fields[k]; const fv = p.fieldVisibility[k]; if (v !== undefined && (fv === 'everyone' || (fv === 'friends' && friend))) view[k] = v; }
     return { profile: signProfile(this.sgn(), ProfileView.parse(view)) };
   }
-  /** Whether `viewer` may open a connection to this device at all (discovery mode and relationship). */
-  reachableBy(viewer: string) {
+  /** Whether `viewer` may open a connection to this device at all (discovery mode, relationship, or our QR secret). */
+  reachableBy(viewer: string, invite?: string | null) {
     const rel = this.rel(viewer);
     if (rel?.blocked) return false;
     if (rel?.state && rel.state !== 'none') return true;
     if (this.hasConversation(viewer)) return true;
+    if (invite && this.visibility() !== 'invisible' && invite === this.inviteToken()) return true;
     return this.visibility() === 'everyone';
+  }
+  /** The secret in this device's profile QR (created once; `reset` makes old printed/shared codes stop working). */
+  inviteToken(reset = false) {
+    const r = this.db.prepare('SELECT invite FROM people_profile').get() as { invite: string | null } | undefined;
+    if (r?.invite && !reset) return r.invite;
+    this.profileRow();
+    const t = randomUUID().replace(/-/g, '');
+    this.db.prepare('UPDATE people_profile SET invite = ? WHERE one = 1').run(t);
+    return t;
   }
 
   // ---------------- contacts ----------------
@@ -231,7 +244,8 @@ export class People {
   }
   /** Blocking is local and silent: nothing from them is accepted, nothing is sent to them, pending requests end. */
   block(key: string) {
-    this.assertPeer(key);
+    if (!/^[A-Za-z0-9_-]{43}$/.test(key) || key === this.myKey()) throw new PeerError('invalid', 'Unknown person.');
+    this.touch(key);
     tx(this.db, () => {
       this.db.prepare(`INSERT INTO people_relations (key, state, blocked, updated_at) VALUES (?, 'none', 1, ?) ON CONFLICT (key) DO UPDATE SET state = 'none', blocked = 1, updated_at = excluded.updated_at`).run(key, this.now());
       this.db.prepare('DELETE FROM people_outbox WHERE to_key = ?').run(key);

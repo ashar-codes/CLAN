@@ -10,6 +10,7 @@
     "./tls": "./src/tls.ts",
     "./peer": "./src/peer-node.ts",
     "./sync": "./src/sync.ts",
+    "./people": "./src/people.ts",
     "./link": "./src/link.ts"
   },
   "dependencies": {
