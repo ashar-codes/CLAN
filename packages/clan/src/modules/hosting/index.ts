@@ -9,6 +9,7 @@ import {
   authorityHash, CheckpointHeader, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
   signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointProvider, type HostSigner,
 } from '@classroom/protocol';
+import { z } from 'zod';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { sha256File } from '../../core/resources.ts';
 import type { Clans } from '../clans/index.ts';
@@ -269,6 +270,46 @@ export class HostAuthority {
   pendingTransition(clanId: string) {
     const t = this.db.prepare('SELECT record FROM hosting_transitions WHERE clan_id = ?').get(clanId) as { record: string } | undefined;
     return t ? JSON.parse(t.record) as AuthorityRecord : null;
+  }
+
+  /**
+   * Source side of the hand-over transport (served to authenticated linked devices only). Every call re-checks the
+   * owner's delegation to the caller's key; blobs are served only to the device that was offered this checkpoint.
+   */
+  replicationSource(o: { localKey: string; signer: HostSigner }) {
+    const offered = new Map<string, string>(); // clanId → destination key
+    const Offer = z.object({ clanId: z.string().uuid(), delegation: HostDelegation }).strict();
+    const Relinquish = Offer.extend({ ack: HostAck }).strict();
+    const authorize = (callerKey: string, clanId: string, d: HostDelegation) => {
+      const r = this.must(clanId);
+      if (d.destKey !== callerKey) throw new HostingError('forbidden', 'The delegation names another device.');
+      const problem = delegationProblem(d, { clanId, ownerKey: r.owner_key, destKey: callerKey, at: this.now(), revoked: this.revoked(r) });
+      if (problem) throw new HostingError('invalid_delegation', problem);
+      if (this.head(r).hostKey !== o.localKey) throw new HostingError('not_authoritative', 'This device is not the CLAN\'s host.');
+      return r;
+    };
+    return {
+      offer: (callerKey: string, raw: unknown) => {
+        const b = Offer.parse(raw), r = authorize(callerKey, b.clanId, b.delegation);
+        const t = this.pendingTransition(b.clanId);
+        // Already handed to this caller (e.g. it crashed before activating): give it the transition again, nothing else.
+        if (r.state === 'relinquished' && t?.hostKey === callerKey) return { chain: this.chain(r), transition: t };
+        const c = this.checkpointOf(b.clanId);
+        if (r.state !== 'frozen' || !c || c.header.epoch !== r.epoch) throw new HostingError('bad_state', 'The host has not prepared a hand-over yet.');
+        const clan = this.clans.get(b.clanId)!;
+        offered.set(b.clanId, callerKey);
+        return { chain: this.chain(r), header: c.header, clan: { type: clan.type, name: clan.name, expiresAt: clan.expiresAt } };
+      },
+      blob: (callerKey: string, clanId: string, sha256: string) => offered.get(clanId) === callerKey ? this.checkpointBlob(clanId, sha256) : null,
+      relinquish: (callerKey: string, raw: unknown) => {
+        const b = Relinquish.parse(raw);
+        authorize(callerKey, b.clanId, b.delegation);
+        if (b.ack.destKey !== callerKey) throw new HostingError('forbidden', 'The acknowledgment is not the caller\'s.');
+        const t = this.relinquish(b.clanId, o.signer, b.delegation, b.ack);
+        offered.delete(b.clanId);
+        return { chain: this.chain(this.must(b.clanId)), transition: t };
+      },
+    };
   }
 
   // ---- destination ----

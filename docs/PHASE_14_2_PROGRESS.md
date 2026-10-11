@@ -304,3 +304,15 @@ itself: blob sizes/hashes (corrupt blobs deleted for re-download), canonical sec
 the registered sections, strict per-table column/scope validation, and file list equality. Activation re-verifies,
 materializes bytes, then imports all sections inside the transaction that records the new epoch (a failed import
 leaves the device standby). PASS: typecheck; `packages/clan/test` 134/134 incl. 9 hosting cases (Linux).
+
+### P1-7 checkpoint C: resumable hand-over transport (cloud)
+
+The personal-sync HTTPS server (pinned per-device certificate, every request signed by a linked unrevoked device key)
+gains `/host/offer`, `/host/blob/:clan/:sha` (byte ranges) and `/host/relinquish`, enabled only when a
+`ReplicationHost` is supplied. `HostAuthority.replicationSource` re-checks the owner's delegation to the caller's key
+on every call, serves blobs only of the prepared checkpoint and only to the device it was offered to, and re-delivers
+only a transition already signed for that caller. `replicateClan` (`@classroom/client/sync`) runs the destination:
+offer → anchor/record CLAN (caller) → stage → ranged resumable download (`.part`) → self-verification (one retry of a
+corrupt blob) → acknowledge → transition → activation; re-running after any interruption resumes. PASS: real-HTTPS
+hand-over test (unprepared refusal, wrong-device delegation, unoffered blob 404, crash during verification, mid-file
+resume, single writer, replay after success); `packages/clan/test` + `server/test/clan.test.ts` 151/151 (Linux).

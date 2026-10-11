@@ -22,7 +22,8 @@ export function serverCheckpointSection(db: Db, storageDir: string): CheckpointP
     { table: 'members', where: SESSIONS, scope: { session_id: { table: 'sessions', column: 'id' } }, exclude: ['token_hash', 'token_expires', 'token_issued_at'],
       fill: { token_hash: () => `replicated:${randomUUID()}`, token_expires: () => 0 }, upsertKey: ['id'] },
     { table: 'trusted_devices', where: "course = 'clan:' || ? OR course IN (SELECT title FROM sessions WHERE clan_id = ? AND clan_type = 'CLASSROOM')",
-      scope: { course: (v, clanId, s) => v === `clan:${clanId}` || (s.get('sessions') ?? []).some((x) => x.clan_type === 'CLASSROOM' && x.title === v) }, upsertKey: ['course', 'fingerprint'] },
+      // trust scope: `clan:<id>`, or a legacy Classroom's course title (classroom.ts trustScope)
+      scope: { course: (v, clanId, s) => v === `clan:${clanId}` || (s.get('sessions') ?? []).some((x) => x.clan_type === 'CLASSROOM' && x.title === v) }, upsertKey: ['course', 'fingerprint'] }, // trust scope
     { table: 'resources', where: `${SESSIONS} AND status IN ('ready','removed')`, scope: { session_id: { table: 'sessions', column: 'id' } }, exclude: ['manifest', 'chunk_size'], upsertKey: ['id'] },
   ]);
   const ready = (raw: unknown[]) => raw.map((x) => (x as { t: string; r: Record<string, unknown> })).filter((x) => x.t === 'resources' && x.r.status === 'ready').map((x) => x.r);
