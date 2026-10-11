@@ -187,6 +187,8 @@ function recordJoined(j: PairedJoin, info: ClassroomInfo) {
   try {
     const c = phoneClan();
     c.clans.recordJoined({ id: info.clanId ?? info.sessionId, type: info.clanType, name: info.title, hostDeviceId: keyFingerprint(j.binding.teacherPublicKey), hostName: info.hostName ?? `${info.title} host`, expiresAt: info.expiresAt ?? null, me: c.me, sessionId: info.sessionId });
+    // Persistent-hosting CLAN: anchor its owner key from this authenticated session (first binding wins, never replaced).
+    if (info.authority && info.clanId) c.hosting.anchorFromPairing(info.clanId, info.authority);
     if (info.clanType === 'CLASSROOM') c.courses.linkClassrooms(meP());
   } catch { /* the class works without it */ }
 }

@@ -137,7 +137,7 @@ export type StudyApi = {
 /** CLAN services (window.classroom.clan). */
 export type ClanApi = {
   home(): Promise<HomeView>;
-  joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null; hostName?: string | null }): Promise<void>;
+  joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null; hostName?: string | null; authority?: unknown }): Promise<void>;
   list(): Promise<Clan[]>;
   archived(): Promise<Clan[]>;
   storedCopies(): Promise<(Clan & { mine: boolean })[]>;

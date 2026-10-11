@@ -186,7 +186,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
 
   // Approved: this device now holds a canonical membership in that CLAN (profile and identity are not copied).
   useEffect(() => {
-    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt, hostName: info.hostName }).catch(() => {});
+    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt, hostName: info.hostName, authority: info.authority }).catch(() => {});
   }, [status, info.sessionId, info.clanId, info.clanType, info.title, info.expiresAt, joined.teacherPublicKey]);
   const L = clanLabels(info.clanType);
   const pres = usePresentation({ baseUrl: session.url, bearer: session.token, sessionId: info.sessionId, msg: presMsg, send: (m) => connRef.current?.send(m), me: session.memberId });

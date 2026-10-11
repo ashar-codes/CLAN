@@ -316,3 +316,15 @@ offer → anchor/record CLAN (caller) → stage → ranged resumable download (`
 corrupt blob) → acknowledge → transition → activation; re-running after any interruption resumes. PASS: real-HTTPS
 hand-over test (unprepared refusal, wrong-device delegation, unoffered blob 404, crash during verification, mid-file
 resume, single writer, replay after success); `packages/clan/test` + `server/test/clan.test.ts` 151/151 (Linux).
+
+### P1-7 checkpoint D: host-epoch fencing and owner-key anchoring at pairing (cloud)
+
+`startClassroomServer({ authority })`: the session refuses to start unless this device holds the CLAN's current
+epoch; every non-GET HTTPS/bootstrap request (pairing, join, reconnect, uploads, shares, reviews, leave, peer reports)
+and every WebSocket message except ephemeral relays (`wb.sync`, `wb.cursor`, `chat.typing`) and liveness re-checks
+it and fails with `503 host_unavailable` / `error host_unavailable`. Reads continue. Legacy CLANs (no authority record)
+are unchanged. The owner-signed genesis is sent only in `hello` inside the authenticated session; desktop
+(`clan:joined`) and phone (`recordJoined`) anchor it (first binding wins; a different owner is refused). Desktop wiring:
+hosted sessions pass `authority` when a chain exists; the device-link server serves hand-overs with the sync device key
+as hosting key; the host-server checkpoint section is registered. No hand-over UI yet. PASS: typecheck;
+`server/test/hosting-fence.test.ts` 3/3; all server suites + hosting suites 202 PASS / 13 environment skips (Linux).

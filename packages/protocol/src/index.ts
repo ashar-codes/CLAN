@@ -2,6 +2,7 @@
 // Every inbound message is parsed with these schemas at the trust boundary.
 import { z } from 'zod';
 import type { ClanCapability, ClanType } from './clan.ts';
+import type { AuthorityRecord } from './hosting.ts';
 import type { SealedDirect } from './direct.ts';
 import { ChatClientMessage, type ChatServerMessage } from './chat.ts';
 import { WhiteboardClientMessage, type WhiteboardServerMessage } from './whiteboard.ts';
@@ -99,6 +100,8 @@ export type ClassroomInfo = {
   description: string;
   /** Temporary CLANs end at this time (null = no expiry). */
   expiresAt: number | null;
+  /** Persistent-hosting CLANs: the owner-signed genesis authority record (hello only, inside the authenticated session). */
+  authority?: AuthorityRecord;
   connectivity: Connectivity;
   /** Data plane: teacher only (false) or peer-assisted (true). The control plane is always the teacher. */
   peerAssist: boolean;

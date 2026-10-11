@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ClanType, JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
 import { leaveClanSession, pairAndJoin, reconnect, type Candidate } from '@classroom/client';
-import { pinnedTransport } from '@classroom/client/node';
+import { newEd25519, nodeSigner, pinnedTransport } from '@classroom/client/node';
 import { backupDb, logError, openDbSafely, purgeStoppedSessions } from '@classroom/server';
 import { Keystore } from './keystore.ts';
 import { Trust } from './trust.ts';
@@ -224,7 +224,7 @@ function registerIpc() {
     const hostName = loadProfile().fullName || (named && named !== 'Me' ? named : undefined);
     try {
       server = await startClassroomServer({ title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: a.connectivity === 'direct' ? 'direct' : 'lan', identity: await trust.teacherIdentity(),
-        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat, whiteboard: clan.whiteboard,
+        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, authority: clanId ? hostingAuthority(clanId) : undefined, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat, whiteboard: clan.whiteboard,
         direct: directNet ? { ssid: directNet.ssid, passphrase: directNet.passphrase, auth: 'WPA2', host: directNet.hostAddress, expiresAt: expiresAt ?? Date.now() + 12 * 3600_000 } : undefined });
       if (directNet) await direct.publish(server);
       chatHooks.hosted(server);
@@ -247,6 +247,12 @@ function registerIpc() {
     return { url: server.url, code: server.classroom.code, teacherToken: server.classroom.teacherToken, title, host, iface,
       direct: directNet ? { ssid: directNet.ssid, band: directNet.band, strategy: directNet.strategy, vpn: directNet.vpn } : null };
   });
+  /** Persistent-hosting CLANs fence every host write on this device's current epoch; legacy CLANs return undefined. */
+  const hostingAuthority = (clanId: string) => {
+    const hostKey = nodeSigner(keystore.get('sync-device-ed25519', () => newEd25519().privatePkcs8)).publicKey; // same device key as personal sync
+    const chain = clan.hosting.chainOf(clanId);
+    return chain ? { assertWritable: () => void clan.hosting.assertWritable(clanId, hostKey), genesis: chain[0]! } : undefined;
+  };
   ipcMain.handle('teacher:stop', async () => {
     const ended = server?.classroom.clan;
     await server?.close(); server = null; clearTimeout(expiryTimer);
