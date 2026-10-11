@@ -88,3 +88,31 @@ and return to owner, never-relinquished host conflict).
 Still required before any handoff is exposed: CLAN-scoped checkpoint builder + immutable file manifest, the separate
 authenticated replication transport, `assertWritable` gating in the host server write paths, client verification of
 the delegation chain during pairing, conflict recovery UX, Android hosting runtime (see above) and cross-device evidence.
+
+
+## Hand-over workflow as implemented (cloud session, 2026-10-11)
+
+1. Owner device: `establish` (genesis, owner device hosts epoch 0; legacy CLANs untouched). Owner key = the device's
+   personal-sync Ed25519 key, never exported. Members anchor it from `hello` (`verifySession`); a linked computer
+   anchors it through the device link (`anchorLinkedOwner`, refused for CLANs it already has without an anchor).
+2. Owner: `delegate(destKey)`; current host: end the live session, `freeze`, `prepareCheckpoint` (durable, re-hashed).
+3. Transport over the device link (pinned per-device TLS + signed requests): destination pull (`replicateClan` against
+   `/host/offer|blob|relinquish`) or, from a phone, push (`pushClan` against `/host/push/*`). Both resume.
+4. Destination: `completeStaging` verifies everything itself → `acknowledge`. Source: `relinquish` (only for the
+   checkpoint it prepared; durable before sending) → destination `accept` re-verifies, materializes and imports inside
+   the epoch transaction. Host servers fence every authoritative write on `assertWritable`.
+5. Revocation: owner-signed, delivered over `/host/push/revoke` (or `addRevocation`); a revoked head stops writing but
+   may hand back to the owner.
+
+Not implemented: hand-over UI (desktop/phone), phone-side `pushClan` wiring to the native pinned transport and
+keystore signer, conflict-recovery UX, member warning UI, free-space preflight on staging, carrying assignments,
+submissions and pending share reviews (they stay on the previous host), local module writes on a frozen device outside
+the host server (not fenced; the host UI writes through the fenced server).
+
+### Android runtime re-check (2026-10-11)
+
+[nodejs-mobile releases](https://github.com/nodejs-mobile/nodejs-mobile/releases): latest is still v18.20.4 (no Node 20/
+22/24 release). [PR #158 "Update v24.5.0"](https://github.com/nodejs-mobile/nodejs-mobile/pull/158) remains open,
+unreviewed; its SQLite and Android ARM64/ARM test items are not confirmed. Decision: **no embedded runtime**; Android
+native hosting stays blocked. The supported mobile path is phone-owned authority with hosting delegated to the owner's
+linked computer (push hand-over). Re-evaluate only on a released, audited Node ≥24 mobile runtime with SQLite.

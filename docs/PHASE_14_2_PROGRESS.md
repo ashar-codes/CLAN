@@ -352,3 +352,7 @@ or forked host therefore cannot present itself as the CLAN's host to members who
 no longer anchor itself as owner of a CLAN this device already takes part in without an anchor (legacy CLANs).
 Member-facing warning UI for a refused session is NOT STARTED (desktop rejects the IPC; phone ignores). PASS: typecheck;
 hosting units 11 + session verification 1, fence 3 (Linux).
+
+Cloud gate after checkpoints A–F: typecheck PASS; full serial unit **367 PASS / 14 skipped / 0 FAIL** (44 files + 3
+skipped, 292.85 s; skips = no LAN mDNS / no SFU binary). Desktop Electron E2E, Android emulator, iOS, Windows and
+physical devices NOT RUN. Android runtime re-check and remaining hosting work: see the hosting design doc.
