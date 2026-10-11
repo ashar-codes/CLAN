@@ -6,7 +6,7 @@
 import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  authorityHash, CheckpointHeader, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
+  authorityHash, b64u, CheckpointHeader, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
   signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointProvider, type HostSigner,
 } from '@classroom/protocol';
 import { z } from 'zod';
@@ -309,6 +309,65 @@ export class HostAuthority {
         offered.delete(b.clanId);
         return { chain: this.chain(this.must(b.clanId)), transition: t };
       },
+    };
+  }
+
+  /**
+   * Destination side of a hand-over pushed by the current host (a phone accepts no connections, so it pushes to its
+   * linked computer). Callers are authenticated linked devices; the pusher must be the verified current host of an
+   * owner-anchored chain, the delegation must name this device, and only that pusher may continue the staging.
+   */
+  replicationSink(o: { localKey: string; signer: HostSigner }) {
+    const pushing = new Map<string, string>(); // clanId → pusher key
+    const Begin = z.object({ chain: z.array(z.unknown()).min(1).max(1000), delegation: HostDelegation, header: z.unknown(),
+      clan: z.object({ type: z.string(), name: z.string(), expiresAt: z.number().int().nullable() }).strict() }).strict();
+    const Blob = z.object({ clanId: z.string().uuid(), sha256: z.string().regex(SHA), offset: z.number().int().nonnegative(), data: z.string().max(12_000_000).regex(/^[A-Za-z0-9_-]*$/) }).strict();
+    const Clan = z.object({ clanId: z.string().uuid() }).strict();
+    const pusher = (callerKey: string, clanId: string) => { if (pushing.get(clanId) !== callerKey) throw new HostingError('forbidden', 'Start the hand-over first.'); };
+    return {
+      begin: async (callerKey: string, raw: unknown) => {
+        const b = Begin.parse(raw);
+        const g = b.chain[0] as { clanId?: unknown; ownerKey?: unknown }, head = b.chain[b.chain.length - 1] as { hostKey?: unknown };
+        if (typeof g.clanId !== 'string' || typeof g.ownerKey !== 'string' || head.hostKey !== callerKey) throw new HostingError('forbidden', 'Only the CLAN\'s current host can hand it over.');
+        const clanId = g.clanId;
+        tx(this.db, () => {
+          this.clans.ensureKnown({ id: clanId, type: b.clan.type as never, name: b.clan.name, expiresAt: b.clan.expiresAt, createdBy: this.me() });
+          if (!this.anchorOf(clanId)) this.anchorLinkedOwner(clanId, g.ownerKey as string);
+        });
+        this.beginStaging(b.chain, b.delegation, b.header, o.localKey);
+        pushing.set(clanId, callerKey);
+        const have = await Promise.all((await this.stagingPathList(clanId)).map(async (x) => ({ sha256: x.sha256, size: x.size,
+          have: await stat(x.path).then((st) => (st.size === x.size ? x.size : 0), () => stat(`${x.path}.part`).then((st) => Math.min(st.size, x.size), () => 0)) })));
+        return { missing: have.filter((x) => x.have < x.size) };
+      },
+      blob: async (callerKey: string, raw: unknown) => {
+        const b = Blob.parse(raw);
+        pusher(callerKey, b.clanId);
+        const final = this.stagingPath(b.clanId, b.sha256), part = `${final}.part`;
+        const size = checkpointBlobs(this.stagedHeader(b.clanId).header).find((x) => x.sha256 === b.sha256)!.size;
+        const have = await stat(part).then((st) => st.size, () => 0);
+        if (b.offset !== have) return { have }; // the pusher resumes from what is actually here
+        const bytes = b64u.decode(b.data);
+        if (have + bytes.length > size) throw new HostingError('invalid', 'More bytes than the checkpoint lists.');
+        const fh = await open(part, 'a');
+        try { await fh.write(bytes); } finally { await fh.close(); }
+        if (have + bytes.length === size) await rename(part, final);
+        return { have: have + bytes.length };
+      },
+      complete: async (callerKey: string, raw: unknown) => {
+        const { clanId } = Clan.parse(raw);
+        pusher(callerKey, clanId);
+        await this.completeStaging(clanId);
+        return { ack: this.acknowledge(clanId, o.signer) };
+      },
+      activate: async (_callerKey: string, raw: unknown) => {
+        // Any linked device may deliver a verified chain: becoming host still requires this device's own verified staging.
+        const b = z.object({ clanId: z.string().uuid(), chain: z.array(z.unknown()).min(1).max(1000) }).strict().parse(raw);
+        const st = await this.accept(b.chain, o.localKey);
+        if (st.hostKey === o.localKey) pushing.delete(b.clanId);
+        return { epoch: st.epoch, writable: st.writable };
+      },
+      revoke: (_callerKey: string, raw: unknown) => { this.addRevocation(raw); return { ok: true }; },
     };
   }
 

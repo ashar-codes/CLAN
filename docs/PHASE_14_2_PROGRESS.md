@@ -328,3 +328,16 @@ are unchanged. The owner-signed genesis is sent only in `hello` inside the authe
 hosted sessions pass `authority` when a chain exists; the device-link server serves hand-overs with the sync device key
 as hosting key; the host-server checkpoint section is registered. No hand-over UI yet. PASS: typecheck;
 `server/test/hosting-fence.test.ts` 3/3; all server suites + hosting suites 202 PASS / 13 environment skips (Linux).
+
+### P1-7 checkpoint E: phone-initiated push and revocation delivery (cloud)
+
+Phones accept no connections, so the owner's phone pushes: the computer's device-link server exposes
+`/host/push/{begin,blob,complete,activate,revoke}` (`ReplicationSink`). Begin requires the caller to be the verified
+current host of an owner-anchored chain (owner key must be a linked device) and a delegation naming this computer;
+blob/complete only continue that pusher's staging; blob chunks (≤8 MB, base64url JSON for the phone's native pinned
+transport) append at the destination-reported offset; complete runs full self-verification and returns the signed ack;
+activate accepts a verified chain (becoming host still needs local verified staging); revoke stores owner-signed
+revocations. Portable `pushClan` (`@classroom/client`) resumes from reported offsets and, after a durable
+relinquish, only re-delivers the signed transition. Desktop registers the sink. Phone UI/native wiring NOT STARTED.
+PASS: real-HTTPS push test (non-host refused, suspended upload resumes at offset 1 MB → only remaining chunks resent,
+lost activation answer re-delivered, revocation stops writes, forged revocation refused).

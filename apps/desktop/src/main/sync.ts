@@ -30,7 +30,8 @@ export async function registerSync(c: ClanApp, keystore: Keystore, deviceName: (
   const arrived = () => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:data'); changed(); };
   // The device key is also this device's hosting key: linked devices may pull a frozen CLAN hand-over when the owner delegated it to them.
   const server = await startSyncServer({ host: s, tls, objectPath: (sha) => c.files.personalObject(c.me, sha), onChange: arrived,
-    deviceKey: (fp) => s.deviceKey(fp), replication: c.hosting.replicationSource({ localKey: signer.publicKey, signer }) });
+    deviceKey: (fp) => s.deviceKey(fp), replication: c.hosting.replicationSource({ localKey: signer.publicKey, signer }),
+    sink: c.hosting.replicationSink({ localKey: signer.publicKey, signer }) }); // a phone pushes its CLAN here (phones accept no connections)
   const endpoints = () => candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${server.port}`).slice(0, 8);
 
   // ---- discovery: an hourly-rotating account tag (no names or ids on the network) ----
