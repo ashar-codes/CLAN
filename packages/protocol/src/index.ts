@@ -106,6 +106,8 @@ export type ClassroomInfo = {
   p2p: 'unknown' | 'available' | 'isolated';
   locked: boolean;
   joinPolicy: JoinPolicy;
+  /** Optional for interoperability with older hosts; absent means teacher-only for Classroom. */
+  fileSharingPolicy?: FileSharingPolicy;
   startedAt: number;
   ended: boolean;
 };
@@ -225,7 +227,11 @@ export const ShareUploadInit = z.object({
   to: z.union([z.literal('clan'), z.string().regex(/^[A-Za-z0-9_-]{22}$/)]),
 });
 export type ShareUploadInit = z.infer<typeof ShareUploadInit>;
-export type ShareUploadStatus = Omit<UploadStatus, 'receipt'> & { resource: ResourceView | null };
+export const FileSharingPolicy = z.enum(['teacher', 'approval', 'everyone']);
+export type FileSharingPolicy = z.infer<typeof FileSharingPolicy>;
+export type ShareUploadStatus = Omit<UploadStatus, 'receipt'> & { resource: ResourceView | null; approval?: 'pending' | 'approved' | 'rejected' };
+export type PendingShare = { uploadId: string; memberName: string; fileName: string; size: number; target: string };
+export type ShareResult = ResourceView | { pending: true; uploadId: string; name: string; size: number };
 export const UPLOAD_CONTENT_TYPE = 'application/offset+octet-stream';
 
 /**
@@ -263,6 +269,7 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('member.block'), memberId: id }),
   z.object({ t: z.literal('class.lock'), locked: z.boolean() }),
   z.object({ t: z.literal('class.policy'), policy: JoinPolicy }),
+  z.object({ t: z.literal('class.filePolicy'), policy: FileSharingPolicy }),
   z.object({ t: z.literal('class.end') }),
   z.object({ t: z.literal('resource.available'), resourceId: id, available: z.boolean() }),
   z.object({ t: z.literal('resource.remove'), resourceId: id }),
@@ -287,7 +294,7 @@ export const ClientMessage = z.discriminatedUnion('t', [
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export const TEACHER_ONLY: ReadonlySet<ClientMessage['t']> = new Set([
-  'member.approve', 'member.reject', 'member.remove', 'member.block', 'class.lock', 'class.policy', 'class.end',
+  'member.approve', 'member.reject', 'member.remove', 'member.block', 'class.lock', 'class.policy', 'class.filePolicy', 'class.end',
   'resource.available', 'resource.remove', 'resource.push', 'assignment.create', 'assignment.close', 'class.peerAssist',
 ]);
 export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.state', 'peer.probeResult']);
@@ -299,7 +306,7 @@ export type ServerMessage =
   /** Member-visible roster for CLANs that grant VIEW_MEMBERS: names + CLAN-scoped chat handles (never device keys or ids). */
   | { t: 'members'; members: { name: string; host: boolean; connected: boolean; handle: string }[]; me: string }
   | { t: 'pong'; n: number; serverTime: number }
-  | { t: 'class.state'; classroom: ClassroomInfo }
+  | { t: 'class.state'; classroom: ClassroomInfo; capabilities?: ClanCapability[] }
   | { t: 'roster'; members: Member[] }
   | { t: 'timeline'; events: TimelineEvent[] }
   | { t: 'member.status'; status: MemberStatus }

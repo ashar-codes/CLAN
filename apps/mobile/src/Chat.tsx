@@ -156,13 +156,14 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
   const discard = useCallback((id: string) => { outbox.sent(id); setPending(({ [id]: _, ...rest }) => rest); }, []);
 
   /** Attach a file to the OPEN conversation only: the audience is fixed before the upload starts. */
-  const [sending, setSending] = useState<{ name: string; sent: number; size: number; error?: string } | null>(null);
+  const [sending, setSending] = useState<{ name: string; sent: number; size: number; error?: string; notice?: string } | null>(null);
   const sendFile = useCallback(async (thread: ChatThreadView, file: { uri: string; name: string; size: number }) => {
     const to = thread.kind === 'group' ? 'clan' : thread.with?.handle;
     if (!to) return;
     setSending({ name: file.name, sent: 0, size: file.size });
     try {
       const r = await shareFile(conn, file, to, randomUUID(), (sent, size) => setSending({ name: file.name, sent, size }));
+      if ('pending' in r) { setSending({ name: file.name, sent: file.size, size: file.size, notice: 'Sent for teacher approval. Approved files appear in Classroom files.' }); return; }
       post(thread.id, '', { attachment: { kind: 'file', resourceId: r.id } });
       setSending(null);
     } catch (e) { setSending({ name: file.name, sent: 0, size: file.size, error: (e as Error).message }); }
@@ -171,7 +172,7 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
 }
 export type MobileChat = ReturnType<typeof useMobileChat>;
 
-export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat; conn: Conn; people: { name: string; handle: string; host: boolean }[] }) {
+export function ChatSection({ c, chat, conn, people, canSendFiles }: { c: C; chat: MobileChat; conn: Conn; people: { name: string; handle: string; host: boolean }[]; canSendFiles: boolean }) {
   const [shown, setShown] = useState(false);
   const [away, setAway] = useState(false);
   const following = useRef(true);
@@ -257,12 +258,12 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
           ))}
         </View>
       )}
-      {chat.sending && <Text style={{ color: chat.sending.error ? c.danger : c.muted }} accessibilityLiveRegion="polite">{chat.sending.error ? `${chat.sending.name}: ${chat.sending.error}` : `Sending ${chat.sending.name} · ${formatBytes(chat.sending.sent)} of ${formatBytes(chat.sending.size)}`}</Text>}
+      {chat.sending && <Text style={{ color: chat.sending.error ? c.danger : c.muted }} accessibilityLiveRegion="polite">{chat.sending.error ? `${chat.sending.name}: ${chat.sending.error}` : chat.sending.notice ?? `Sending ${chat.sending.name} · ${formatBytes(chat.sending.sent)} of ${formatBytes(chat.sending.size)}`}</Text>}
       {t && !chat.opening && (
         <View style={s.row}>
-          <Pressable accessibilityRole="button" accessibilityLabel={t.kind === 'group' ? 'Send a file to everyone' : `Send a file to ${t.with?.name}`} disabled={!!chat.sending && !chat.sending.error}
+          {canSendFiles && <Pressable accessibilityRole="button" accessibilityLabel={t.kind === 'group' ? 'Send a file to everyone' : `Send a file to ${t.with?.name}`} disabled={!!chat.sending && !chat.sending.error && !chat.sending.notice}
             onPress={async () => { const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }); const a = !r.canceled && r.assets[0]; if (a && a.size) void chat.sendFile(t, { uri: a.uri, name: a.name, size: a.size }); }}
-            style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>📎</Text></Pressable>
+            style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>📎</Text></Pressable>}
           <Pressable accessibilityRole="button" accessibilityLabel="Send something from your Inbox" onPress={() => setFromInbox(!fromInbox)} style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>⇣</Text></Pressable>
           <TextInput style={[s.input, { color: c.text, borderColor: c.border }]} value={text} onChangeText={setText} maxLength={4000} placeholder="Message" placeholderTextColor={c.muted} accessibilityLabel="Message" multiline />
           <Pressable accessibilityRole="button" disabled={!text.trim()} onPress={() => { following.current = true; setAway(false); chat.post(t.id, text.trim()); setText(''); }} style={[s.chip, { borderColor: c.accent, opacity: text.trim() ? 1 : 0.5, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.accent, fontWeight: '700' }}>Send</Text></Pressable>

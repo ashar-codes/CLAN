@@ -154,7 +154,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         if (m.t === 'error' && ['presenting', 'whiteboard', 'not_shared'].includes(m.code)) boardRef.current.onServer(m);
         if (m.t === 'error' && ['busy', 'forbidden', 'media_unavailable', 'not_presenting', 'whiteboard'].includes(m.code)) void presRef.current?.refused(m.message);
         if (m.t === 'peer.probe') void api.peerProbe(m.targets).then((r) => connRef.current?.send({ t: 'peer.probeResult', probeId: m.probeId, ...r })).catch(() => {});
-        if (m.t === 'class.state') setInfo(m.classroom);
+        if (m.t === 'class.state') { setInfo(m.classroom); if (m.capabilities) setCan(m.capabilities); }
         if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: [] }); } // register the peer server as soon as we're in
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
         if (m.t === 'assignments') { setAssignments(m.assignments as StudentAssignmentView[]); void api.study.assignmentsSeen(infoRef.current.clanId ?? infoRef.current.sessionId, m.assignments).catch(() => {}); } // offline projection for Today / Course
@@ -227,7 +227,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       <div className="room-with-chat">
         {experience !== 'minimal' && <MemberRoom kind={info.clanType} board={boardNode} pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : chat.host ? [{ name: info.hostName ?? L.host, host: true, connected: true, handle: chat.host }] : null} resources={resources}
           actions={{ ...personSender(chat, (handle) => setDm({ handle, n: Date.now() }), can.includes('SEND_FILES')), me: chat.me }} onToast={toast}
-          onTableDrop={can.includes('SEND_FILES') ? async (files) => { const r = await api.chat.sendDropped(chat.conn, files, 'clan'); return r.length ? `Shared ${r.length === 1 ? r[0]!.name : `${r.length} files`} with everyone in the ${L.session}` : 'Nothing was shared.'; } : undefined} />}
+          onTableDrop={can.includes('SEND_FILES') ? async (files) => { const r = await api.chat.sendDropped(chat.conn, files, 'clan'); if (r.some((f) => 'pending' in f)) return 'File sent for teacher approval.'; return r.length ? `Shared ${r.length === 1 ? r[0]!.name : `${r.length} files`} with everyone in the ${L.session}` : 'Nothing was shared.'; } : undefined} />}
         <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>
           <ChatPanel chat={chat} role="member" clanName={info.title} canSendFiles={can.includes('SEND_FILES')} conn={conn} request={dm}
             people={can.includes('VIEW_MEMBERS') ? people.map((p) => ({ handle: p.handle, name: p.name, host: p.host, connected: p.connected })) : []} />

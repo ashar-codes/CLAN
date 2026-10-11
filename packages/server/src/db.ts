@@ -209,6 +209,12 @@ export const MIGRATIONS: string[] = [
     UNIQUE (member_id, idempotency_key)
   );
   `,
+  // 8: classroom student sharing policy and quarantined teacher approvals (existing upload states stay intact).
+  `
+  ALTER TABLE sessions ADD COLUMN file_sharing_policy TEXT NOT NULL DEFAULT 'teacher' CHECK (file_sharing_policy IN ('teacher','approval','everyone'));
+  ALTER TABLE share_uploads ADD COLUMN approval TEXT CHECK (approval IN ('pending','approved','rejected'));
+  CREATE INDEX shares_pending ON share_uploads(session_id, approval);
+  `,
 ];
 
 export type Db = DatabaseSync;

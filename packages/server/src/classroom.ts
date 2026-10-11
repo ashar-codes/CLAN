@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { capabilitiesFor, ClanType, keyFingerprint, type ClanCapability, type ClassroomInfo, type Connectivity, type DeviceTrust, type JoinPolicy, type Member, type MemberStatus, type StudentProfile, type TimelineEvent } from '@classroom/protocol';
+import { capabilitiesFor, ClanType, keyFingerprint, type ClanCapability, type ClassroomInfo, type Connectivity, type DeviceTrust, type JoinPolicy, type FileSharingPolicy, type Member, type MemberStatus, type StudentProfile, type TimelineEvent } from '@classroom/protocol';
 import type { Db } from './db.ts';
 import { Throttle } from './throttle.ts';
 
@@ -74,15 +74,17 @@ export class Classroom extends EventEmitter {
   }
 
   info(): ClassroomInfo {
-    const r = this.db.prepare('SELECT title, locked, join_policy, started_at, ended_at, connectivity, peer_assist FROM sessions WHERE id = ?').get(this.id) as
-      { title: string; locked: number; join_policy: JoinPolicy; started_at: number; ended_at: number | null; connectivity: Connectivity; peer_assist: number };
+    const r = this.db.prepare('SELECT title, locked, join_policy, started_at, ended_at, connectivity, peer_assist, file_sharing_policy FROM sessions WHERE id = ?').get(this.id) as
+      { title: string; locked: number; join_policy: JoinPolicy; started_at: number; ended_at: number | null; connectivity: Connectivity; peer_assist: number; file_sharing_policy: FileSharingPolicy };
     if (r.ended_at === null && this.clan.expiresAt !== null && this.clan.expiresAt <= this.now()) { this.end(); return this.info(); } // expiry ends the session
-    return { sessionId: this.id, title: r.title, clanId: this.clan.id, clanType: this.clan.type, hostName: this.hostName, description: this.clan.description, expiresAt: this.clan.expiresAt, locked: !!r.locked, joinPolicy: r.join_policy, startedAt: r.started_at, ended: r.ended_at !== null, connectivity: r.connectivity, peerAssist: !!r.peer_assist, p2p: this.p2p };
+    return { sessionId: this.id, title: r.title, clanId: this.clan.id, clanType: this.clan.type, hostName: this.hostName, description: this.clan.description, expiresAt: this.clan.expiresAt, locked: !!r.locked, joinPolicy: r.join_policy, fileSharingPolicy: this.clan.type === 'CLASSROOM' ? r.file_sharing_policy : 'everyone', startedAt: r.started_at, ended: r.ended_at !== null, connectivity: r.connectivity, peerAssist: !!r.peer_assist, p2p: this.p2p };
   }
 
   /** Server-side authority: what this principal may do in this CLAN. */
   capabilities(p: Principal): readonly ClanCapability[] {
-    return capabilitiesFor(this.clan.type, p.role === 'teacher' ? 'host' : 'member');
+    const defaults = capabilitiesFor(this.clan.type, p.role === 'teacher' ? 'host' : 'member');
+    if (p.role === 'student' && this.clan.type === 'CLASSROOM' && this.info().fileSharingPolicy !== 'teacher') return [...defaults, 'SEND_FILES'];
+    return defaults;
   }
   can(p: Principal, cap: ClanCapability) { return this.capabilities(p).includes(cap); }
 
@@ -223,6 +225,15 @@ export class Classroom extends EventEmitter {
     if (this.info().joinPolicy === policy) return;
     this.db.prepare('UPDATE sessions SET join_policy = ? WHERE id = ?').run(policy, this.id);
     this.log('class.policy', null, { policy });
+    this.emit('state');
+  }
+
+  setFilePolicy(policy: FileSharingPolicy) {
+    if (this.clan.type !== 'CLASSROOM') throw new JoinError(409, 'not_classroom', 'Sharing policy applies to Classroom only.');
+    if (!['teacher', 'approval', 'everyone'].includes(policy)) throw new JoinError(400, 'invalid', 'Invalid sharing policy.');
+    if (this.info().fileSharingPolicy === policy) return;
+    this.db.prepare('UPDATE sessions SET file_sharing_policy = ? WHERE id = ?').run(policy, this.id);
+    this.log('class.file_policy', null, { policy });
     this.emit('state');
   }
 

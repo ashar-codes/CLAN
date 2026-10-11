@@ -7,7 +7,7 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 |---|---|---|---|---|
 | P0-1 | Windows-hosted CLAN: Mac/Android discover but can't connect | **Fixed in source, NOT TESTED on Windows** | `fd8249c`, `a833dd1` | `packages/server/test/multi-address.test.ts` (3 PASS); join/discovery/security/mobile/integration suites 138 PASS; typecheck PASS |
 | P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | IMPLEMENTED; desktop PASS, Android verification in progress | see git log | 4 desktop E2Es + 17 targeted unit tests PASS |
-| P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | NOT STARTED | — | — |
+| P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | IMPLEMENTED; host + desktop PASS, native UI pending | see git log | 70 targeted units + 5 desktop chat/sharing E2Es PASS |
 | P0-4 | File preview / open / save-export (SAF, iOS Files) | NOT STARTED | — | — |
 | P0-5 | CLAN archive / remove from device / leave / delete | NOT STARTED | — | — |
 | P1-6…10 | Notifications + Raise Hand, persistent mobile CLANs (standby hosts, epochs), Android hosting, iOS parity, installers | NOT STARTED | — | — |
@@ -64,3 +64,23 @@ secure joining, then failed to open chat. The harness incorrectly searched for a
 scrolling and accepted the room preview as chat evidence. A focused native check opened the modal successfully.
 The harness now handles only a visible OS prompt and verifies Close chat; a full rerun is in progress. No timeout
 was increased. Emulator results do not establish physical Android performance or connectivity.
+
+## P0-3 classroom student file sharing
+
+Classroom defaults to teacher-only. The host may select Everyone or Teacher approval; permission changes reach
+connected students immediately. Other CLAN types retain their existing defaults. Approval uploads are checksum-verified
+and quarantined in host temporary storage without a resource/manifest/download until approved. The host sees a bounded
+queue and may approve/decline; duplicate approval returns the same resource. Authorization is checked at initiation,
+resume, final upload, and immediately before resource publication, including removal during asynchronous copying.
+Pending clients return an explicit approval result rather than endlessly uploading a completed file.
+
+Database migration 8 appends the session policy and upload approval columns. Existing upload states, IDs, byte/hash
+validation and authenticated transport remain unchanged. This is a live-session policy; new sessions default to the
+safer teacher-only rule. Pending review is scoped to its originating session and remains stored if that session ends.
+Cross-host transfer of such queues belongs to the separately gated durable hosting design.
+
+PASS: typecheck; **70/70** targeted sharing/chat/security/data-safety unit tests (32.12 s);
+**5/5 desktop chat/sharing E2Es** (51.96 s). Tests cover real HTTP credentials, WSS privilege denial, cross-session review,
+checksum failure, duplicate approval, policy change and removal during copying, plus live controls/table visibility.
+Logs `/tmp/clan-142-sharing-typecheck2.log`, `/tmp/clan-142-sharing-unit2.log`, `/tmp/clan-142-sharing-e2e1.log`.
+Native UI changes still require an updated APK and emulator verification. Physical devices remain NOT TESTED.

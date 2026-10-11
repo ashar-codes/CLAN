@@ -230,3 +230,12 @@ Out of scope: a removed student keeps files it already downloaded; peers learn w
 * Unsigned macOS builds: Keychain access is tied to the code signature; re-signing can regenerate identities (handled and
   surfaced, but it means re-approval).
 * Throttle counters and pairing state are in memory (a teacher-app restart resets them and also creates a new code).
+
+## Phase 14.2 Classroom sharing
+
+Classroom student file uploads default to disabled. Only the authenticated host may change the sharing rule or
+review uploads. Teacher-approval bytes stay in quarantine without a public resource, manifest or download. Student
+membership, target scope and policy are rechecked on retries and immediately before publication after asynchronous
+copying; the originally declared SHA-256 is checked again. Approval cannot restore a removed student's rights.
+Review IDs are session-scoped, moderation is idempotent, and pending uploads count against bounded upload quotas.
+The existing pinned transport and teacher-only checks remain mandatory. Other CLAN types retain their permissions.

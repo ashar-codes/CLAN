@@ -8,7 +8,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile, access } from 'node:fs/pr
 import { basename, extname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { safeFileName, UPLOAD_CONTENT_TYPE, type Receipt, type ResourceView, type ShareUploadStatus, type TransferState, type UploadStatus } from '@classroom/protocol';
+import { safeFileName, UPLOAD_CONTENT_TYPE, type Receipt, type ResourceView, type ShareUploadStatus, type ShareResult, type TransferState, type UploadStatus } from '@classroom/protocol';
 import { b64u, type TlsBinding } from '@classroom/protocol';
 import { api, assertSecureUrl, resourceContentPath, sleep, TransferError, type DeviceSigner, type Transport, type WebSocketLike } from './index.ts';
 
@@ -203,10 +203,16 @@ export async function uploadSubmission(o: {
 }
 
 /** A member shares a file with the whole CLAN ('clan') or one CLANmate (chat handle). Returns the new resource. */
-export async function uploadShare(o: {
+export async function uploadShareResult(o: {
   transport: Transport; url: string; token: string; path: string; fileName?: string; to: string; idempotencyKey: string;
   signal?: AbortSignal; onProgress?: (sent: number, size: number) => void; maxRetries?: number;
-}): Promise<ResourceView> {
-  const st = await resumableUpload<ShareUploadStatus>({ ...o, base: '/api/shares', init: { fileName: o.fileName ?? basename(o.path), idempotencyKey: o.idempotencyKey, to: o.to }, done: (s) => !!s.resource });
-  return st.resource!;
+}): Promise<ShareResult> {
+  const st = await resumableUpload<ShareUploadStatus>({ ...o, base: '/api/shares', init: { fileName: o.fileName ?? basename(o.path), idempotencyKey: o.idempotencyKey, to: o.to }, done: (s) => !!s.resource || s.approval === 'pending' });
+  return st.resource ?? { pending: true, uploadId: st.uploadId, name: o.fileName ?? basename(o.path), size: st.size };
+}
+/** Compatibility for callers that require an immediately published resource. */
+export async function uploadShare(o: Parameters<typeof uploadShareResult>[0]): Promise<ResourceView> {
+  const result = await uploadShareResult(o);
+  if ('pending' in result) throw new TransferError('approval_pending', 'File sent for teacher approval.');
+  return result;
 }

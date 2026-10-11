@@ -369,6 +369,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     return needChat().page(auth(req), uuidParam(req), q);
   });
   app.post('/api/chat/direct', async (req) => needChat().openDirect(auth(req), parse(z.object({ to: ChatHandle }), req.body).to));
+  app.get('/api/shares/pending', async (req) => ({ shares: shares.pending(auth(req)) }));
+  app.post('/api/shares/:id/review', async (req) => shares.decide(auth(req), uuidParam(req), parse(z.object({ accept: z.boolean() }), req.body).accept));
   app.post('/api/shares', async (req, reply) => {
     const memberId = studentOnly(auth(req));
     const st = await shares.init(memberId, parse(ShareUploadInit, req.body));
@@ -490,7 +492,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   classroom.on('timeline', () => toTeachers(() => ({ t: 'timeline', events: classroom.timeline() })));
   classroom.on('state', () => {
     const info = classroom.info();
-    toAll({ t: 'class.state', classroom: info });
+    for (const [ws, p] of sockets) send(ws, { t: 'class.state', classroom: info, capabilities: [...classroom.capabilities(p)] });
     if (info.ended) { void presentations.end().then(() => media?.close()); for (const ws of sockets.keys()) ws.close(WS_CLOSE.ended, 'class ended'); }
   });
   // Presentation control state to everyone; pending requests only to those who may decide on them.
@@ -576,6 +578,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
             case 'member.block': return classroom.setStatus(msg.memberId, 'blocked');
             case 'class.lock': return classroom.setLocked(msg.locked);
             case 'class.policy': return classroom.setPolicy(msg.policy);
+            case 'class.filePolicy': return classroom.setFilePolicy(msg.policy);
             case 'class.end': return classroom.end();
             case 'resource.available': return resources.setAvailable(msg.resourceId, msg.available);
             case 'resource.push': return resources.push(msg.resourceId);

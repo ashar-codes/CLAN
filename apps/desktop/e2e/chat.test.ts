@@ -202,3 +202,20 @@ it('chat scroll stays put while reading, jumps to latest, and preserves the visi
     await expect.poll(() => again.page.getByTestId('chat-input').isVisible()).toBe(true);
   }
 }, 180_000);
+
+it('Classroom: sharing permissions update live; approved student files reach the table without leaking pending bytes', async () => {
+  const h = await launch(), a = await launch();
+  const code = await hostClan(h.page, 'Classroom', 'File approval class');
+  await joinClan(a.page, 'Ada', code, h.page);
+  expect(await a.page.getByRole('button', { name: 'Attach file' }).count()).toBe(0);
+  await h.page.getByLabel('Student file sharing').selectOption('approval');
+  await a.page.getByRole('button', { name: 'Attach file' }).waitFor();
+  const pending = file('student-for-review.pdf'); await pickNext(a, pending.path);
+  await a.page.getByRole('button', { name: 'Attach file' }).click();
+  await a.page.getByText('student-for-review.pdf sent for teacher approval.', { exact: false }).waitFor();
+  expect(await a.page.getByTestId('room-table').getByTitle('student-for-review.pdf').count()).toBe(0);
+  await h.page.getByRole('button', { name: 'Approve file', exact: true }).click();
+  await a.page.getByTestId('room-table').getByTitle('student-for-review.pdf').waitFor();
+  await h.page.getByLabel('Student file sharing').selectOption('teacher');
+  await expect.poll(() => a.page.getByRole('button', { name: 'Attach file' }).count()).toBe(0);
+}, 120_000);

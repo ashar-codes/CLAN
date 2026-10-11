@@ -51,12 +51,13 @@ export class Resources extends EventEmitter {
    * In-process (host files, or a member's finished share upload): copy into managed storage while hashing it.
    * `audience` limits it to those chat handles (sent to one CLANmate); identical bytes already stored are linked, not copied twice.
    */
-  async importFile(src: string, displayName = basename(src), o: { audience?: string[] | null; sharedBy?: string | null; owner?: string } = {}): Promise<ResourceView> {
+  async importFile(src: string, displayName = basename(src), o: { audience?: string[] | null; sharedBy?: string | null; owner?: string; validate?: () => void; expectedSha256?: string } = {}): Promise<ResourceView> {
     const st = await stat(src);
     if (!st.isFile()) throw new ApiError(400, 'not_a_file', 'Only regular files can be added.');
     const count = (this.db.prepare("SELECT count(*) n FROM resources WHERE session_id = ? AND status != 'removed'").get(this.classroom.id) as { n: number }).n;
     if (count >= this.limits.maxResourcesPerSession) throw new ApiError(429, 'too_many', 'This class has too many files.');
     await this.storage.ensureSpace(st.size, this.limits.diskReserveBytes);
+    o.validate?.();
 
     const id = randomUUID();
     const original = displayName.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'file';
@@ -107,6 +108,16 @@ export class Resources extends EventEmitter {
     if (inChunk > 0 || chunks.length === 0) chunks.push(chunkHash.digest('hex')); // last partial chunk (or empty file)
     const sha256 = hash.digest('hex');
     await this.dedupe(id, sha256);
+    // Upload/policy authorization may have changed during asynchronous hashing and copying.
+    try {
+      if (o.expectedSha256 && sha256 !== o.expectedSha256) throw new ApiError(422, 'hash_mismatch', 'The file failed checksum verification.');
+      o.validate?.();
+    } catch (e) {
+      this.db.prepare("UPDATE resources SET status = 'failed' WHERE id = ?").run(id);
+      await rm(this.storage.resource(id), { force: true });
+      this.emit('changed');
+      throw e;
+    }
     const row = this.row(id)!;
     const payload: ManifestPayload = {
       type: 'classroom-lan/resource-manifest', v: 1, resourceId: id, sessionId: this.classroom.id, courseTitle: this.classroom.title,

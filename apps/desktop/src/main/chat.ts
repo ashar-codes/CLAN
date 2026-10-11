@@ -7,7 +7,7 @@ import { copyFile, mkdir, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { pinnedTransport, sha256File, uniquePath } from '@classroom/client/node';
-import { ChatHandle, ClientMessage, safeFileName, type ChatMessageView, type ChatThreadView, type ResourceView } from '@classroom/protocol';
+import { ChatHandle, ClientMessage, safeFileName, type ChatMessageView, type ChatThreadView, type ResourceView, type ShareResult } from '@classroom/protocol';
 import { ChatEvents, fetchLinkMeta, parseIntake, type ClanApp } from '@clan/core';
 import type { RunningServer } from '@classroom/server';
 import type { Trust } from './trust.ts';
@@ -49,6 +49,16 @@ export function registerChat(o: { clan: ClanApp; server: () => RunningServer | n
     return b;
   });
 
+  // Teacher moderation uses the actual running host; renderer paths and principals are never trusted.
+  handle('chat:pendingShares', () => {
+    const host = o.server(); if (!host) throw new Error('Not hosting a CLAN.');
+    return host.shares.pending({ role: 'teacher' });
+  });
+  handle('chat:reviewShare', (_e, id, accept) => {
+    const host = o.server(); if (!host) throw new Error('Not hosting a CLAN.');
+    return host.shares.decide({ role: 'teacher' }, z.uuid().parse(id), z.boolean().parse(accept));
+  });
+
   // Durable Outbox (this device): a message is kept until the host acknowledged it, and retried with the same id.
   const Send = ClientMessage.refine((m) => m.t === 'chat.send');
   handle('chat:outboxAdd', (_e, clanId, payload) => clan.chat.queue(z.uuid().parse(clanId), Send.parse(payload) as never));
@@ -63,7 +73,7 @@ export function registerChat(o: { clan: ClanApp; server: () => RunningServer | n
   handle('chat:received', () => clan.chat.receivedFiles(me).map((m) => ({ ...m, clanName: clan.clans.get(m.clanId)?.name ?? 'CLAN' })));
 
   /** Send files to the CLAN table or one CLANmate. Same resource/transfer system either way; only the audience differs. */
-  const send = async (raw: unknown, paths: string[], to: string): Promise<ResourceView[]> => {
+  const send = async (raw: unknown, paths: string[], to: string): Promise<ShareResult[]> => {
     const r = route(raw);
     for (const p of paths) if (!(await stat(p)).isFile()) throw new Error('Only files can be sent.');
     if (r.host) {

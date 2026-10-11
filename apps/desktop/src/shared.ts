@@ -1,6 +1,6 @@
 import type { DiscoveredClassroom } from '@classroom/server/discovery';
 import type { Iface } from '@classroom/server';
-import type { ChatMessageView, ChatThreadView, ClassroomInfo, ClientMessage, JoinPolicy, MemberStatus, Receipt, ResourceView, StudentProfile, TransferState } from '@classroom/protocol';
+import type { ChatMessageView, ChatThreadView, ClassroomInfo, ClientMessage, JoinPolicy, MemberStatus, Receipt, ResourceView, ShareResult, ShareUploadStatus, PendingShare, StudentProfile, TransferState } from '@classroom/protocol';
 import type { KeystoreStatus } from './main/keystore.ts';
 import type { Clan, ClanType, Collection, DiaryEntry, FileView, Note, Reminder, SavedItem, InboxItem, NoticePrefs, DeliveredNotice,
   Course, Topic, Lecture, CourseLink, Task, Exam, Deck, Card, StudySession, AssignmentItem, AgendaItem,
@@ -177,8 +177,10 @@ export type ChatApi = {
   localPage(threadId: string, before?: number): Promise<ChatMessageView[]>;
   received(): Promise<ReceivedFile[]>;
   /** Files dropped in the window (real File objects, resolved to paths in the preload) or picked in a dialog. */
-  sendDropped(c: ChatConn, files: File[], to: string): Promise<ResourceView[]>;
-  sendPicked(c: ChatConn, to: string): Promise<ResourceView[]>;
+  sendDropped(c: ChatConn, files: File[], to: string): Promise<ShareResult[]>;
+  sendPicked(c: ChatConn, to: string): Promise<ShareResult[]>;
+  pendingShares(): Promise<PendingShare[]>;
+  reviewShare(uploadId: string, accept: boolean): Promise<ShareUploadStatus>;
   hostSave(resourceId: string): Promise<{ name: string }>;
   onUpload(cb: (p: { sent: number; size: number; name: string }) => void): () => void;
 };

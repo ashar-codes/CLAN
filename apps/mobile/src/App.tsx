@@ -265,7 +265,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
           <RoomHeader c={c} title={info.title} host={info.hostName} files={resources.length} type={L.type} />
           {presenting && <PresentationCard c={c} presenting={presenting} conn={{ url: joined.url, token: joined.token, transport: joined.transport as PinnedNativeTransport }} />}
           {board.view?.wall === 'WHITEBOARD' && !presenting && <MobileBoard c={c} board={board} title={`${info.title} board`} />}
-          <ChatSection c={c} chat={chat} conn={conn} people={people} />
+          <ChatSection c={c} chat={chat} conn={conn} people={people} canSendFiles={info.clanType !== 'CLASSROOM' || (info.fileSharingPolicy ?? 'teacher') !== 'teacher'} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
         </>

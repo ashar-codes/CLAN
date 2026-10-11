@@ -20,6 +20,7 @@ const api: DesktopApi = {
   } as DesktopApi['clan'],
   chat: {
     http: inv('chat:http'), outboxAdd: inv('chat:outboxAdd'), outbox: inv('chat:outbox'), outboxSent: inv('chat:outboxSent'), ingest: inv('chat:ingest'), setMe: inv('chat:setMe'),
+    pendingShares: inv('chat:pendingShares'), reviewShare: inv('chat:reviewShare'),
     local: inv('chat:local'), localPage: inv('chat:localPage'), received: inv('chat:received'), hostSave: inv('chat:hostSave'), sendPicked: inv('chat:sendPicked'),
     sendDropped: (c, files, to) => ipcRenderer.invoke('chat:sendDropped', c, files.slice(0, 20).map((f) => webUtils.getPathForFile(f)).filter(Boolean), to),
     onUpload: (cb) => listen('chat:upload', cb),

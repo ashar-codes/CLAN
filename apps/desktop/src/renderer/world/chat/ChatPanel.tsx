@@ -97,7 +97,10 @@ function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: Chat
     setNote('');
     try {
       const files = await api.chat.sendPicked(chat.conn, t.kind === 'group' ? 'clan' : t.with!.handle);
-      for (const f of files) await chat.post(target, '', { attachment: { kind: 'file', resourceId: f.id } });
+      for (const f of files) {
+        if ('pending' in f) setNote(`${f.name} sent for teacher approval. Approved files appear in Classroom files.`);
+        else await chat.post(target, '', { attachment: { kind: 'file', resourceId: f.id } });
+      }
     } catch (x) { setNote(errText(x)); }
   };
   const shareSaved = async (it: SavedItem) => { setSaved(null); await chat.post(target, '', { attachment: { kind: 'link', url: it.url, title: it.title, savedItemId: it.id } }); };

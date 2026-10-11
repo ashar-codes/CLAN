@@ -9,7 +9,7 @@ import {
 } from '@classroom/client';
 import {
   b64u, bitfield, safeFileName, UPLOAD_CONTENT_TYPE, verifyManifest, verifyReceipt,
-  type ManifestPayload, type PeerCapability, type PeerCapabilities, type Receipt, type ResourceView, type ShareUploadStatus, type SignedManifest, type TransferState,
+  type ManifestPayload, type PeerCapability, type PeerCapabilities, type Receipt, type ResourceView, type ShareUploadStatus, type ShareResult, type SignedManifest, type TransferState,
 } from '@classroom/protocol';
 import { pinnedNativeTransport, type PinnedNativeTransport } from './native';
 
@@ -249,10 +249,10 @@ export function receipts(c: Conn): StoredReceipt[] {
  * person can never be posted to the whole CLAN (the host checks every send).
  */
 export async function shareFile(c: Conn, file: { uri: string; name: string; size: number }, to: string, idempotencyKey: string,
-  onProgress: (sent: number, size: number) => void): Promise<ResourceView> {
+  onProgress: (sent: number, size: number) => void): Promise<ShareResult> {
   const init = { fileName: file.name.slice(0, 255), size: file.size, sha256: sha256File(file.uri), idempotencyKey, to };
   let st = await api<ShareUploadStatus>(c.transport, c.url, c.token, '/api/shares', { method: 'POST', body: JSON.stringify(init) });
-  for (let attempt = 0; !st.resource; attempt++) {
+  for (let attempt = 0; !st.resource && st.approval !== 'pending'; attempt++) {
     if (st.state === 'failed') throw new TransferError('failed', st.error ?? 'Sending failed.');
     try {
       const res = await c.transport.uploadFromFile(`${c.url}/api/shares/${st.uploadId}`,
@@ -264,5 +264,5 @@ export async function shareFile(c: Conn, file: { uri: string; name: string; size
     await new Promise((r) => setTimeout(r, Math.min(5000, 500 * 2 ** attempt)));
     st = await api<ShareUploadStatus>(c.transport, c.url, c.token, `/api/shares/${encodeURIComponent(st.uploadId)}`);
   }
-  return st.resource;
+  return st.resource ?? { pending: true, uploadId: st.uploadId, name: file.name, size: st.size };
 }

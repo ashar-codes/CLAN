@@ -34,7 +34,7 @@ export const capabilitiesFor = (type: ClanType, role: ClanRole): readonly ClanCa
 /** Which capability each host-side control message needs (enforced by the host server). */
 export const MESSAGE_CAPABILITY: Partial<Record<ClientMessage['t'], ClanCapability>> = {
   'member.approve': 'APPROVE_MEMBERS', 'member.reject': 'APPROVE_MEMBERS', 'member.remove': 'REMOVE_MEMBERS', 'member.block': 'REMOVE_MEMBERS',
-  'class.lock': 'MANAGE_CLAN', 'class.policy': 'MANAGE_PERMISSIONS', 'class.end': 'MANAGE_CLAN', 'class.peerAssist': 'MANAGE_CLAN',
+  'class.lock': 'MANAGE_CLAN', 'class.policy': 'MANAGE_PERMISSIONS', 'class.filePolicy': 'MANAGE_PERMISSIONS', 'class.end': 'MANAGE_CLAN', 'class.peerAssist': 'MANAGE_CLAN',
   'resource.available': 'SHARE_RESOURCE', 'resource.remove': 'SHARE_RESOURCE', 'resource.push': 'SHARE_RESOURCE',
   'assignment.create': 'CREATE_ASSIGNMENT', 'assignment.close': 'CREATE_ASSIGNMENT',
   'present.approve': 'MANAGE_PRESENTERS', 'present.decline': 'MANAGE_PRESENTERS', 'present.policy': 'MANAGE_PRESENTERS',

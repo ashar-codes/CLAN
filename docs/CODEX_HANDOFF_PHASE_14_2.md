@@ -21,7 +21,7 @@ early). Progress table: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md).
 Root causes and reasoning: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md) › P0-1.
 
 ## 3. Database migrations / compatibility
-No migrations in 14.2. Protocol: the mDNS TXT gains optional `a`; old hosts/clients interoperate (missing `a` ⇒ old
+Server migration 8 appends `sessions.file_sharing_policy` (teacher default) and `share_uploads.approval`; prior migrations remain intact. Upload states/IDs and the whiteboard protocol are unchanged. New file policy messages require an updated host/client; fields are optional for older state messages. Protocol: the mDNS TXT gains optional `a`; old hosts/clients interoperate (missing `a` ⇒ old
 ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffected.
 
 ## 4. Tests actually run (macOS arm64, 2026-10-11)
@@ -50,7 +50,7 @@ ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffect
    unread, cursors); mobile `apps/mobile/src/Chat.tsx` (loads the latest 50 only). Scroll container + "Jump to latest",
    keep position on prepend, auto-scroll only near the bottom; mobile inverted `FlatList` + `KeyboardAvoidingView`.
    Reuse the existing messages API cursor (check `packages/server/src/chat.ts`). Tests: `apps/desktop/e2e/chat.test.ts`.
-3. **P0-3 classroom file-sharing policy:** server-side in `packages/server/src/{classroom.ts,shares.ts,chat.ts}`
+3. **P0-3 classroom file-sharing policy implemented; native UI verification pending:** server-side in `packages/server/src/{classroom.ts,shares.ts,chat.ts}`
    (capabilities via `MESSAGE_CAPABILITY` in `server.ts`); policy `everyone | approval | teacher` for `CLASSROOM` only
    (Study Group/Friends/Project keep current behaviour); a pending-share queue the host approves; tests in
    `packages/server/test/` (unauthorized and revoked senders).
@@ -85,7 +85,7 @@ credential. Never force-push; never move `clan-beta-v0.1.0-rc1`.
   `release/beta-v0.1.0-rc1/` (local, git-ignored) — don't modify.
 
 ## 12. Known risks
-P0-1 remains hardware-unverified; Windows Firewall or a *Public* network profile could still block. Baseline full suites passed. New chat targeted desktop/unit checks passed; Android rerun is pending. P0-3 policy regression tests and host implementation are in progress, not yet verified.
+P0-1 remains hardware-unverified; Windows Firewall or a *Public* network profile could still block. Baseline full suites passed. New chat targeted desktop/unit checks passed; Android rerun is pending. P0-3 host policy and desktop UI passed 70 targeted units and 5 desktop E2Es. Pending queues stay scoped to their original session; native UI verification is pending.
 
 ## 13. Evidence
 `design/beta/v0.1.0/`, `design/beta/v0.1.0-rc1/VERIFICATION.md`, `docs/RC1_HARDWARE_GATES.md`,

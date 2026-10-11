@@ -4,11 +4,11 @@ import { app, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { partPaths, uploadShare, uploadSubmission } from '@classroom/client/node';
+import { partPaths, uploadShareResult, uploadSubmission } from '@classroom/client/node';
 import { completedFileReader, PeerAgent } from '@classroom/client/peer';
 import { api, type PeerInfo } from '@classroom/client';
 import { candidateInterfaces } from '@classroom/server';
-import { safeFileName, verifyReceipt, type Receipt, type ResourceView, type SignedManifest } from '@classroom/protocol';
+import { safeFileName, verifyReceipt, type Receipt, type ResourceView, type ShareResult, type SignedManifest } from '@classroom/protocol';
 import type { Conn, FileState, StoredReceipt } from '../shared.ts';
 import type { Trust } from './trust.ts';
 type Job = { conn: Conn; resource: ResourceView; ctl?: AbortController; state: FileState; hostOnly?: boolean };
@@ -206,9 +206,9 @@ export class StudentFiles {
   }
 
   /** Member sharing files (dropped/picked paths, resolved in main): the whole CLAN ('clan') or one CLANmate (handle). */
-  async share(c: Conn, paths: string[], to: string): Promise<ResourceView[]> {
+  async share(c: Conn, paths: string[], to: string): Promise<ShareResult[]> {
     const route = this.route(c);
-    const out: ResourceView[] = [];
+    const out: ShareResult[] = [];
     for (const path of paths) {
       const st = await stat(path);
       if (!st.isFile()) throw new Error('Only files can be sent.');
@@ -217,7 +217,7 @@ export class StudentFiles {
       const k = `share:${c.sessionId}:${to}:${path}:${st.size}:${st.mtimeMs}`;
       pending[k] ??= randomUUID();
       await writeFile(this.pendingPath(), JSON.stringify(pending));
-      out.push(await uploadShare({ transport: route.transport, url: route.url, token: c.token, path, to, idempotencyKey: pending[k]!,
+      out.push(await uploadShareResult({ transport: route.transport, url: route.url, token: c.token, path, to, idempotencyKey: pending[k]!,
         onProgress: (sent, size) => this.win()?.webContents.send('chat:upload', { sent, size, name: path.split(/[\\/]/).pop() }) }));
       delete pending[k];
       await writeFile(this.pendingPath(), JSON.stringify(pending));

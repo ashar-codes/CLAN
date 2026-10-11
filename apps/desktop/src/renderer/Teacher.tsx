@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ClassroomConnection, formatBytes, recommendDistribution, type Quality } from '@classroom/client';
-import { clanLabels, shortFingerprint, type ClanCapability, type ClanType, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats } from '@classroom/protocol';
+import { clanLabels, shortFingerprint, type ClanCapability, type ClanType, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats, type PendingShare, type FileSharingPolicy } from '@classroom/protocol';
 import { TeacherAssignments, TeacherFiles } from './Files.tsx';
 import type { Capabilities, DirectAvailability, DirectStatus, PastClass, StartedClassroom } from '../shared.ts';
 import { api } from './App.tsx';
@@ -131,6 +131,8 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const [stats, setStats] = useState<TransferStats | null>(null);
   const [can, setCan] = useState<ClanCapability[]>([]);
   const [shared, setShared] = useState('');
+  const [pendingShares, setPendingShares] = useState<PendingShare[]>([]);
+  const [reviewingShare, setReviewingShare] = useState<string | null>(null);
   const [presMsg, setPresMsg] = useState<PresentationMsg | null>(null);
   const [ask, setAsk] = useState(0);
   const presRef = useRef<ReturnType<typeof usePresentation> | null>(null);
@@ -172,6 +174,24 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   }, [started]);
 
   const send = conn.current?.send.bind(conn.current) ?? (() => {});
+  useEffect(() => {
+    if (info?.clanType !== 'CLASSROOM') return;
+    let alive = true, busy = false;
+    const refresh = async () => {
+      if (busy) return; busy = true;
+      try { const items = await api.chat.pendingShares(); if (alive) setPendingShares(items); }
+      catch (e) { if (alive) setNotice((e as Error).message); }
+      finally { busy = false; }
+    };
+    void refresh(); const timer = setInterval(() => void refresh(), 5000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [info?.clanType, started]);
+  const reviewShare = async (id: string, accept: boolean) => {
+    setReviewingShare(id);
+    try { await api.chat.reviewShare(id, accept); setPendingShares(await api.chat.pendingShares()); }
+    catch (e) { setNotice((e as Error).message); }
+    finally { setReviewingShare(null); }
+  };
   const pending = members.filter((m) => m.status === 'pending');
   const roster = members.filter((m) => m.status === 'approved');
   const gone = members.filter((m) => m.status === 'removed' || m.status === 'blocked' || m.status === 'rejected');
@@ -245,6 +265,16 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         <div className="card">
           <h3>Settings</h3>
           <label>Who can join<select value={info.joinPolicy} onChange={(e) => send({ t: 'class.policy', policy: e.target.value as JoinPolicy })}>{POLICY_ORDER.map((p) => <option key={p} value={p}>{L.policy[p]}</option>)}</select></label>
+          {info.clanType === 'CLASSROOM' && <>
+            <label>Student file sharing<select value={info.fileSharingPolicy ?? 'teacher'} onChange={(e) => send({ t: 'class.filePolicy', policy: e.target.value as FileSharingPolicy })}>
+              <option value="teacher">Teacher only</option><option value="approval">Teacher approval</option><option value="everyone">Everyone</option>
+            </select></label>
+            <h3>Files awaiting approval ({pendingShares.length})</h3>
+            {pendingShares.map((f) => <div className="person" key={f.uploadId}>
+              <span>{f.memberName} · {f.fileName} · {formatBytes(f.size)}</span>
+              <div className="row"><button disabled={!!reviewingShare} onClick={() => void reviewShare(f.uploadId, true)}>Approve file</button><button disabled={!!reviewingShare} onClick={() => void reviewShare(f.uploadId, false)}>Decline file</button></div>
+            </div>)}
+          </>}
           <h3>Network</h3>
           {started.direct && <DirectCard started={started} />}
           {info.p2p === 'isolated' && <p className="muted small-text" data-testid="p2p-isolated">Peer Assistance unavailable: this network keeps members apart, so files come from you.</p>}
