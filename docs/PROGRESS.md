@@ -22,6 +22,10 @@
 | 8 — whiteboard, exam mode, recording | not started |
 | 9 — archive, timeline UI, search, diagnostics, sync outbox | not started (timeline events are already recorded) |
 | 10 — hardening, load, packaging, E2E | partial: packaging config + verified unpacked macOS build |
+| 14.2 — persistent CLAN hosting | source + cloud tested (draft PR #1); hardware NOT TESTED |
+| 14.3 A+B — Nearby People, friends, personal chats, files, voice notes, calls | source + cloud tested (draft PR #2); desktop E2E 5/5 on Linux; hardware NOT TESTED |
+| 14.3 C+D — router-free links (LAN/hotspot, Wi-Fi Direct, Wi-Fi Aware, Apple peer-to-peer), QR everywhere, animated-QR transfer, phone calls/voice/QR | source + cloud tested (draft PR #3); Android Kotlin type-checked only; iOS not compiled; hardware NOT TESTED — see PHASE_14_3_PROGRESS.md |
+| 15 | not started |
 
 ## Milestone 1 delivered
 * Teacher: create class (title, join rule), LAN adapter selection, big join code, approve/reject/approve-all,
