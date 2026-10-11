@@ -11,7 +11,8 @@
     "./peer": "./src/peer-node.ts",
     "./sync": "./src/sync.ts",
     "./people": "./src/people.ts",
-    "./link": "./src/link.ts"
+    "./link": "./src/link.ts",
+    "./call": "./src/call-engine.ts"
   },
   "dependencies": {
     "@classroom/protocol": "workspace:*",

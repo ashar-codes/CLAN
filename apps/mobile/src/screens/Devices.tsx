@@ -2,7 +2,9 @@
 // sync counters, conflicts to compare, Unlink, and what syncs (Diary opt-in, large files opt-in).
 import { useState } from 'react';
 import { Text, View } from 'react-native';
+import { parseLinkQr } from '@classroom/protocol';
 import { phoneClan } from '../core/clan';
+import { QrScanner } from '../ui/qr';
 import { isSyncing, linkWithCode, startOverPhoneSync, syncNow } from '../sync/phone';
 import { act, bump, Btn, Card, Choice, Err, Field, H1, Muted, Row, Screen, useC, useData, when } from '../ui/kit';
 
@@ -19,6 +21,7 @@ export function DevicesScreen() {
   const conflicts = useData(() => s.conflicts()) ?? [];
   const revoked = useData(() => s.selfRevoked()) ?? false;
   const [code, setCode] = useState(''), [addr, setAddr] = useState(''), [busy, setBusy] = useState(false), [msg, setMsg] = useState<string | null>(null), [confirm, setConfirm] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const others = devices.filter((d) => !d.current);
   const run = async (f: () => Promise<unknown>, done: string) => { setBusy(true); setMsg(null); try { await f(); setMsg(done); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); bump(); } };
   return (
@@ -45,6 +48,8 @@ export function DevicesScreen() {
       {!revoked && (
         <Card title={others.length ? 'Link to another computer' : 'Link this phone to your computer'}>
           <Muted>On your computer open Me › My Devices › “Link a new device”, then type the code it shows. Approve on the computer.</Muted>
+          {scanning ? <QrScanner hint="Point at the code on your computer (Me › My Devices › Link a new device)." onClose={() => setScanning(false)} onCode={(t) => { const q = parseLinkQr(t); if (!q) return; setCode(q.code); setAddr(q.address); setScanning(false); return true; }} />
+            : <Btn small label="Scan the code" onPress={() => setScanning(true)} />}
           <Field label="Link code" value={code} onChange={setCode} placeholder="CLAN-XXXX-XXXX-XXXX" autoCapitalize="characters" autoCorrect={false} />
           <Field label="Computer address (only if not found)" value={addr} onChange={setAddr} placeholder="192.168.1.20:52341" keyboardType="numbers-and-punctuation" autoCapitalize="none" />
           <Btn primary label={busy ? 'Waiting for approval on your computer…' : 'Link'} disabled={busy || !code.trim()} onPress={() => void run(() => linkWithCode(code, addr), 'Linked. Your data is coming across.').then(() => setCode(''))} />

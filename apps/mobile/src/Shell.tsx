@@ -12,6 +12,7 @@ import { DevicesScreen } from './screens/Devices';
 import { HostingScreen } from './screens/Hosting';
 import { PeopleScreen } from './screens/People';
 import { phonePeople } from './people/native';
+import { PhoneCallProvider } from './people/Call';
 import { act, bump, Btn, Card, Field, Mate, Muted, RoomBand, Row, Screen, useC, useData, when } from './ui/kit';
 
 type Tab = 'home' | 'study' | 'people' | 'inbox' | 'diary' | 'me';
@@ -32,6 +33,7 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
     : hosting ? <View style={{ flex: 1 }}><HostingScreen /><View style={{ position: 'absolute', top: 12, right: 16 }}><Btn small label="Done" onPress={() => setHosting(false)} /></View></View>
     : <MeScreen onDevices={() => setDevices(true)} onHosting={() => setHosting(true)} onEditProfile={onEditProfile} />);
   return (
+    <PhoneCallProvider>
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1 }}>{body}</View>
       {!intake && (
@@ -46,6 +48,7 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
         </View>
       )}
     </View>
+    </PhoneCallProvider>
   );
 }
 

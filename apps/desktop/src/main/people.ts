@@ -16,7 +16,7 @@ import { PeopleChanged } from '@clan/core';
 import { candidateInterfaces, createClassroomTls, logError } from '@classroom/server';
 import { IMAGE_PREVIEW_BYTES, TEXT_PREVIEW_BYTES, previewImageMime, previewKind, type FilePreview } from '@classroom/client';
 import { newEd25519, nodeSigner, sha256File } from '@classroom/client/node';
-import { keyFingerprint, PROFILE_FIELDS, safetyNumber, TEMP_TTLS, VOICE_MIME, type PeerBody } from '@classroom/protocol';
+import { ackCode, encodeTransfer, keyFingerprint, parseReceiveCode, PROFILE_FIELDS, QRX_MAX_BYTES, safetyNumber, TEMP_TTLS, verifyAck, VOICE_MIME, type PeerBody } from '@classroom/protocol';
 import { startPeopleRuntime } from './people-runtime.ts';
 import { canOpen } from './student.ts';
 import { windowsOpenWith } from './open-with.ts';
@@ -38,16 +38,21 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   const portFile = join(o.dataDir, 'people', 'port');
   await mkdir(join(o.dataDir, 'people'), { recursive: true });
   const saved = Number(await readFile(portFile, 'utf8').catch(() => '')) || undefined;
+  const linkPortFile = join(o.dataDir, 'people', 'link-port'), savedLink = Number(await readFile(linkPortFile, 'utf8').catch(() => '')) || undefined;
   const start = (port?: number) => startPeopleRuntime({
-    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port, allowLoopback: loopback,
+    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port, linkPort: savedLink, allowLoopback: loopback,
     endpoints: (port) => [...candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${port}`), ...(loopback ? [`127.0.0.1:${port}`] : [])].slice(0, 3),
     onLive: (e) => send('people:live', { from: e.from, body: e.body }),
     onChange: (what) => send('people:changed', { what }),
   });
   const rt = await start(saved).catch((e: NodeJS.ErrnoException) => { if (saved && e.code === 'EADDRINUSE') return start(); throw e; });
   if (rt.port !== saved) await writeFile(portFile, String(rt.port));
+  if (rt.linkPort !== savedLink) await writeFile(linkPortFile, String(rt.linkPort));
   c.bus.subscribe('desktop.people', PeopleChanged, (e) => send('people:changed', e.payload));
-  setInterval(() => void p.sweep().catch((e) => logError('people', e)), 60_000).unref();
+  // this computer is one of the account's devices (after Me › My Devices linking); friends hear about the others
+  const devices = () => { try { const acc = c.sync.account(); if (!acc) return; p.announceDevice(acc.accountId, `${p.myProfile().name}’s ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer'}`); if (p.shareDeviceLinks()) void rt.tick(); } catch (e) { logError('people', e); } };
+  devices();
+  setInterval(() => { void p.sweep().catch((e) => logError('people', e)); devices(); }, 60_000).unref();
   void p.sweep();
 
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
@@ -56,7 +61,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     return { key: signer.publicKey, fingerprint: keyFingerprint(signer.publicKey), profile: prof, qr, port: rt.port };
   };
   handle('people:me', () => me());
-  handle('people:qrImage', async () => QRCode.toDataURL(rt.myQr(), { errorCorrectionLevel: 'M', margin: 1, width: 280 }));
+  handle('people:qrImage', async (intent) => QRCode.toDataURL(rt.myQr(z.enum(['profile', 'friend', 'chat']).optional().parse(intent)), { errorCorrectionLevel: 'M', margin: 1, width: 280 }));
   handle('people:resetQr', () => { p.inviteToken(true); return me(); });
   handle('people:update', (raw) => p.updateProfile(z.object({ name: z.string().optional(), ...Object.fromEntries(PROFILE_FIELDS.map((f) => [f, f === 'interests' ? z.array(z.string()).optional() : z.string().optional()])),
     fieldVisibility: z.record(z.string(), z.enum(['everyone', 'friends', 'nobody'])).optional() }).parse(raw) as never));
@@ -71,7 +76,8 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   handle('people:avatar', async (raw) => {
     const key = raw === 'me' ? null : Key.parse(raw);
     if (!key) { const a = p.myProfile().avatar; if (!a) return null; const loc = p.avatarPath(a.objectId); return loc ? `data:${a.mime};base64,${(await readFile(loc)).toString('base64')}` : null; }
-    return null; // other people's pictures are shown once fetched (avatar transfer is a later increment)
+    const a = p.avatarOf(key); // fetched and verified against their signed profile
+    return a ? `data:${a.mime};base64,${Buffer.from(a.data).toString('base64')}` : null;
   });
   handle('people:visibility', async (v, ms) => { const r = p.setVisibility(z.enum(['everyone', 'friends', 'invisible']).parse(v), ms === undefined ? undefined : z.number().int().parse(ms)); await rt.refreshDiscovery(); return r; });
   handle('people:nearby', () => rt.nearby());
@@ -159,6 +165,57 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     if (!b.kind.startsWith('call.')) throw new Error('Not a call signal.');
     return rt.sendLive(p.callSignal(key, b as Extract<PeerBody, { kind: `call.${string}` }>));
   });
+  // ---- optical (animated QR) transfer: encoded here so the sender's identity signature uses the keystore key ----
+  const optical = new Map<string, ReturnType<typeof encodeTransfer>>();
+  handle('people:opticalStart', async (rawTo, rawPath) => {
+    const to = rawTo ? parseReceiveCode(z.string().max(300).parse(rawTo)) : null;
+    if (rawTo && !to) throw new Error('That is not a CLAN receive code.');
+    let path = rawPath === undefined || rawPath === null ? null : z.string().max(4096).parse(rawPath);
+    if (!path) { const win = BrowserWindow.getFocusedWindow(); const r = win ? await dialog.showOpenDialog(win, { properties: ['openFile'] }) : await dialog.showOpenDialog({ properties: ['openFile'] }); if (r.canceled || !r.filePaths[0]) return null; path = r.filePaths[0]; }
+    const st = await stat(path);
+    if (!st.isFile()) throw new Error('Choose a file.');
+    if (st.size > QRX_MAX_BYTES) throw new Error(`That file is ${Math.round(st.size / 1e5) / 10} MB. QR transfer is limited to ${QRX_MAX_BYTES / 1024 / 1024} MB — share it over a direct connection instead.`);
+    const tx = encodeTransfer({ bytes: new Uint8Array(await readFile(path)), name: basename(path), mime: mimeOf(path) }, { blockSize: st.size > 64_000 ? 600 : 400, to: to ?? undefined, signer });
+    if (optical.size > 4) optical.delete(optical.keys().next().value!);
+    optical.set(tx.id, tx);
+    return { id: tx.id, name: tx.info.name, size: tx.info.size, mode: tx.meta.mode, minFrames: tx.minFrames, to: to?.name ?? null };
+  });
+  handle('people:opticalFrames', (id, from, count) => {
+    const tx = optical.get(z.string().regex(/^[0-9a-f]{16}$/).parse(id)); if (!tx) throw new Error('That transfer was stopped.');
+    const f = z.number().int().min(0).parse(from), n = z.number().int().min(1).max(200).parse(count);
+    return Array.from({ length: n }, (_, i) => tx.frame(f + i));
+  });
+  handle('people:opticalStop', (id) => { optical.delete(z.string().parse(id)); });
+  handle('people:opticalReceipt', (id, text) => {
+    const tx = optical.get(z.string().parse(id)); if (!tx) throw new Error('That transfer was stopped.');
+    const r = verifyAck(z.string().max(600).parse(text), { id: tx.id, sha256: tx.info.sha256 });
+    if (!r) return null;
+    const c0 = p.contact(r.key);
+    return { key: r.key, name: c0?.name ?? null, fingerprint: keyFingerprint(r.key) };
+  });
+  handle('people:opticalAck', (id, sha) => ackCode({ id: z.string().regex(/^[0-9a-f]{16}$/).parse(id), sha256: z.string().regex(/^[0-9a-f]{64}$/).parse(sha), signer }));
+  const opticalFile = async (bytes: unknown, name: unknown) => {
+    const b = Buffer.from(z.instanceof(Uint8Array).parse(bytes));
+    if (b.length > QRX_MAX_BYTES) throw new Error('Too large.');
+    const safe = z.string().max(200).parse(name).replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, '_').slice(0, 120) || 'file';
+    return { b, safe };
+  };
+  handle('people:opticalSave', async (bytes, name) => {
+    const { b, safe } = await opticalFile(bytes, name);
+    const win = BrowserWindow.getFocusedWindow();
+    const r = win ? await dialog.showSaveDialog(win, { defaultPath: safe }) : await dialog.showSaveDialog({ defaultPath: safe });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, b);
+    return { name: basename(r.filePath) };
+  });
+  handle('people:opticalInbox', async (bytes, name, mime) => {
+    const { b, safe } = await opticalFile(bytes, name);
+    const tmp = join(o.dataDir, 'people', 'optical'); await mkdir(tmp, { recursive: true });
+    const path = join(tmp, `${randomUUID()}-${safe}`); await writeFile(path, b);
+    try { await c.capture.capture({ kind: 'user', userId: c.me }, { kind: 'file', path, name: safe, mime: z.string().max(120).parse(mime) }); } finally { await rm(path, { force: true }); }
+  });
+  handle('people:deviceOffers', () => p.deviceOffers());
+  handle('people:deviceOffer', (action, from, key) => { const a = z.enum(['accept', 'decline']).parse(action); if (a === 'accept') p.acceptDeviceOffer(Key.parse(from), Key.parse(key)); else p.declineDeviceOffer(Key.parse(from), Key.parse(key)); void rt.tick(); });
   handle('people:armMedia', (kind) => armMedia(z.enum(['microphone', 'camera']).parse(kind)));
   handle('people:logCall', (raw) => p.logCall(z.object({ id: z.string().max(64), peerKey: Key, direction: z.enum(['in', 'out']), connectedAt: z.number().int().nullable().optional(), endedAt: z.number().int().nullable().optional(), outcome: z.string().max(40).optional() }).parse(raw)));
   return { rt, close: () => rt.stop() };

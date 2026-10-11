@@ -6,7 +6,7 @@ import type { FilePreview } from '@classroom/client';
 import type { PeopleConversation, PeopleMessage, PeopleTransfer } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import { useCall } from './Call.tsx';
-import { ago, clock, errText, Initials, mb, ttlLabel, until, usePeople } from './common.tsx';
+import { ago, clock, errText, Avatar, Initials, mb, ttlLabel, until, usePeople } from './common.tsx';
 
 const PAGE = 50;
 const TTLS: [number, string][] = [[3_600_000, '1 hour'], [86_400_000, '24 hours'], [7 * 86_400_000, '7 days']];
@@ -44,7 +44,7 @@ export function Chats({ openId, setOpenId }: { openId: string | null; setOpenId(
           {!convs?.length && <p className="muted">No chats yet.</p>}
           <ul className="people-list">{convs?.map((c) => (
             <li key={c.id}><button className={`conv ${c.id === openId ? 'on' : ''}`} aria-current={c.id === openId ? 'true' : undefined} onClick={() => setOpenId(c.id)}>
-              <Initials name={c.peerName} /><span className="grow"><b>{c.peerName}</b>{c.mode === 'temporary' && <span className="chip" title={ttlLabel(c.ttlMs)}> ⏱</span>}
+              <Avatar k={c.peerKey} name={c.peerName} /><span className="grow"><b>{c.peerName}</b>{c.mode === 'temporary' && <span className="chip" title={ttlLabel(c.ttlMs)}> ⏱</span>}
                 <br /><small className="muted">{STATE[c.state] || (c.lastText ?? 'No messages yet')}</small></span>
               <span className="conv-meta">{c.lastAt ? <small className="muted">{ago(c.lastAt)}</small> : null}{c.unread > 0 && <span className="badge" aria-label={`${c.unread} unread`}>{c.unread}</span>}</span>
             </button></li>))}</ul>
@@ -82,7 +82,7 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
   return (
     <section className="card chat-view stack" aria-label={`Chat with ${c.peerName}`}>
       <div className="row between">
-        <div className="row"><Initials name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
+        <div className="row"><Avatar k={c.peerKey} name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
         <div className="row">
           {(c.friend || c.state === 'active') && <button disabled={active} onClick={() => call(c.peerKey, c.peerName)}>Call</button>}
           {(c.state === 'active' || c.state === 'ended' || c.state === 'declined') && <ChatInvite peerKey={c.peerKey} onChat={() => {}} onError={setErr} label={c.state === 'active' ? 'Change terms…' : 'Invite again…'} terms />}
@@ -193,7 +193,7 @@ const VOICE_LIMIT_MS = 5 * 60_000;
 /** Record → listen back → send or discard. Nothing leaves the device until you press Send. */
 function VoiceRecorder({ convId, onError }: { convId: string; onError(e: string): void }) {
   const [state, setState] = useState<'idle' | 'recording' | 'review'>('idle'), [ms, setMs] = useState(0);
-  const rec = useRef<MediaRecorder | null>(null), chunks = useRef<Blob[]>([]), started = useRef(0), blob = useRef<Blob | null>(null);
+  const rec = useRef<MediaRecorder | null>(null), chunks = useRef<Blob[]>([]), started = useRef(0), blob = useRef<Blob | null>(null), container = useRef<'audio/mp4' | 'audio/webm'>('audio/webm');
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => { if (state !== 'recording') return; const t = setInterval(() => { const d = Date.now() - started.current; setMs(d); if (d >= VOICE_LIMIT_MS) rec.current?.stop(); }, 200); return () => clearInterval(t); }, [state]);
   useEffect(() => () => { rec.current?.stream.getTracks().forEach((t) => t.stop()); if (url) URL.revokeObjectURL(url); }, [url]);
@@ -201,15 +201,17 @@ function VoiceRecorder({ convId, onError }: { convId: string; onError(e: string)
     try {
       await api.people.armMedia('microphone');
       const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+      // AAC in MP4 plays everywhere (iPhones included); WebM/Opus where the OS offers no AAC encoder
+      const mime = ['audio/mp4;codecs=mp4a.40.2', 'audio/webm;codecs=opus', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m)) ?? 'audio/webm';
+      container.current = mime.startsWith('audio/mp4') ? 'audio/mp4' : 'audio/webm';
       const r = new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 32_000 }); rec.current = r; chunks.current = [];
       r.ondataavailable = (e) => { if (e.data.size) chunks.current.push(e.data); };
-      r.onstop = () => { s.getTracks().forEach((t) => t.stop()); setMs(Date.now() - started.current); blob.current = new Blob(chunks.current, { type: 'audio/webm' }); setUrl(URL.createObjectURL(blob.current)); setState('review'); };
+      r.onstop = () => { s.getTracks().forEach((t) => t.stop()); setMs(Date.now() - started.current); blob.current = new Blob(chunks.current, { type: container.current }); setUrl(URL.createObjectURL(blob.current)); setState('review'); };
       started.current = Date.now(); setMs(0); r.start(500); setState('recording');
     } catch (e) { const n = (e as DOMException).name; onError(n === 'NotAllowedError' ? 'Microphone access was denied. Allow CLAN to use the microphone in your system settings.' : n === 'NotFoundError' ? 'No microphone was found.' : errText(e)); }
   };
   const discard = () => { if (url) URL.revokeObjectURL(url); setUrl(null); blob.current = null; setState('idle'); };
-  const send = () => { const b = blob.current; if (!b) return; const d = ms; discard(); void b.arrayBuffer().then((buf) => api.people.sendVoice(convId, new Uint8Array(buf), 'audio/webm', d)).catch((e) => onError(errText(e))); };
+  const send = () => { const b = blob.current; if (!b) return; const d = ms; discard(); void b.arrayBuffer().then((buf) => api.people.sendVoice(convId, new Uint8Array(buf), container.current, d)).catch((e) => onError(errText(e))); };
   if (state === 'recording') return <span className="row recording" role="status"><span className="rec-dot" aria-hidden /> {fmt(ms / 1000)} <button className="small" onClick={() => rec.current?.stop()}>Stop</button></span>;
   if (state === 'review') return <span className="row" aria-label="Voice message preview">{url && <audio src={url} controls aria-label="Listen before sending" />}<button className="primary small" onClick={send}>Send voice</button><button className="small" onClick={discard}>Discard</button></span>;
   return <button aria-label="Record a voice message" title="Record a voice message" onClick={() => void start()}>🎙</button>;

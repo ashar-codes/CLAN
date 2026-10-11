@@ -10,18 +10,23 @@
       "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "CLAN finds and connects to nearby CLANs on this Wi-Fi network. No internet is used.",
+        "NSLocalNetworkUsageDescription": "CLAN finds and connects to nearby CLANs and people on this Wi-Fi, a hotspot or directly between iPhones. No internet is used.",
         "NSBonjourServices": [
-          "_classroomlan._tcp",
-          "_clansync._tcp"
+          "_clanlink._tcp",
+          "_clanpeer._tcp",
+          "_clansync._tcp",
+          "_classroomlan._tcp"
         ],
-        "NSCameraUsageDescription": "CLAN uses the camera only when you take a photo to save in your Inbox.",
+        "NSCameraUsageDescription": "CLAN uses the camera when you scan a CLAN code (a person, a CLAN or an optical file transfer) or take a photo for your Inbox.",
         "NSPhotoLibraryUsageDescription": "CLAN opens your photos only when you pick one to save in your Inbox or send in a chat.",
-        "NSMicrophoneUsageDescription": "CLAN never turns on the microphone. iOS asks for this text because the screen-sharing library it includes can use audio devices.",
+        "NSMicrophoneUsageDescription": "CLAN uses the microphone only while you record a voice message or are in a call you started or answered.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
-        "NSBluetoothAlwaysUsageDescription": "CLAN uses Bluetooth to find a nearby CLAN host that runs its own network. Only pairing messages are exchanged."
+        "NSBluetoothAlwaysUsageDescription": "CLAN uses Bluetooth to find a nearby CLAN host that runs its own network. Only pairing messages are exchanged.",
+        "UIBackgroundModes": [
+          "audio"
+        ]
       },
       "entitlements": {
         "com.apple.developer.networking.HotspotConfiguration": true
@@ -40,7 +45,13 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.CHANGE_NETWORK_STATE",
-        "android.permission.CHANGE_WIFI_STATE"
+        "android.permission.CHANGE_WIFI_STATE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.NEARBY_WIFI_DEVICES",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"
       ],
       "intentFilters": [
         {
@@ -79,7 +90,8 @@
         }
       ],
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO", "android.permission.SYSTEM_ALERT_WINDOW"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ],
       "allowBackup": false
     },
@@ -101,6 +113,20 @@
         }
       ],
       "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "CLAN uses the camera when you scan a CLAN code (a person, a CLAN or an optical file transfer) or take a photo for your Inbox.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "CLAN uses the microphone only while you record a voice message or are in a call you started or answered."
+        }
+      ],
       "@react-native-community/datetimepicker",
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",

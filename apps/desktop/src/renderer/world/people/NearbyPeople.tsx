@@ -4,14 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 import type { NearbyPersonView, PeopleContact } from '../../../shared.ts';
 import { api } from '../../App.tsx';
-import { errText, Initials, REL, usePeople } from './common.tsx';
+import { errText, Avatar, Initials, REL, usePeople } from './common.tsx';
 import { ChatInvite } from './Chats.tsx';
+import { OpticalTransfer } from './Optical.tsx';
 
 export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
   const [list] = usePeople(() => api.people.nearby());
   const [me, reloadMe] = usePeople(() => api.people.me());
   const [msg, setMsg] = useState(''), [err, setErr] = useState('');
   const [connected, setConnected] = useState<string | null>(null);
+  const [optical, setOptical] = useState(false);
   const [cc] = usePeople(() => connected ? api.people.contact(connected) : Promise.resolve(null), [connected]);
   useEffect(() => { const t = setInterval(() => void api.people.nearby().then(() => {}), 5000); return () => clearInterval(t); }, []);
   const act = (f: () => Promise<unknown>, done: string) => { setErr(''); void f().then(() => setMsg(done), (e) => setErr(errText(e))); };
@@ -35,7 +37,8 @@ export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
       </div>
       {cc && !list?.some((n) => n.key === cc.key) && <div role="list" aria-label="Connected by code" className="people-list">
         <NearbyCard n={{ key: cc.key, name: cc.name, profile: cc.profile ?? { key: cc.key, name: cc.name, avatar: null, updatedAt: 0 }, endpoint: '', relation: cc.relation, seenAt: cc.lastSeen, verified: cc.verified }} onChat={onChat} onError={setErr} /></div>}
-      <QrCard onConnected={(c) => { setConnected(c.key); setMsg(`Connected to ${c.name}. Their identity matched the code.`); }} onError={setErr} />
+      <QrCard onConnected={(c) => { setConnected(c.key); setMsg(`Connected to ${c.name}. Their identity matched the code.`); }} onError={setErr} onOptical={() => setOptical(true)} />
+      {optical ? <OpticalTransfer onClose={() => setOptical(false)} /> : <button onClick={() => setOptical(true)}>QR file transfer (no network needed)…</button>}
     </section>
   );
 }
@@ -45,7 +48,7 @@ function NearbyCard({ n, onChat, onError }: { n: NearbyPersonView; onChat(id: st
   const run = (f: () => Promise<unknown>) => void f().catch((e) => onError(errText(e)));
   return (
     <article role="listitem" className="card person" aria-label={n.name}>
-      <div className="row"><Initials name={n.name} /><div><b>{n.name}</b>{n.verified && <span className="chip" title="Identity checked by QR code"> ✓ verified</span>}
+      <div className="row"><Avatar k={n.key} name={n.name} /><div><b>{n.name}</b>{n.verified && <span className="chip" title="Identity checked by QR code"> ✓ verified</span>}
         <br /><small className="muted">{[p.university, p.department, p.course].filter(Boolean).join(' · ') || 'CLAN user'}{REL[rel] ? ` · ${REL[rel]}` : ''}</small></div></div>
       {p.bio && <p className="small-text">{p.bio}</p>}
       {p.interests?.length ? <p className="muted small-text">Interests: {p.interests.join(', ')}</p> : null}
@@ -59,10 +62,15 @@ function NearbyCard({ n, onChat, onError }: { n: NearbyPersonView; onChat(id: st
 }
 
 /** Your code and a scanner. A scanned code must match the identity and certificate the person presents. */
-function QrCard({ onConnected, onError }: { onConnected(c: PeopleContact): void; onError(e: string): void }) {
+function QrCard({ onConnected, onError, onOptical }: { onConnected(c: PeopleContact): void; onError(e: string): void; onOptical(): void }) {
   const [img, setImg] = useState<string | null>(null), [text, setText] = useState(''), [scanning, setScanning] = useState(false);
+  const [intent, setIntent] = useState<'profile' | 'friend' | 'chat'>('profile');
+  useEffect(() => { if (img) void api.people.qrImage(intent).then(setImg, () => {}); }, [intent]); // eslint-disable-line react-hooks/exhaustive-deps
   const video = useRef<HTMLVideoElement>(null);
-  const connect = (code: string) => void api.people.connectQr(code).then(onConnected, (e) => onError(errText(e)));
+  const connect = (code: string) => {
+    if (code.startsWith('CLQ1') || code.startsWith('clan://qrx/')) return onOptical(); // a QR transfer: open the receiver
+    void api.people.connectQr(code).then(onConnected, (e) => onError(errText(e)));
+  };
   const decode = (data: ImageData) => jsQR(data.data, data.width, data.height)?.data ?? null;
   useEffect(() => {
     if (!scanning) return;
@@ -89,10 +97,11 @@ function QrCard({ onConnected, onError }: { onConnected(c: PeopleContact): void;
     <div className="card stack" aria-label="QR code">
       <b>Connect with a code</b>
       <div className="row">
-        <button onClick={() => void api.people.qrImage().then(setImg, (e) => onError(errText(e)))}>Show my code</button>
+        <button onClick={() => void api.people.qrImage(intent).then(setImg, (e) => onError(errText(e)))}>Show my code</button>
         <button onClick={() => setScanning(!scanning)}>{scanning ? 'Stop camera' : 'Scan with camera'}</button>
         <label className="button">Scan a picture<input type="file" accept="image/*" hidden onChange={(e) => fromPicture(e.target.files?.[0])} /></label>
       </div>
+      {img && <div className="row" role="radiogroup" aria-label="What the code offers">{(['profile', 'friend', 'chat'] as const).map((x) => <button key={x} className="small" aria-pressed={intent === x} onClick={() => setIntent(x)}>{x === 'profile' ? 'My profile' : x === 'friend' ? 'Friend request' : 'Chat invitation'}</button>)}</div>}
       {img && <figure><img src={img} alt="Your CLAN profile code" width={220} height={220} /><figcaption className="muted small-text">Whoever scans this can find you on this network, even in Friends Only mode. <button className="link" onClick={() => void api.people.resetQr().then(() => api.people.qrImage().then(setImg))}>Make a new code</button> to stop old copies working.</figcaption></figure>}
       {scanning && <video ref={video} muted playsInline width={260} aria-label="Camera preview for scanning" />}
       <div className="row"><input aria-label="Paste a CLAN code" placeholder="clan://p/…" value={text} onChange={(e) => setText(e.target.value)} /><button disabled={!text.trim()} onClick={() => connect(text.trim())}>Connect</button></div>

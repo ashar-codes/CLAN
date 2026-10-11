@@ -55,6 +55,8 @@ export function peerClient(o: { endpoint: string; tls: { certificate: string; sp
   };
   return {
     profile: async () => (await (await call('POST', '/peer/profile', '{}')).json() as { profile: unknown }).profile,
+    /** Their picture as they show it to us (null if none); the caller verifies it against the signed profile. */
+    avatar: async () => { try { const r = await (await call('POST', '/peer/avatar', '{}')).json() as { mime: string; data: string }; return { mime: r.mime, data: Buffer.from(r.data, 'base64url') }; } catch (e) { if (e instanceof PeerHttpError && e.status === 404) return null; throw e; } },
     send: async (envelopes: PeerEnvelope[], intro?: unknown) => (await (await call('POST', '/peer/inbox', JSON.stringify({ envelopes, ...(intro ? { intro } : {}) }))).json() as { results: { ok: boolean; error?: string; final?: boolean }[] }).results,
     /** Resumable: continues `${dest}.part`; renames to `dest` when complete. The caller verifies the hash. */
     download: async (transferId: string, dest: string, size: number, onProgress?: (n: number) => void) => {

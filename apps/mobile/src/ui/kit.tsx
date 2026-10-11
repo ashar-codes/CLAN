@@ -1,7 +1,7 @@
 // CLAN's phone kit: the shared palette, room-like headers and a compact CLANmate — lightweight scenes and reduced-motion-aware entry. Touch targets
 // are ≥ 48 dp, every control has an accessibility label, and data reads come straight from @clan/core.
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AccessibilityInfo, Animated, Platform, Pressable, ScrollView, Text, TextInput, useColorScheme, View, type TextInputProps } from 'react-native';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AccessibilityInfo, Animated, Image, Platform, Pressable, ScrollView, Text, TextInput, useColorScheme, View, type TextInputProps } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { dark, light } from '@clan/design/palette';
 import { mateFor } from '@clan/design/avatar';
@@ -136,4 +136,10 @@ export function RoomBand({ title, sub, right }: { title: string; sub?: string; r
       <View style={{ height: 7, backgroundColor: c.wood }} /><View style={{ height: 12, backgroundColor: c.floor }} />
     </View>
   );
+}
+
+/** A person's picture once fetched and verified against their signed profile; their CLANmate until then. */
+export function PersonPic({ pic, name, size = 44 }: { pic: { mime: string; data: Uint8Array } | null | undefined; name: string; size?: number }) {
+  const uri = useMemo(() => { if (!pic) return null; let s = ''; for (let i = 0; i < pic.data.length; i += 0x8000) s += String.fromCharCode(...pic.data.subarray(i, i + 0x8000)); return `data:${pic.mime};base64,${btoa(s)}`; }, [pic]);
+  return uri ? <Image source={{ uri }} accessibilityIgnoresInvertColors accessible={false} style={{ width: size, height: size, borderRadius: size / 2 }} /> : <Mate name={name} size={size} />;
 }

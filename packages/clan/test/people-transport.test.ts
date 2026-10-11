@@ -152,4 +152,27 @@ describe('people over the network', () => {
     a.p.setVisibility('invisible'); await a.rt.refreshDiscovery();
     await wait(() => !b.rt.nearby().some((n) => n.key === a.key), 20_000);
   }, 60_000);
+
+  it.skipIf(!lan)('presence: Friends Only friends find each other automatically; an advertiser never learns who looked', async () => {
+    const mk = async (name: string) => {
+      const d = setup(), signer = nodeSigner(newEd25519().privatePkcs8), tls = await createClassroomTls(`p-${name}`, Date.now(), 1e10);
+      d.app.people.setSigner(signer); d.app.people.updateProfile({ name });
+      const rt = await startPeopleRuntime({ people: d.app.people, signer, tls, dir: join(d.storageDir, 'people'), discover: true, endpoints: (port) => [`${lan}:${port}`], tickMs: 300 });
+      stops.push(() => rt.stop());
+      return { p: d.app.people, rt, key: signer.publicKey };
+    };
+    const a = await mk('Ayesha'), b = await mk('Bashir'), m = await mk('Lurker');
+    m.p.setVisibility('everyone'); await m.rt.refreshDiscovery();
+    await a.rt.connectQr(b.rt.myQr());
+    a.p.sendFriendRequest(b.key); await a.rt.tick();
+    await wait(() => b.p.contacts('requests').length === 1, 10_000);
+    b.p.acceptFriend(a.key); await b.rt.tick();
+    await wait(() => a.p.isFriend(b.key) && b.p.matchPresence('x'.repeat(16), a.p.presenceTagFor('x'.repeat(16))) === a.key && a.p.matchPresence('y'.repeat(16), b.p.presenceTagFor('y'.repeat(16))) === b.key, 15_000);
+    await a.rt.refreshDiscovery(); await b.rt.refreshDiscovery(); // fresh adverts with tags friends now recognise
+    await wait(() => a.rt.nearby().some((n) => n.key === b.key) && b.rt.nearby().some((n) => n.key === a.key), 30_000);
+    // they also saw the public advertiser, but under throwaway identities
+    await wait(() => a.rt.nearby().some((n) => n.key === m.key), 30_000);
+    expect(m.p.contact(a.key)).toBeNull();
+    expect(m.p.contact(b.key)).toBeNull();
+  }, 90_000);
 });

@@ -582,3 +582,7 @@ button.link.ai-link { border: 0; }
 .call-panel[data-phase='ringing'] { outline: 2px solid var(--ok); }
 .tabs-main .badge { margin-left: .25rem; }
 @media (max-width: 760px) { .people-cols, .chat-split { grid-template-columns: 1fr; } .msg { max-width: 88%; } }
+/* QR transfer */
+.qr-video { max-width: 100%; border-radius: 12px; background: #000; }
+.qr-frame { background: #fff; padding: 6px; border-radius: 8px; image-rendering: pixelated; max-width: 100%; height: auto; }
+.ok { color: var(--ok); font-weight: 700; }

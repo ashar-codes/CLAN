@@ -45,14 +45,20 @@
 * The SFU publish test spends ~15 s of its 20 s budget waiting for LiveKit to refuse an unauthorised publish (flake risk on
   a loaded machine).
 
-### Phase 14.3 A+B (people, chats, files, voice, calls)
-* Phones run no listener: phone-to-phone contact is impossible in this build; phones reach people on computers only,
-  and receive only while the app is in the foreground (no background connections by design).
-* Phones: no camera QR scanner (code text is pasted), no voice-note recording/playback, no calls — each needs a native
-  module and device validation (expo-camera, expo-audio, the existing react-native-webrtc). Desktop has all three.
-* Temporary chats rely on the other device honouring the agreed expiry; screenshots/saved copies cannot be prevented.
-* Profile pictures stay on the owner's device (peers see initials).
-* A friendship synced to your other linked devices is not known to the friend's devices until each of your devices
-  contacts them (each device key is a separate identity to them).
-* Calls are LAN-only (no STUN/TURN); networks with client isolation block discovery, chats and calls alike.
-* Nothing here has run on macOS/Windows/Android/iOS hardware yet — see PHASE_14_3_HARDWARE_TESTS.md.
+### Phase 14.3 (people, chats, files, voice, calls, router-free links, QR)
+* Native code: Android Kotlin is only type-checked in the cloud (Android 16 API surface + Expo DSL mirrors); no Gradle
+  build, no iOS/Swift compile, no device run. Every radio path (Wi-Fi Direct, Wi-Fi Aware, Apple peer-to-peer, hotspot,
+  foreground service) is unverified on hardware.
+* iPhone ↔ Android without a router needs a hotspot (Android creates; iPhone joins) or the optical QR transfer; Wi-Fi
+  Aware between them (iOS 26) is not implemented. BLE is not used for people discovery.
+* iPhone cannot create a hotspot from an app; iOS stops listening when CLAN is suspended (no background availability
+  beyond the short grace time and active calls).
+* Wi-Fi Direct needs the other person to accept the Android system prompt each time a group forms.
+* Calls are LAN/direct only (no STUN/TURN); networks with client isolation block calls, links and discovery alike.
+* Desktop voice notes are AAC/MP4 only where the OS provides an AAC encoder (macOS/Windows); Linux falls back to
+  WebM/Opus, which iPhones may not play.
+* Optical transfer is limited to 2 MB (best ≤ 256 KB); speed depends on cameras and screens (not measured on hardware).
+* Temporary chats rely on the other device honouring the agreed expiry; screenshots/copies cannot be prevented.
+* A friend's other device appears as a separate chat thread (same person, separate conversation history per device).
+* Desktop E2E on Linux has 6 pre-existing environment/selector failures (screen sharing ×3, WebGL ×2, board-tape
+  `Leave` selector); they are reported, not hidden.

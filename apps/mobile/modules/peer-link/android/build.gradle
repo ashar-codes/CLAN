@@ -1,0 +1,15 @@
+// CLAN peer transport (Android): sockets for clan-link/1, NSD, Wi-Fi Direct, Wi-Fi Aware, local-only hotspot and the
+// "stay available" foreground service. Kotlin is compile-checked in the cloud against the Android 36 API surface;
+// the full Gradle build and every radio path still need a real toolchain and devices (docs/PHASE_14_3_HARDWARE_TESTS.md).
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.peerlink'
+version = '0.1.0'
+
+android {
+  defaultConfig { versionCode 1; versionName '0.1.0' }
+  namespace "expo.modules.peerlink"
+}

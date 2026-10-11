@@ -119,7 +119,7 @@ describe('people: private conversations', () => {
 
   it('queued messages survive restart and deliver later; failed sends can be retried', () => {
     const clock = { t: 1_000_000 }, a = person('Aisha', clock), b = person('Bilal', clock);
-    meet(a, b); a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a);
+    meet(a, b); a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a); flush(a, b); // + presence keys
     const conv = a.p.conversations()[0]!.id;
     const m = a.p.sendText(conv, 'while you were away');
     const d = a.p.due()[0]!;
@@ -192,7 +192,7 @@ describe('people: files, voice notes, calls', () => {
     const clock = { t: 1_000_000 }, a = person('Aisha', clock), b = person('Bilal', clock);
     meet(a, b);
     expect(() => a.p.callSignal(b.key, { kind: 'call.invite', callId: randomUUID(), sdp: 'v=0' })).toThrow(/call friends/);
-    a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a);
+    a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a); flush(a, b);
     const conv = a.p.conversations()[0]!.id;
     const ogg = join(a.storageDir, 'v.webm'); writeFileSync(ogg, Buffer.alloc(20_000, 1));
     const v = await a.p.offerFile(conv, ogg, { name: 'Voice message.webm', mime: 'audio/webm', voiceMs: 4200 });
@@ -213,7 +213,7 @@ describe('people: files, voice notes, calls', () => {
   it('friends and blocks follow the owner to linked devices through personal sync providers', () => {
     const clock = { t: 1_000_000 }, a = person('Aisha', clock), b = person('Bilal', clock), a2 = person('Aisha laptop', clock);
     meet(a, b); a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a);
-    const prov = a.p.syncProviders()[0]!, other = a2.p.syncProviders()[0]!;
+    const prov = a.p.syncProviders().find((s) => s.kind === 'people-relation')!, other = a2.p.syncProviders().find((s) => s.kind === 'people-relation')!;
     for (const [id, payload] of prov.all('')) other.apply('', id, payload, { merge: false });
     expect(a2.p.contacts('friends')).toMatchObject([{ key: b.key, name: 'Bilal' }]);
   });
@@ -221,3 +221,57 @@ describe('people: files, voice notes, calls', () => {
 
 // the envelope type is exported for transports
 export type { PeerEnvelope };
+
+describe('people: presence', () => {
+  it('only friends can recognise anonymous adverts; presence keys come only from friends; removal rotates the key', () => {
+    const clock = { t: 1_000_000 }, a = person('Aisha', clock), b = person('Bilal', clock), c = person('Chen', clock);
+    meet(a, b); a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a); flush(a, b); flush(b, a);
+    const r = 'AbCdEfGhIjKlMnOp';
+    expect(b.p.matchPresence(r, a.p.presenceTagFor(r))).toBe(a.key);
+    expect(a.p.matchPresence(r, b.p.presenceTagFor(r))).toBe(b.key);
+    expect(c.p.matchPresence(r, a.p.presenceTagFor(r))).toBeNull(); // a stranger sees random values
+    expect(a.p.presenceTagFor('ZZZZZZZZZZZZZZZZ')).not.toBe(a.p.presenceTagFor(r)); // unlinkable across rotations
+    meet(c, a);
+    const forged = signEnvelope(c.signer, { id: randomUUID(), to: a.key, at: clock.t, body: { kind: 'presence.key', key: 'A'.repeat(43) } });
+    expect(() => a.p.receive(forged, c.key)).toThrow(/friends/);
+    a.p.removeFriend(b.key); flush(a, b);
+    expect(b.p.matchPresence(r, a.p.presenceTagFor(r))).toBeNull();
+    expect(a.p.matchPresence(r, b.p.presenceTagFor(r))).toBeNull();
+  });
+});
+
+describe("people: a friend's other devices", () => {
+  it('self-signed device statements sync between own devices, are offered to friends, and need an explicit yes', () => {
+    const clock = { t: 1_000_000 }, a1 = person('Aisha laptop', clock), a2 = person('Aisha phone', clock), f = person('Farah', clock), m = person('Mallory', clock);
+    // Aisha's two devices share an account; each signs its own statement; the rows sync between them
+    a1.p.announceDevice('acct-aisha', 'Aisha’s laptop'); a2.p.announceDevice('acct-aisha', 'Aisha’s phone');
+    const prov = (x: P) => x.p.syncProviders().find((s) => s.kind === 'people-device')!;
+    for (const [id, row] of prov(a2).all('')) prov(a1).apply('', id, row, { merge: false });
+    // a device cannot be claimed by someone else: Mallory's key with a statement signed by Aisha's laptop is dropped
+    prov(a1).apply('', m.key, { name: 'Not Mallory', account: 'acct-aisha', sig: a1.signer.sign(new TextEncoder().encode(`clan-device/1|acct-aisha|${m.key}`)), at: 1 }, { merge: false });
+    expect(prov(a1).one('', m.key)).toBeNull();
+    // Farah and the laptop are friends; the laptop shares the account's devices
+    meet(a1, f); a1.p.sendFriendRequest(f.key); flush(a1, f); f.p.acceptFriend(a1.key); flush(f, a1); flush(a1, f); flush(f, a1);
+    expect(a1.p.shareDeviceLinks()).toBe(1);
+    expect(a1.p.shareDeviceLinks()).toBe(0); // unchanged set: nothing re-sent
+    flush(a1, f);
+    const offers = f.p.deviceOffers();
+    expect(offers).toEqual([expect.objectContaining({ fromKey: a1.key, key: a2.key, name: 'Aisha’s phone', fromName: 'Aisha laptop' })]);
+    expect(f.p.isFriend(a2.key)).toBe(false); // nothing changes without Farah's yes
+    // the phone already knows Farah as a friend (relations sync between Aisha's devices)
+    const rel = a1.p.syncProviders().find((s) => s.kind === 'people-relation')!, rel2 = a2.p.syncProviders().find((s) => s.kind === 'people-relation')!;
+    for (const [id, row] of rel.all('')) rel2.apply('', id, row, { merge: false });
+    meet(f, a2); meet(a2, f);
+    f.p.acceptDeviceOffer(a1.key, a2.key);
+    expect(f.p.isFriend(a2.key)).toBe(true);
+    flush(f, a2); flush(a2, f);
+    // now the phone and Farah message each other, and recognise each other's adverts
+    const conv = f.p.conversations().find((c) => c.peerKey === a2.key)!.id;
+    f.p.sendText(conv, 'hi on your phone'); expect(flush(f, a2)).toEqual([{ kind: 'msg.text', result: 'ok' }]);
+    expect(f.p.matchPresence('abcdefghijklmnop', a2.p.presenceTagFor('abcdefghijklmnop'))).toBe(a2.key);
+    // device lists only from friends
+    meet(m, f);
+    const env = signEnvelope(m.signer, { id: randomUUID(), to: f.key, at: clock.t, body: { kind: 'device.links', account: 'x', devices: [] } });
+    expect(() => f.p.receive(env, m.key)).toThrow(/friends/);
+  });
+});

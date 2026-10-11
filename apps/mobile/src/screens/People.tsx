@@ -1,17 +1,23 @@
-// People on the phone: connect to a computer by its code, friends and requests, and personal chats with files.
-// A phone is never discoverable and accepts no connections; it reaches people on their computers. Phone-to-phone
-// contact, voice notes, calls and camera QR scanning need native additions that are not in this build (see docs).
+// People on the phone: visibility and Nearby availability, codes (show and scan), direct connections without a router
+// (Wi-Fi Direct, Wi-Fi Aware, Apple peer-to-peer, hotspots), friends and requests, personal chats with files and voice
+// notes, calls, and QR file transfer.
 import { useEffect, useState } from 'react';
-import { Alert, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
-import { safetyNumber, TEMP_TTLS } from '@classroom/protocol';
+import { parseProfileQr, profileQr, safetyNumber, TEMP_TTLS } from '@classroom/protocol';
 import type { Contact, PeopleMessage } from '@clan/core';
 import { phoneClan } from '../core/clan';
 import { phonePeople } from '../people/native';
 import { verify } from '../FileActions';
-import { act, Btn, Card, Err, Field, H1, Mate, Muted, Row, Screen, useC, useData, when } from '../ui/kit';
+import { nearby, parseWifiQr, wifiQr } from '../people/nearby';
+import { QrImage, QrScanner } from '../ui/qr';
+import { OpticalScreen } from './Optical';
+import { usePhoneCall } from '../people/Call';
+import { VoiceNotePlayer, VoiceRecorder } from '../people/Voice';
+import { act, bump, Btn, Card, Err, Field, H1, Muted, PersonPic, Row, Screen, useC, useData, when } from '../ui/kit';
 
 type Seg = 'nearby' | 'chats' | 'friends';
 const people = () => phoneClan().people;
@@ -25,6 +31,8 @@ export function PeopleScreen() {
   const unread = useData(() => people().conversations().reduce((n, c) => n + c.unread + (c.state === 'invited_in' ? 1 : 0), 0)) ?? 0;
   const requests = useData(() => people().contacts('requests').filter((r) => r.relation === 'incoming').length) ?? 0;
   const open = (id: string) => { setChat(id); setSeg('chats'); };
+  const [optical, setOptical] = useState(false);
+  if (optical) return <OpticalScreen onBack={() => setOptical(false)} />;
   if (chat) return <ChatView id={chat} onBack={() => setChat(null)} />;
   return (
     <Screen>
@@ -35,36 +43,116 @@ export function PeopleScreen() {
         <Btn small label={requests ? `Friends · ${requests}` : 'Friends'} on={seg === 'friends'} onPress={() => setSeg('friends')} />
       </Row>
       <Err msg={err} />
-      {seg === 'nearby' ? <Nearby onChat={open} /> : seg === 'friends' ? <Friends onChat={open} /> : <ChatList onOpen={open} />}
+      {seg === 'nearby' ? <Nearby onChat={open} onOptical={() => setOptical(true)} /> : seg === 'friends' ? <Friends onChat={open} /> : <ChatList onOpen={open} />}
     </Screen>
   );
 }
 
-function Nearby({ onChat }: { onChat(id: string): void }) {
-  const [code, setCode] = useState(''), [busy, setBusy] = useState(false), [err, setErr] = useState<string | null>(null), [ok, setOk] = useState<string | null>(null);
-  const met = useData(() => people().contacts('all').filter((c) => c.relation === 'none').slice(0, 20)) ?? [];
-  const connect = async () => {
-    setBusy(true); setErr(null); setOk(null);
-    try { const c = await (await phonePeople()).connectQr(code); setOk(`Connected to ${c.name}. Their identity matched the code.`); setCode(''); }
-    catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): void }) {
+  const c = useC();
+  const [scan, setScan] = useState(false), [show, setShow] = useState<null | 'profile' | 'friend' | 'chat'>(null);
+  const [busy, setBusy] = useState(false), [err, setErr] = useState<string | null>(null), [ok, setOk] = useState<string | null>(null);
+  const [pendingWifi, setPendingWifi] = useState<{ ssid: string; passphrase: string } | null>(null);
+  const [connected, setConnected] = useState<{ key: string; intent: string } | null>(null);
+  const met = useData(() => people().contacts('all').filter((x) => x.relation === 'none').slice(0, 20)) ?? [];
+  const vis = useData(() => people().visibility());
+  const myCode = useData(() => show ? profileQr({ key: people().myKey(), endpoints: [], links: nearby.myAddrs(), name: people().myProfile().name, invite: people().inviteToken(), intent: show }) : null);
+  const entries = useData(() => [...nearby.entries.values()].sort((x, y) => Number(y.friend) - Number(x.friend))) ?? [];
+  const caps = nearby.caps;
+  const run = async (f: () => Promise<unknown>, done?: string) => { setBusy(true); setErr(null); setOk(null); try { await f(); if (done) setOk(done); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); bump(); } };
+  /** Every CLAN code this phone understands, from the camera or a picture. */
+  const onCode = (t: string) => {
+    if (t.startsWith('clan://p/')) {
+      setScan(false);
+      void run(async () => { const x = await (await phonePeople()).connectQr(t); const q = parseProfileQr(t); setConnected({ key: x.key, intent: q?.intent ?? 'profile' }); setOk(`Connected to ${x.name}. Their identity matched the code.`); });
+      return true;
+    }
+    const wifi = parseWifiQr(t);
+    if (wifi) { setScan(false); setPendingWifi(wifi); return true; }
+    if (t.startsWith('CLQ1') || t.startsWith('clan://qrx/')) { setScan(false); onOptical(); return true; }
+    if (t.startsWith('clan://link?')) { setScan(false); setOk('That is a device-link code. Open Me › My Devices › Link to use it.'); return true; }
+    if (t.startsWith('clan://direct#')) { setScan(false); void Linking.openURL(t); return true; } // joining a CLAN Direct network (existing flow)
+    setErr('That code is not a CLAN code.');
   };
+  const intended = connected && people().contact(connected.key);
   return (
     <>
+      <Card title="Who can find you">
+        <Row gap={6}>
+          <Btn small label="Everyone nearby (1 h)" on={vis === 'everyone'} onPress={() => setErr(act(() => people().setVisibility('everyone', 3_600_000)))} />
+          <Btn small label="Friends only" on={vis === 'friends'} onPress={() => setErr(act(() => people().setVisibility('friends')))} />
+          <Btn small label="Invisible" on={vis === 'invisible'} onPress={() => setErr(act(() => people().setVisibility('invisible')))} />
+        </Row>
+        <Muted small>Everyone Nearby shows only fields you mark for everyone and switches back by itself. Avoid it on public networks. Others only ever see a random id unless you let them in.</Muted>
+        <Muted>Nearby on this phone</Muted>
+        <Row gap={6}>
+          <Btn small label="Off" on={nearby.mode === 'off'} onPress={() => nearby.setMode('off')} />
+          <Btn small label="While using CLAN" on={nearby.mode === 'app'} onPress={() => nearby.setMode('app')} />
+          <Btn small label="Stay available in a session" on={nearby.mode === 'session'} onPress={() => nearby.setMode('session')} />
+        </Row>
+        <Muted small>{Platform.OS === 'android' ? 'During an open chat, call or transfer, Android keeps it connected with a visible notification. Nothing runs when no session is open.' : 'iPhone keeps a session only while CLAN is open (plus a short moment after you leave, and during a call). Nobody can reach you while CLAN is closed.'}</Muted>
+      </Card>
+
       <Card title="Connect with a code">
-        <Muted>On the other person’s computer: Nearby › Show my code. Paste the code text here (camera scanning on phones comes in a later build). You must be on the same Wi-Fi.</Muted>
-        <Field label="CLAN code" value={code} onChange={setCode} autoCapitalize="none" autoCorrect={false} placeholder="clan://p/…" />
-        <Btn primary label={busy ? 'Connecting…' : 'Connect'} disabled={busy || !code.trim()} onPress={() => void connect()} />
-        {ok && <Text accessibilityLiveRegion="polite">{ok}</Text>}<Err msg={err} />
+        <Row gap={6}>
+          <Btn primary label="Scan a code" onPress={() => { setScan(true); setShow(null); }} />
+          <Btn label="Show my code" onPress={() => { setShow('profile'); setScan(false); }} />
+          <Btn label="QR file transfer" onPress={onOptical} />
+        </Row>
+        {scan && <QrScanner hint="A person’s code, a hotspot’s Wi-Fi code, a CLAN or a QR transfer." onClose={() => setScan(false)} onCode={onCode} />}
+        {show && (myCode && nearby.myAddrs().length ? <>
+          <Row gap={6}>{(['profile', 'friend', 'chat'] as const).map((x) => <Btn key={x} small on={show === x} label={x === 'profile' ? 'My profile' : x === 'friend' ? 'Friend request' : 'Chat invitation'} onPress={() => setShow(x)} />)}</Row>
+          <QrImage text={myCode} label="Your CLAN code" />
+          <Muted small>Whoever scans this can reach you on this network, even in Friends Only mode. Make a new code to stop old copies working.</Muted>
+          <Btn small label="Make a new code" onPress={() => { people().inviteToken(true); bump(); }} />
+        </> : <Muted>{nearby.mode === 'off' ? 'Turn Nearby on to show a code others can connect to.' : 'Join a Wi-Fi or hotspot (or start one below) to show a code others can connect to. QR file transfer works without any network.'}</Muted>)}
+        {pendingWifi && <View style={{ gap: 6 }}><Text style={{ color: c.text }}>Join the hotspot “{pendingWifi.ssid}”? CLAN uses it only to reach people on it; it has no internet.</Text>
+          <Row><Btn small primary label="Join" onPress={() => { const w = pendingWifi; setPendingWifi(null); void run(() => nearby.joinHotspot(w.ssid, w.passphrase), `Joined ${w.ssid}. People on it appear below.`); }} /><Btn small label="Cancel" onPress={() => setPendingWifi(null)} /></Row></View>}
+        {intended && connected!.intent !== 'profile' && <View style={{ gap: 6 }}>
+          <Text style={{ color: c.text }}>{intended.name} {connected!.intent === 'friend' ? 'offered to be friends.' : 'invited you to chat.'}</Text>
+          {connected!.intent === 'friend' && intended.relation === 'none' && <Btn small primary label="Send friend request" onPress={() => { setConnected(null); setErr(act(() => people().sendFriendRequest(intended.key))); void phonePeople().then((r) => r.tick()); }} />}
+          {connected!.intent === 'chat' && <Btn small primary label="Start a chat" onPress={() => { setConnected(null); onChat(people().inviteChat(intended.key)); }} />}
+        </View>}
+        {ok && <Text accessibilityLiveRegion="polite" style={{ color: c.text }}>{ok}</Text>}<Err msg={err} />
       </Card>
-      <Card title="Your phone and Nearby">
-        <Muted>Phones are never listed in Nearby and cannot be reached by others directly — you contact people on their computers, and they reply while CLAN is open on your phone.</Muted>
+
+      <Card title="No Wi-Fi network?">
+        {Platform.OS === 'ios' ? <Muted>iPhones with CLAN open find each other directly (Apple peer-to-peer Wi-Fi) — keep Wi-Fi and Bluetooth on; no network needed. For Android or a computer, join their hotspot by scanning its Wi-Fi code, or turn on Settings › Personal Hotspot.</Muted>
+          : <Muted>Phones can connect directly. Choose what both phones support; the other person must be on this screen too.</Muted>}
+        <Row gap={6}>
+          {caps?.wifiDirect && <Btn small label="Wi-Fi Direct" disabled={busy} onPress={() => void run(() => nearby.startDirect())} />}
+          {caps?.wifiAware && <Btn small label="Wi-Fi Aware" disabled={busy || !caps.wifiAwareAvailable} onPress={() => void run(() => nearby.startAware())} />}
+          {caps?.localHotspot && !nearby.hotspot && <Btn small label="Start a hotspot" disabled={busy} onPress={() => void run(() => nearby.startHotspot())} />}
+          {nearby.hotspot && <Btn small label="Stop hotspot" onPress={() => nearby.stopHotspot()} />}
+          <Btn small label="Join a hotspot" onPress={() => { setScan(true); setShow(null); }} />
+        </Row>
+        {caps?.wifiAware && !caps.wifiAwareAvailable && <Muted small>Wi-Fi Aware is supported but off right now (turn on Wi-Fi and Location).</Muted>}
+        {!caps && <Muted small>This build has no direct-connection module; use the same Wi-Fi, a hotspot or QR transfer.</Muted>}
+        {nearby.hotspot && <View style={{ gap: 6 }}><Muted>Others scan this to join your hotspot (no internet; it closes when you stop it):</Muted><QrImage text={wifiQr(nearby.hotspot.ssid, nearby.hotspot.passphrase)} size={200} label="Hotspot Wi-Fi code" /><Muted small>Network {nearby.hotspot.ssid}. Then show them your CLAN code.</Muted></View>}
+        {!!nearby.status && <Muted small>{nearby.status}</Muted>}
       </Card>
-      {met.map((c) => <PersonCard key={c.key} c={c} onChat={onChat} />)}
+
+      {entries.map((e) => (
+        <Card key={e.id}>
+          <Row><PersonPic pic={e.key ? people().avatarOf(e.key) : null} name={e.name} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', color: c.text }}>{e.name}{e.friend ? ' · friend' : ''}</Text>
+            <Muted small>{e.via === 'direct' ? 'Wi-Fi Direct' : e.via === 'aware' ? 'Wi-Fi Aware' : e.via === 'apple' ? 'Apple peer-to-peer' : 'Same network'}{e.key && nearby.state(e.key) ? ` · ${STATE[nearby.state(e.key)!]}` : ''}{e.profile?.university ? ` · ${e.profile.university}` : ''}</Muted></View></Row>
+          <Row gap={6}>
+            {e.via === 'direct' && !e.key && <Btn small label="Connect directly" onPress={() => void run(() => nearby.connectDirect(e))} />}
+            {e.via === 'aware' && !e.key && <Btn small label="Connect" onPress={() => void run(() => nearby.connectAware(e.address!.replace('aware-peer:', ''), e))} />}
+            {e.key && !e.friend && people().contact(e.key)?.relation === 'none' && <Btn small label="Add friend" onPress={() => void run(async () => { await nearby.connectAs(e); people().sendFriendRequest(e.key!); await nearby.cm?.tick(); }, 'Friend request sent.')} />}
+            {e.key && <Btn small label="Chat" onPress={() => void run(async () => { if (!nearby.cm?.connected(e.key!)) await nearby.connectAs(e); const x = people().conversations().find((v) => v.peerKey === e.key && v.state === 'active'); onChat(x ? x.id : people().inviteChat(e.key!)); })} />}
+          </Row>
+        </Card>
+      ))}
+      {met.map((x) => <PersonCard key={x.key} c={x} onChat={onChat} />)}
     </>
   );
 }
+const STATE: Record<string, string> = { connecting: 'Connecting…', connected: 'Connected', reconnecting: 'Reconnecting…', offline: 'Offline', failed: 'Failed' };
 
 function PersonCard({ c, onChat }: { c: Contact; onChat(id: string): void }) {
+  const calls = usePhoneCall();
+  const pic = useData(() => people().avatarOf(c.key));
   const [err, setErr] = useState<string | null>(null), [invite, setInvite] = useState(false), [confirm, setConfirm] = useState<'remove' | 'block' | null>(null);
   const myKey = useData(() => people().myKey());
   const run = (f: () => unknown) => { setErr(act(f)); void phonePeople().then((r) => r.tick()); };
@@ -72,8 +160,8 @@ function PersonCard({ c, onChat }: { c: Contact; onChat(id: string): void }) {
   const chat = () => { const x = people().conversations().find((v) => v.peerKey === c.key && v.state === 'active'); if (x) onChat(x.id); else setInvite(true); };
   return (
     <Card>
-      <Row><Mate name={c.name} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', fontSize: 16 }}>{c.name}{c.verified ? ' ✓' : ''}</Text>
-        <Muted small>{[p?.university, p?.department, p?.course].filter(Boolean).join(' · ') || (REL[c.relation] || (c.blocked ? 'Blocked' : 'Not connected'))}</Muted></View></Row>
+      <Row><PersonPic pic={pic} name={c.name} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', fontSize: 16 }}>{c.name}{c.verified ? ' ✓' : ''}</Text>
+        <Muted small>{[p?.university, p?.department, p?.course].filter(Boolean).join(' · ') || (REL[c.relation] || (c.blocked ? 'Blocked' : 'Not connected'))}{nearby.state(c.key) ? ` · ${STATE[nearby.state(c.key)!]}` : ''}</Muted></View></Row>
       {p?.bio ? <Muted>{p.bio}</Muted> : null}
       {myKey && <Muted small>Safety number: {safetyNumber(myKey, c.key)}{c.verified ? ' · verified' : ''}</Muted>}
       <Row gap={6}>
@@ -81,6 +169,7 @@ function PersonCard({ c, onChat }: { c: Contact; onChat(id: string): void }) {
         {c.relation === 'incoming' && <><Btn small primary label="Accept" onPress={() => run(() => people().acceptFriend(c.key))} /><Btn small label="Decline" onPress={() => run(() => people().rejectFriend(c.key))} /></>}
         {c.relation === 'outgoing' && <Btn small label="Cancel request" onPress={() => run(() => people().cancelFriendRequest(c.key))} />}
         {!c.blocked && c.relation !== 'incoming' && <Btn small label="Chat" onPress={chat} />}
+        {c.relation === 'friend' && !c.blocked && <Btn small label="Call" disabled={calls.active} onPress={() => calls.call(c.key, c.name)} />}
         {!c.verified && !c.blocked && <Btn small label="Numbers match" a11y="The safety numbers match" onPress={() => run(() => people().markVerified(c.key))} />}
         {c.relation === 'friend' && <Btn small label="Remove" onPress={() => setConfirm('remove')} />}
         {c.blocked ? <Btn small label="Unblock" onPress={() => run(() => people().unblock(c.key))} /> : <Btn small danger label="Block" onPress={() => setConfirm('block')} />}
@@ -110,14 +199,29 @@ function InviteTerms({ onSend, onCancel }: { onSend(mode: 'permanent' | 'tempora
 function Friends({ onChat }: { onChat(id: string): void }) {
   const list = useData(() => [...people().contacts('requests'), ...people().contacts('friends'), ...people().contacts('blocked')]) ?? [];
   const me = useData(() => people().myProfile());
+  const offers = useData(() => people().deviceOffers()) ?? [];
+  const c = useC();
   const [name, setName] = useState(me?.name ?? ''), [err, setErr] = useState<string | null>(null);
   return (
     <>
-      {!list.length && <Muted>No friends yet. Connect to someone’s computer with their code in Nearby.</Muted>}
+      {offers.map((o) => (
+        <Card key={`${o.fromKey}:${o.key}`} title="A friend’s other device">
+          <Text style={{ color: c.text }}><Text style={{ fontWeight: '700' }}>{o.name}</Text> — {o.fromName} says this device is also theirs.</Text>
+          <Muted small>Safety number for that device: {o.safety}. If you can, compare it on their device first.</Muted>
+          <Row><Btn small primary label={`Trust as ${o.fromName}`} onPress={() => { setErr(act(() => people().acceptDeviceOffer(o.fromKey, o.key))); void phonePeople().then((r) => r.tick()); }} /><Btn small label="Not now" onPress={() => setErr(act(() => people().declineDeviceOffer(o.fromKey, o.key)))} /></Row>
+        </Card>
+      ))}
+      {!list.length && <Muted>No friends yet. Find people in Nearby or scan their code.</Muted>}
       {list.map((c) => <PersonCard key={c.key} c={c} onChat={onChat} />)}
       <Card title="Your name for people">
         <Field label="Name" value={name} onChange={setName} maxLength={80} />
         <Btn small label="Save" disabled={!name.trim()} onPress={() => setErr(act(() => people().updateProfile({ name: name.trim() })))} />
+        <Btn small label="Change picture" onPress={() => void (async () => {
+          const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+          const a = !r.canceled && r.assets[0]; if (!a) return;
+          try { await people().setAvatar(a.uri, a.mimeType === 'image/png' ? 'image/png' : 'image/jpeg'); bump(); } catch (e) { setErr((e as Error).message); }
+        })()} />
+        <Muted small>Your picture is shown to people who can see your profile, and sent only to them.</Muted>
         <Err msg={err} />
       </Card>
     </>
@@ -129,7 +233,7 @@ function ChatList({ onOpen }: { onOpen(id: string): void }) {
   if (!convs.length) return <Muted>No chats yet. Start one from Friends or Nearby.</Muted>;
   return <>{convs.map((c) => (
     <Card key={c.id}>
-      <Row><Mate name={c.peerName} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700' }}>{c.peerName}{c.unread ? ` · ${c.unread} new` : ''}</Text>
+      <Row><PersonPic pic={people().avatarOf(c.peerKey)} name={c.peerName} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700' }}>{c.peerName}{c.unread ? ` · ${c.unread} new` : ''}</Text>
         <Muted small>{c.state === 'invited_in' ? 'Invites you to chat' : c.state === 'invited_out' ? 'Invitation sent' : c.state === 'ended' ? 'Ended' : c.state === 'declined' ? 'Declined' : (c.lastText ?? ttlText(c.ttlMs))}</Muted></View>
         <Btn small label="Open" a11y={`Open chat with ${c.peerName}`} onPress={() => onOpen(c.id)} /></Row>
     </Card>
@@ -145,6 +249,7 @@ function roomFor(bytes: number) {
 const PAGE = 40;
 function ChatView({ id, onBack }: { id: string; onBack(): void }) {
   const c = useC();
+  const calls = usePhoneCall();
   const [limit, setLimit] = useState(PAGE), [text, setText] = useState(''), [err, setErr] = useState<string | null>(null);
   const conv = useData(() => people().conversation(id));
   const msgs = useData(() => people().page(id, { limit })) ?? [];
@@ -168,6 +273,7 @@ function ChatView({ id, onBack }: { id: string; onBack(): void }) {
     <Screen>
       <Row><Btn small label="← Chats" onPress={onBack} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '800', fontSize: 18, color: c.text }}>{conv.peerName}</Text><Muted small>{ttlText(conv.ttlMs)}</Muted></View></Row>
       <Row gap={6}>
+        {(conv.friend || conv.state === 'active') && <Btn small label="Call" disabled={calls.active} onPress={() => calls.call(conv.peerKey, conv.peerName)} />}
         {conv.state === 'active' && <Btn small label="End chat" onPress={() => confirm('end')} />}
         <Btn small label="Clear history" onPress={() => confirm('clear')} />
         <Btn small danger label="Remove" onPress={() => confirm('remove')} />
@@ -180,7 +286,7 @@ function ChatView({ id, onBack }: { id: string; onBack(): void }) {
       <Err msg={err} />
       {conv.state === 'active' ? <>
         <Field label="Message" value={text} onChange={setText} multiline maxLength={8000} />
-        <Row><Btn primary label="Send" disabled={!text.trim()} onPress={send} /><Btn label="📎 File" a11y="Send a file" onPress={() => void sendFile()} /></Row>
+        <Row><Btn primary label="Send" disabled={!text.trim()} onPress={send} /><Btn label="📎 File" a11y="Send a file" onPress={() => void sendFile()} /><VoiceRecorder convId={id} onError={setErr} onSent={tick} /></Row>
       </> : conv.state !== 'invited_in' && conv.state !== 'invited_out' ? <Muted>This chat is closed.</Muted> : null}
     </Screen>
   );
@@ -203,7 +309,7 @@ function Bubble({ m, onError, onAct }: { m: PeopleMessage; onError(e: string): v
       {t ? <>
         <Text style={{ fontWeight: '700', color: c.text }}>{m.kind === 'voice' ? `Voice message · ${Math.round((t.voiceMs ?? 0) / 1000)} s` : t.name}</Text>
         <Muted small>{mb(t.size)} · {t.retention} · {t.state === 'complete' ? 'Verified' : t.state === 'transferring' ? `${Math.round((t.received / Math.max(1, t.size)) * 100)}%` : t.state}{t.error ? ` — ${t.error}` : ''}</Muted>
-        {m.kind === 'voice' && <Muted small>Voice playback on phones comes in a later build; Share opens it in another app.</Muted>}
+        {m.kind === 'voice' && <VoiceNotePlayer t={t} mine={m.mine} onError={onError} />}
         <Row gap={6}>
           {!m.mine && t.state === 'offered' && <><Btn small primary label={`Accept ${mb(t.size)}`} onPress={() => onAct(() => { roomFor(t.size - t.received); people().acceptFile(t.id); })} /><Btn small label="Decline" onPress={() => onAct(() => people().declineFile(t.id))} /></>}
           {['offered', 'accepted', 'transferring'].includes(t.state) && (m.mine || t.state !== 'offered') && <Btn small label="Cancel" onPress={() => void people().cancelFile(t.id).catch((e) => onError((e as Error).message))} />}

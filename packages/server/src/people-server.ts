@@ -25,6 +25,7 @@ export type PeopleHost = {
   introduce?(fromKey: string, intro: unknown): void;
   /** Applies one signed envelope (throws a coded error when refused). */
   receive(envelope: unknown, fromKey: string): unknown;
+  avatar?(key: string, invite: string | null): Promise<{ mime: string; data: Uint8Array } | null>;
   outgoingBytes(transferId: string, peerKey: string): { path: string; size: number; sha256: string; mime: string; name: string } | null;
   /** A phone pushes bytes it offered: append at `offset` (the receiver's own state decides what is accepted). */
   incomingChunk?(transferId: string, peerKey: string, offset: number, bytes: Uint8Array): Promise<{ have: number }>;
@@ -79,6 +80,15 @@ export async function startPeopleServer(o: PeopleServerOptions) {
   // First contact: the caller proves its key bound to the SPKI it saw; we release our identity binding only if allowed.
   app.post('/peer/hello', async (req, reply) => {
     try { const b = body(req), key = authed(req, b.raw, o.tls.spkiSha256); reachable(key, req); return { binding: o.host.binding() }; } catch (e) { return fail(reply, e); }
+  });
+  // The caller's view of our picture (only if the profile it may see includes one).
+  app.post('/peer/avatar', async (req, reply) => {
+    try {
+      const b = body(req), key = authed(req, b.raw, o.host.myKey()); reachable(key, req);
+      const a = await o.host.avatar?.(key, invite(req));
+      if (!a) throw Object.assign(new Error('No picture.'), { code: 'not_found' });
+      return { mime: a.mime, data: Buffer.from(a.data).toString('base64url') };
+    } catch (e) { return fail(reply, e); }
   });
   app.post('/peer/profile', async (req, reply) => {
     try { const b = body(req), key = authed(req, b.raw, o.host.myKey()); reachable(key, req); const p = o.host.profileFor(key, invite(req)); if (!p.profile) throw Object.assign(new Error('Not shared.'), { code: 'hidden' }); return p; } catch (e) { return fail(reply, e); }
@@ -167,15 +177,19 @@ export async function startPeopleServer(o: PeopleServerOptions) {
 
 
 /** DNS-SD: TXT carries only a random id that the caller rotates; nothing identifies the person. */
-export function advertisePeople(o: { port: number; r: string }) {
+/** `r` random per advert; `t` the presence tag only friends can recognise (presenceTag). Nothing else is advertised. */
+export function advertisePeople(o: { port: number; r: string; t?: string }) {
   const bonjour = new Bonjour({ bind: '0.0.0.0' } as object, () => {});
-  bonjour.publish({ name: `CLAN person ${o.r.slice(0, 6)}`, type: PEER_SERVICE, port: o.port, txt: { v: '1', r: o.r }, disableIPv6: true });
+  bonjour.publish({ name: `CLAN person ${o.r.slice(0, 6)}`, type: PEER_SERVICE, port: o.port, txt: { v: '1', r: o.r, ...(o.t ? { t: o.t } : {}) }, disableIPv6: true });
   return () => new Promise<void>((r) => bonjour.unpublishAll(() => { bonjour.destroy(); r(); }));
 }
-export function browsePeople(onUp: (s: { addr: string; port: number; r: string }) => void, onDown?: (r: string) => void) {
+export function browsePeople(onUp: (s: { addr: string; port: number; r: string; t: string }) => void, onDown?: (r: string) => void, type: string = PEER_SERVICE) {
   const bonjour = new Bonjour({}, () => {});
-  const b = bonjour.find({ type: PEER_SERVICE });
-  b.on('up', (s) => { const txt = (s.txt ?? {}) as { v?: string; r?: string }; const addr = s.addresses?.find((a) => a.includes('.')) ?? s.referer?.address; if (txt.v === '1' && addr && txt.r && /^[A-Za-z0-9_-]{16,24}$/.test(txt.r)) onUp({ addr, port: s.port, r: txt.r }); });
+  const b = bonjour.find({ type });
+  b.on('up', (s) => {
+    const txt = (s.txt ?? {}) as { v?: string; r?: string; t?: string }; const addr = s.addresses?.find((a) => a.includes('.')) ?? s.referer?.address;
+    if (txt.v === '1' && addr && txt.r && /^[A-Za-z0-9_-]{8,24}$/.test(txt.r)) onUp({ addr, port: s.port, r: txt.r, t: typeof txt.t === 'string' && /^[A-Za-z0-9_-]{16}$/.test(txt.t) ? txt.t : '' });
+  });
   b.on('down', (s) => { const r = (s.txt as { r?: string } | undefined)?.r; if (r) onDown?.(r); });
   const t = setInterval(() => b.update(), 4000);
   return () => { clearInterval(t); b.stop(); bonjour.destroy(); };

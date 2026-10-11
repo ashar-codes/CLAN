@@ -6,6 +6,7 @@
 // the owner's visibility settings.
 import { z } from 'zod';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { hmac } from '@noble/hashes/hmac.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { b64u, canonicalBytes, ed25519Verify, keyFingerprint } from './trust.ts';
 
@@ -65,6 +66,10 @@ export type FileMeta = z.infer<typeof FileMeta>;
 export const PeerBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('friend.request'), note: Text(200).optional() }).strict(),
   z.object({ kind: z.literal('friend.accept') }).strict(),
+  /** Friend → friend: this person's other devices, each self-signed for their account (personDeviceStatement). */
+  z.object({ kind: z.literal('device.links'), account: z.string().min(1).max(80), devices: z.array(z.object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/), name: Text(80).min(1), sig: z.string().max(100) }).strict()).max(8) }).strict(),
+  /** Friend → friend: the secret that lets them recognise this person's anonymous nearby adverts (presenceTag). */
+  z.object({ kind: z.literal('presence.key'), key: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict(),
   z.object({ kind: z.literal('friend.reject') }).strict(),
   z.object({ kind: z.literal('friend.cancel') }).strict(),
   z.object({ kind: z.literal('friend.remove') }).strict(),
@@ -111,18 +116,36 @@ export const conversationId = (a: string, b: string) => {
 };
 
 // ---- QR (static profile / invitation) ----
-/** `clan://p/<key>?h=<host:port>&s=<spki>&n=<name>` — the key and certificate pin make a scanned connection verified. */
-export const profileQr = (o: { key: string; endpoints: string[]; spkiSha256: string; name: string; invite: string }) =>
-  `clan://p/${o.key}?${new URLSearchParams([...o.endpoints.slice(0, 3).map((e) => ['h', e] as [string, string]), ['s', o.spkiSha256], ['i', o.invite], ['n', o.name.slice(0, 40)]]).toString()}`;
-export function parseProfileQr(text: string): { key: string; endpoints: string[]; spkiSha256: string; name: string; invite: string } | null {
+/**
+ * `clan://p/<key>?h=<host:port>&s=<spki>&l=<link address>&i=<invite>&n=<name>&x=<intent>`. A computer lists its TLS
+ * endpoints (h + pin s) and/or link listeners (l, e.g. `tcp:192.168.49.1:7000`); a phone lists only link listeners.
+ * Whatever answers must prove it holds <key> (and, over TLS, present the pinned certificate). `x` says what the person
+ * showing the code offered: `friend` (a friend request) or `chat` (a chat invitation); plain profile otherwise.
+ */
+export type QrIntent = 'profile' | 'friend' | 'chat';
+export const profileQr = (o: { key: string; endpoints: string[]; spkiSha256?: string; links?: string[]; name: string; invite: string; intent?: QrIntent }) =>
+  `clan://p/${o.key}?${new URLSearchParams([...o.endpoints.slice(0, 3).map((e) => ['h', e] as [string, string]), ...(o.spkiSha256 ? [['s', o.spkiSha256] as [string, string]] : []),
+    ...(o.links ?? []).slice(0, 3).map((l) => ['l', l] as [string, string]), ['i', o.invite], ['n', o.name.slice(0, 40)], ...(o.intent && o.intent !== 'profile' ? [['x', o.intent] as [string, string]] : [])]).toString()}`;
+const LINK_ADDR = /^tcp:(\[[0-9a-fA-F:.]+(%[\w.-]+)?\]|[0-9.]{7,15}):\d{2,5}$/;
+export function parseProfileQr(text: string): { key: string; endpoints: string[]; spkiSha256: string; links: string[]; name: string; invite: string; intent: QrIntent } | null {
   const m = /^clan:\/\/p\/([A-Za-z0-9_-]{43})\?(.*)$/.exec(text.trim());
-  if (!m) return null;
+  if (!m || text.length > 2000) return null;
   const q = new URLSearchParams(m[2]);
-  const endpoints = q.getAll('h').filter((h) => /^[0-9.]{7,15}:\d{2,5}$/.test(h)).slice(0, 3), s = q.get('s') ?? '';
-  const invite = q.get('i') ?? '';
-  if (!endpoints.length || !/^[A-Za-z0-9+/=_-]{40,64}$/.test(s) || !/^[0-9a-f]{32}$/.test(invite)) return null;
-  return { key: m[1]!, endpoints, spkiSha256: s, name: (q.get('n') ?? '').slice(0, 40), invite };
+  const s = q.get('s') ?? '', endpoints = /^[A-Za-z0-9+/=_-]{40,64}$/.test(s) ? q.getAll('h').filter((h) => /^[0-9.]{7,15}:\d{2,5}$/.test(h)).slice(0, 3) : [];
+  const links = q.getAll('l').filter((l) => LINK_ADDR.test(l)).slice(0, 3);
+  const invite = q.get('i') ?? '', x = q.get('x');
+  if ((!endpoints.length && !links.length) || !/^[0-9a-f]{32}$/.test(invite)) return null;
+  return { key: m[1]!, endpoints, spkiSha256: endpoints.length ? s : '', links, name: (q.get('n') ?? '').slice(0, 40), invite, intent: x === 'friend' || x === 'chat' ? x : 'profile' };
 }
+/**
+ * Nearby adverts carry a random id `r` and `t = presenceTag(presenceKey, r)`. Only friends hold the presence key, so
+ * only they can tell that an advert is this person; strangers see unlinkable random values. Devices connect on their
+ * own only to adverts that match a friend (or when they chose to be visible to everyone themselves), so nobody's
+ * identity leaks to an arbitrary advertiser.
+ */
+export const presenceTag = (presenceKey: string, r: string) => b64u.encode(hmac(sha256, b64u.decode(presenceKey), new TextEncoder().encode(`clan-presence/v1|${r}`)).slice(0, 12));
+/** What each device signs to say "this identity key is one of the devices of account X" (no device can be claimed by others). */
+export const personDeviceStatement = (account: string, key: string) => new TextEncoder().encode(`clan-device/1|${account}|${key}`);
 /** Short fingerprint people compare to verify each other in person. */
 export const safetyNumber = (a: string, b: string) => {
   const h = sha256(new TextEncoder().encode(['clan-safety/v1', ...[keyFingerprint(a), keyFingerprint(b)].sort()].join('|')));
