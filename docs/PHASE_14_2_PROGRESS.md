@@ -6,7 +6,7 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | # | Item | State | Commit | Evidence |
 |---|---|---|---|---|
 | P0-1 | Windows-hosted CLAN: Mac/Android discover but can't connect | **Fixed in source, NOT TESTED on Windows** | `fd8249c`, `a833dd1` | `packages/server/test/multi-address.test.ts` (3 PASS); join/discovery/security/mobile/integration suites 138 PASS; typecheck PASS |
-| P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | NOT STARTED | — | — |
+| P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | IMPLEMENTED; desktop PASS, Android verification in progress | see git log | 4 desktop E2Es + 17 targeted unit tests PASS |
 | P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | NOT STARTED | — | — |
 | P0-4 | File preview / open / save-export (SAF, iOS Files) | NOT STARTED | — | — |
 | P0-5 | CLAN archive / remove from device / leave / delete | NOT STARTED | — | — |
@@ -43,3 +43,24 @@ placed after `--` and Vitest started parallel workers; the corrected full serial
 Logs: `/tmp/clan-142-typecheck.log`, `/tmp/clan-142-unit-baseline-serial.log`, `/tmp/clan-142-e2e-baseline.log`.
 No timeouts were increased. The [P1 hosting design](PHASE_14_2_HOSTING_DESIGN.md) defines authorization, durable
 relinquishment, replication and fencing gates before implementation.
+
+## P0-2 chat implementation
+
+Desktop chat has a bounded internal scroll area, reader-position preservation when older pages load, and Jump to
+latest. Mobile uses a full-screen keyboard-aware modal with an inverted FlatList, older-page loading, explicit
+Retry/Discard for failed sends, and durable idempotent retries. Read receipts require a visible conversation and an
+active app. Shared catch-up walks all 200-message pages and reloads edits/removals at their original sequence.
+No chat domain, whiteboard protocol or permission checks were replaced.
+
+PASS: typecheck; 17 targeted unit cases (4 history/catch-up and 13 existing secure-host chat cases);
+final desktop chat E2E **4/4 PASS** (41.97 s), including widths 1440/1024/390/360, pagination and live arrivals while
+reading. An earlier E2E revealed a genuine 26px scroll shift caused by anchoring a day separator; anchoring the
+message article fixed it. Logs `/tmp/clan-142-chat-unit-final.log`, `/tmp/clan-142-chat-typecheck4.log`,
+`/tmp/clan-142-chat-e2e-final.log`.
+
+Android release APK built with the existing signing identity, installed on a fresh dedicated `clan_phase142` AVD
+(no original emulator/user profile reused). First cross-device run passed personal sync/conflicts/revocation and
+secure joining, then failed to open chat. The harness incorrectly searched for absent OS prompt buttons while
+scrolling and accepted the room preview as chat evidence. A focused native check opened the modal successfully.
+The harness now handles only a visible OS prompt and verifies Close chat; a full rerun is in progress. No timeout
+was increased. Emulator results do not establish physical Android performance or connectivity.

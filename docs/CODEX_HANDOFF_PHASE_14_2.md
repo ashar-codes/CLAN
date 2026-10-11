@@ -46,7 +46,7 @@ ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffect
    If it still fails, collect `ipconfig /all`, `Get-NetFirewallRule -DisplayName "*Electron*","*CLAN*"`, the Mac's
    `CLAN_DEBUG_DISCOVERY=1 pnpm dev` output (`browse up {url, alt}`), and `curl http://<windows-ip>:<bootstrap-port>/api/info`
    from the Mac.
-2. **P0-2 chat:** desktop `apps/desktop/src/renderer/world/chat/{ChatPanel.tsx,useChat.ts}` (has `loadEarlier`,
+2. **P0-2 chat implemented, Android verification in progress:** desktop `apps/desktop/src/renderer/world/chat/{ChatPanel.tsx,useChat.ts}` (has `loadEarlier`,
    unread, cursors); mobile `apps/mobile/src/Chat.tsx` (loads the latest 50 only). Scroll container + "Jump to latest",
    keep position on prepend, auto-scroll only near the bottom; mobile inverted `FlatList` + `KeyboardAvoidingView`.
    Reuse the existing messages API cursor (check `packages/server/src/chat.ts`). Tests: `apps/desktop/e2e/chat.test.ts`.
@@ -85,8 +85,7 @@ credential. Never force-push; never move `clan-beta-v0.1.0-rc1`.
   `release/beta-v0.1.0-rc1/` (local, git-ignored) — don't modify.
 
 ## 12. Known risks
-P0-1 is a code-level diagnosis; Windows Firewall or a *Public* network profile could still block. Full suites not
-re-run on 14.2.
+P0-1 remains hardware-unverified; Windows Firewall or a *Public* network profile could still block. Baseline full suites passed. New chat targeted desktop/unit checks passed; Android rerun is pending. P0-3 policy regression tests and host implementation are in progress, not yet verified.
 
 ## 13. Evidence
 `design/beta/v0.1.0/`, `design/beta/v0.1.0-rc1/VERIFICATION.md`, `docs/RC1_HARDWARE_GATES.md`,

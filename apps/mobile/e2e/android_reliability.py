@@ -47,6 +47,7 @@ def main():
         tap('Home'); tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')
         connected = lambda: any(m['status'] == 'approved' and m['connected'] for m in http(47499, '/state')['members'])
         until(connected, 'member connected', 60); ok('joined')
+        tap('Open chat')
         http(47499, '/chat', {'body': 'Before the freeze'}); find('Before the freeze'); ok('messages flow')
         h.send_signal(signal.SIGSTOP); time.sleep(20); h.send_signal(signal.SIGCONT)
         until(connected, 'phone connected after the host woke', 90)
@@ -56,6 +57,7 @@ def main():
         adb('shell', 'cmd', 'connectivity', 'airplane-mode', 'disable')
         until(connected, 'phone reconnected after the network came back', 120); ok('network lost until the host noticed → phone reconnected')
         http(47499, '/chat', {'body': 'After Wi-Fi'}); find('After Wi-Fi'); ok('messages flow after Wi-Fi interruption')
+        tap('Close chat')
         tap('Leave CLAN'); time.sleep(65)  # the join bridge's WebView is released 60 s after its last use
         until(lambda: not connected(), 'host sees the phone left', 30)
         tap('Home'); tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')

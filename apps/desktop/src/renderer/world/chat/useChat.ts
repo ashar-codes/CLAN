@@ -3,6 +3,7 @@
 // acknowledges it, and is re-sent with the same id after every reconnect — the host recognises repeats.
 // Delivery states are only what the host can know: SENT (stored), DELIVERED / READ (the recipient's own cursor reports).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { catchUpChat, mergeChatMessages as byId } from '@classroom/client';
 import type { AttachmentInput, ChatCursors, ChatMessageView, ChatThreadView, ClientMessage, ServerMessage } from '@classroom/protocol';
 import type { ChatConn } from '../../../shared.ts';
 import { api } from '../../App.tsx';
@@ -13,11 +14,6 @@ export type Delivery = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 export type ChatPerson = { handle: string; name: string; host: boolean; connected: boolean };
 type Target = Send['thread'];
 const PAGE = 50;
-const byId = (list: ChatMessageView[], add: ChatMessageView[]) => {
-  const m = new Map(list.map((x) => [x.id, x]));
-  for (const x of add) m.set(x.id, x);
-  return [...m.values()].sort((a, b) => a.seq - b.seq);
-};
 
 export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: string | null; send(m: ClientMessage): void }) {
   const [me, setMe] = useState<string | null>(null);
@@ -25,6 +21,8 @@ export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: st
   const [threads, setThreads] = useState<ChatThreadView[]>([]);
   const [msgs, setMsgs] = useState<Record<string, ChatMessageView[]>>({});
   const [more, setMore] = useState<Record<string, boolean>>({});
+  const [loadingEarlier, setLoadingEarlier] = useState<Record<string, boolean>>({});
+  const paging = useRef(new Set<string>());
   const [cursors, setCursors] = useState<Record<string, ChatCursors>>({});
   const [pending, setPending] = useState<Record<string, Pending>>({});
   const [typing, setTyping] = useState<Record<string, { handle: string; name: string; until: number }[]>>({});
@@ -54,12 +52,15 @@ export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: st
       if (ref.current.o.role === 'member' && ref.current.o.clanId) void api.chat.setMe(ref.current.o.clanId, r.me);
       // Catch up the conversations already open on screen (after a reconnect).
       for (const id of loaded.current) {
-        const last = ref.current.msgs[id]?.at(-1)?.seq ?? 0;
-        const p = await http<{ messages: ChatMessageView[]; cursors: ChatCursors }>('GET', `/api/chat/threads/${id}/messages?after=${last}&limit=200`);
-        setMsgs((m) => ({ ...m, [id]: byId(m[id] ?? [], p.messages) }));
-        setCursors((c) => ({ ...c, [id]: p.cursors }));
+        // Refresh the loaded interval too: edits/removals keep their original sequence number.
+        const last = Math.max(0, (ref.current.msgs[id]?.[0]?.seq ?? 1) - 1);
         const t = r.threads.find((x) => x.id === id);
-        if (t) cache(t, p.messages);
+        if (!t) continue;
+        await catchUpChat(last, t.lastSeq, async (after) => {
+          const p = await http<{ messages: ChatMessageView[]; cursors: ChatCursors }>('GET', `/api/chat/threads/${id}/messages?after=${after}&limit=200`);
+          setCursors((c) => ({ ...c, [id]: p.cursors }));
+          return p.messages;
+        }, (messages) => { setMsgs((m) => ({ ...m, [id]: byId(m[id] ?? [], messages) })); cache(t, messages); });
       }
     } catch (e) { setError((e as Error).message); }
   }, [http]);
@@ -79,9 +80,10 @@ export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: st
     if (!loaded.current.has(threadId)) {
       const p = await http<{ messages: ChatMessageView[]; cursors: ChatCursors }>('GET', `/api/chat/threads/${threadId}/messages?limit=${PAGE}`);
       loaded.current.add(threadId);
-      setMsgs((m) => ({ ...m, [threadId]: byId(m[threadId] ?? [], p.messages) }));
+      const through = p.messages.at(-1)?.seq ?? 0;
+      setMsgs((m) => ({ ...m, [threadId]: byId(p.messages, (m[threadId] ?? []).filter((x) => x.seq > through)) }));
       setCursors((c) => ({ ...c, [threadId]: p.cursors }));
-      setMore((x) => ({ ...x, [threadId]: p.messages.length === PAGE }));
+      setMore((x) => ({ ...x, [threadId]: p.messages.length === PAGE && (p.messages[0]?.seq ?? 1) > 1 }));
       const t = ref.current.threads.find((x) => x.id === threadId);
       if (t) cache(t, p.messages);
     }
@@ -90,11 +92,18 @@ export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: st
   }, [http, report]);
 
   const loadEarlier = useCallback(async (threadId: string) => {
+    if (paging.current.has(threadId)) return;
     const first = ref.current.msgs[threadId]?.[0]?.seq;
     if (!first || first <= 1) return setMore((x) => ({ ...x, [threadId]: false }));
-    const p = await http<{ messages: ChatMessageView[] }>('GET', `/api/chat/threads/${threadId}/messages?before=${first}&limit=${PAGE}`);
-    setMsgs((m) => ({ ...m, [threadId]: byId(m[threadId] ?? [], p.messages) }));
-    setMore((x) => ({ ...x, [threadId]: p.messages.length === PAGE }));
+    paging.current.add(threadId); setLoadingEarlier((x) => ({ ...x, [threadId]: true }));
+    try {
+      const p = await http<{ messages: ChatMessageView[] }>('GET', `/api/chat/threads/${threadId}/messages?before=${first}&limit=${PAGE}`);
+      setMsgs((m) => ({ ...m, [threadId]: byId(m[threadId] ?? [], p.messages) }));
+      setMore((x) => ({ ...x, [threadId]: p.messages.length === PAGE && (p.messages[0]?.seq ?? 1) > 1 }));
+      const t = ref.current.threads.find((x) => x.id === threadId); if (t) cache(t, p.messages);
+      setError('');
+    } catch (e) { setError((e as Error).message); }
+    finally { paging.current.delete(threadId); setLoadingEarlier((x) => ({ ...x, [threadId]: false })); }
   }, [http]);
 
   /** While a direct conversation opens, no composer is shown — so nothing typed meanwhile can go to the wrong conversation. */
@@ -181,7 +190,7 @@ export function useChat(o: { role: 'host' | 'member'; conn: ChatConn; clanId: st
 
   const unread = useMemo(() => threads.reduce((n, t) => n + t.unread, 0), [threads]);
   return {
-    me, host, threads, msgs, more, cursors, pending, typing, active, error, unread, clanId, conn: o.conn, opening,
+    me, host, threads, msgs, more, loadingEarlier, cursors, pending, typing, active, error, unread, clanId, conn: o.conn, opening,
     open, openDirect, loadEarlier, post, retry, discard, onServer, typingPing, delivery, refresh,
     react: (id: string, reaction: string, on: boolean) => o.send({ t: 'chat.react', id, reaction: reaction as never, on }),
     edit: (id: string, body: string) => o.send({ t: 'chat.edit', id, body }),

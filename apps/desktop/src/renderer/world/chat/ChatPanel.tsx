@@ -1,6 +1,6 @@
 // The room's conversation panel (lazy chunk): CLAN group chat + direct conversations with CLANmates, beside the room.
 // Wording is deliberate: the host relays and stores these messages, so nothing here says "private" or "encrypted".
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { EDIT_WINDOW_MS, REACTIONS, type ChatAttachment, type ChatMessageView, type ChatThreadView, type ResourceView } from '@classroom/protocol';
 import { formatBytes } from '@classroom/client';
 import type { Conn, FileState, SavedItem } from '../../../shared.ts';
@@ -58,9 +58,30 @@ function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: Chat
   const [editing, setEditing] = useState<ChatMessageView | null>(null);
   const [note, setNote] = useState('');
   const [saved, setSaved] = useState<SavedItem[] | null>(null);
-  const end = useRef<HTMLDivElement>(null);
+  const log = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  const anchor = useRef<{ id: string; offset: number } | null>(null);
+  const [away, setAway] = useState(false);
   const target = { id: t.id };
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [list.length, mine.length]);
+  const latest = () => { following.current = true; setAway(false); if (log.current) log.current.scrollTop = log.current.scrollHeight; };
+  useLayoutEffect(() => {
+    const el = log.current; if (!el) return;
+    if (anchor.current) {
+      const item = [...el.querySelectorAll<HTMLElement>('[data-chat-id]')].find((x) => x.dataset.chatId === anchor.current!.id);
+      if (item) el.scrollTop += item.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current.offset;
+      anchor.current = null;
+    } else if (following.current) el.scrollTop = el.scrollHeight;
+  }, [list, mine.length]);
+  const earlier = async () => {
+    const el = log.current; if (!el || chat.loadingEarlier[t.id]) return;
+    const top = el.getBoundingClientRect().top;
+    const item = [...el.querySelectorAll<HTMLElement>('[data-chat-id]')].find((x) => x.getBoundingClientRect().bottom > top);
+    if (item) anchor.current = { id: item.dataset.chatId!, offset: item.getBoundingClientRect().top - top };
+    following.current = false;
+    await chat.loadEarlier(t.id);
+    // Clear a failed/empty request's anchor too; never shift a later unrelated update.
+    requestAnimationFrame(() => { anchor.current = null; });
+  };
   const typers = (chat.typing[t.id] ?? []).map((x) => x.name.split(' ')[0]);
 
   const submit = async (e?: FormEvent) => {
@@ -68,7 +89,7 @@ function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: Chat
     const body = text.trim();
     if (!body) return;
     if (editing) { chat.edit(editing.id, body); setEditing(null); setText(''); return; }
-    setText(''); setReply(null);
+    latest(); setText(''); setReply(null);
     await chat.post(target, body, reply ? { replyTo: reply.id } : {});
   };
   const key = (e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); } else if (e.key === 'Escape') { setReply(null); setEditing(null); } };
@@ -89,8 +110,9 @@ function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: Chat
         {chat.clanId && <button className="small ai-link" onClick={() => ai.open({ mode: 'run', title: 'Summarize discussion', action: 'chatSummary', scope: { kind: 'clan', clanId: chat.clanId!, threadId: t.id }, include: { chat: true } })}>Summarize discussion</button>}
         <span className="muted small-text">{t.kind === 'group' ? 'Group conversation · kept by the host' : `Direct conversation · only you two see it here · relayed and kept by the host${t.with && !t.with.here ? ' · not in the room right now' : ''}`}</span>
       </header>
-      <div className="chat-log" role="log" aria-live="polite" aria-label={t.kind === 'group' ? 'Group messages' : `Messages with ${t.with?.name}`}>
-        {chat.more[t.id] && <button className="link small chat-more" onClick={() => void chat.loadEarlier(t.id)}>Load earlier messages</button>}
+      <div ref={log} className="chat-log" role="log" aria-live="polite" tabIndex={0} aria-label={t.kind === 'group' ? 'Group messages' : `Messages with ${t.with?.name}`}
+        onScroll={() => { const el = log.current!; following.current = el.scrollHeight - el.clientHeight - el.scrollTop < 80; setAway(!following.current); }}>
+        {chat.more[t.id] && <button className="link small chat-more" disabled={chat.loadingEarlier[t.id]} onClick={() => void earlier()}>Load earlier messages{chat.loadingEarlier[t.id] ? '…' : ''}</button>}
         {list.length === 0 && mine.length === 0 && <p className="muted chat-empty">{t.kind === 'group' ? 'No messages yet. Say hello to the CLAN.' : 'No messages yet.'}</p>}
         {list.map((m) => {
           const d = day(m.createdAt), sep = d !== lastDay; lastDay = d;
@@ -109,8 +131,9 @@ function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: Chat
             <span className="chat-meta">{p.state === 'failed' ? <><span className="error">Not sent — {p.error}</span> <button className="link small" onClick={() => chat.retry(p.payload.id)}>Retry</button> <button className="link small" onClick={() => chat.discard(p.payload.id)}>Discard</button></> : 'Sending…'}</span>
           </div>
         ))}
-        <div ref={end} />
       </div>
+      {away && <button className="link small chat-latest" onClick={latest}>Jump to latest</button>}
+      {chat.error && <p className="error small-text" role="status">{chat.error}</p>}
       <p className="chat-typing muted small-text" aria-live="polite">{typers.length ? `${typers.join(', ')} ${typers.length === 1 ? 'is' : 'are'} typing…` : ' '}</p>
       {(reply || editing) && (
         <div className="chat-replying"><span>{editing ? 'Editing your message' : <>Replying to <b>{reply!.authorName}</b>: {reply!.body.slice(0, 80) || 'an attachment'}</>}</span>
@@ -138,7 +161,7 @@ function Message({ m, own, t, chat, list, role, conn, onReply, onEdit }: { m: Ch
   const canEdit = own && !m.removed && Date.now() - m.createdAt < EDIT_WINDOW_MS && !!m.body;
   const canRemove = !m.removed && (own || (role === 'host' && t.kind === 'group'));
   return (
-    <article className={`chat-msg ${own ? 'own' : ''} ${m.removed ? 'removed' : ''}`} data-testid="chat-message" aria-label={`${m.authorName} at ${time(m.createdAt)}`}>
+    <article className={`chat-msg ${own ? 'own' : ''} ${m.removed ? 'removed' : ''}`} data-chat-id={m.id} data-testid="chat-message" aria-label={`${m.authorName} at ${time(m.createdAt)}`}>
       {!own && <span className="chat-author">{m.authorName}</span>}
       <div className="chat-bubble">
         {m.replyTo && <blockquote className="chat-quote">{quoted ? (quoted.removed ? 'Original message was removed' : <><b>{quoted.authorName}</b> {quoted.body.slice(0, 120) || (quoted.attachment ? 'an attachment' : '')}</>) : 'Earlier message (not loaded)'}</blockquote>}

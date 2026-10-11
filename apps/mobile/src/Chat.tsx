@@ -3,12 +3,13 @@
 // the same ids (the host recognises repeats). Files go only to the conversation that is open (the whole CLAN, or the one
 // person of a direct conversation); the host re-checks that scope on every send.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Notifications from 'expo-notifications';
 import { Directory, File, Paths } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
-import { api, formatBytes } from '@classroom/client';
+import { api, catchUpChat, mergeChatMessages as merge, formatBytes } from '@classroom/client';
 import type { ChatMessageView, ChatThreadView, ClientMessage, ResourceView, ServerMessage } from '@classroom/protocol';
 import { download, shareFile, type Conn, type FileState } from './transfers';
 import { phoneClan, me as meP } from './core/clan';
@@ -39,34 +40,65 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
   const [host, setHost] = useState<string | null>(null);
   const [threads, setThreads] = useState<ChatThreadView[]>([]);
   const [msgs, setMsgs] = useState<Record<string, ChatMessageView[]>>({});
-  const [pending, setPending] = useState<Record<string, { m: Send; failed?: string }>>({});
+  const [more, setMore] = useState<Record<string, boolean>>({});
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [error, setError] = useState('');
+  const loaded = useRef(new Set<string>()), paging = useRef(false);
+  const viewing = useRef(false);
+  const [pending, setPending] = useState<Record<string, { m: Send; failed?: string; at: number }>>({});
   const [active, setActive] = useState<string | null>(null);
-  const ref = useRef({ active, me }); ref.current = { active, me };
+  const ref = useRef({ active, me, msgs, pending }); ref.current = { active, me, msgs, pending };
   const get = useCallback(<T,>(path: string, init?: RequestInit) => api<T>(conn.transport, conn.url, conn.token, path, init), [conn]);
-  const merge = (list: ChatMessageView[], add: ChatMessageView[]) => [...new Map([...list, ...add].map((x) => [x.id, x])).values()].sort((a, b) => a.seq - b.seq);
+  const [opening, setOpening] = useState(false);
 
   const open = useCallback(async (id: string) => {
     setActive(id);
-    const p = await get<{ messages: ChatMessageView[] }>(`/api/chat/threads/${id}/messages?limit=50`);
-    setMsgs((x) => ({ ...x, [id]: merge(x[id] ?? [], p.messages) }));
-    const last = p.messages.at(-1)?.seq;
-    if (last) send({ t: 'chat.cursor', threadId: id, delivered: last, read: last });
-    setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, unread: 0 } : t)));
+    setOpening(true);
+    try {
+      if (!loaded.current.has(id)) {
+        const p = await get<{ messages: ChatMessageView[] }>(`/api/chat/threads/${id}/messages?limit=50`);
+        const through = p.messages.at(-1)?.seq ?? 0;
+        setMsgs((x) => ({ ...x, [id]: merge(p.messages, (x[id] ?? []).filter((m) => m.seq > through)) }));
+        setMore((x) => ({ ...x, [id]: p.messages.length === 50 && (p.messages[0]?.seq ?? 1) > 1 }));
+        loaded.current.add(id);
+        if (through) send({ t: 'chat.cursor', threadId: id, delivered: through });
+      }
+      setError('');
+    } catch (e) { setError((e as Error).message); }
+    finally { setOpening(false); }
   }, [get, send]);
+
+  const loadEarlier = useCallback(async (id: string) => {
+    if (paging.current) return;
+    const first = ref.current.msgs[id]?.[0]?.seq;
+    if (!first || first <= 1) { setMore((x) => ({ ...x, [id]: false })); return; }
+    paging.current = true; setLoadingEarlier(true);
+    try {
+      const p = await get<{ messages: ChatMessageView[] }>(`/api/chat/threads/${id}/messages?before=${first}&limit=50`);
+      setMsgs((x) => ({ ...x, [id]: merge(x[id] ?? [], p.messages) }));
+      setMore((x) => ({ ...x, [id]: p.messages.length === 50 && (p.messages[0]?.seq ?? 1) > 1 })); setError('');
+    } catch (e) { setError((e as Error).message); }
+    finally { paging.current = false; setLoadingEarlier(false); }
+  }, [get]);
 
   const refresh = useCallback(async () => {
     const r = await get<{ me: string; host: string; threads: ChatThreadView[] }>('/api/chat/threads');
     setMe(r.me); setHost(r.host); setThreads(r.threads);
     const list = outbox.list(clanId);
-    setPending((p) => ({ ...p, ...Object.fromEntries(list.map((m) => [m.id, { m }])) }));
+    setPending((p) => ({ ...p, ...Object.fromEntries(list.map((m) => [m.id, { m, at: Date.now() }])) }));
     for (const m of list) send(m);
     // (Re)connected: messages sent while the socket was down only show up in the thread list's unread count — reload
     // the conversation that is open so they appear.
-    if (ref.current.active) await open(ref.current.active);
+    for (const id of loaded.current) {
+      const thread = r.threads.find((t) => t.id === id); if (!thread) continue;
+      const after = Math.max(0, (ref.current.msgs[id]?.[0]?.seq ?? 1) - 1); // edits/removals keep their original seq
+      await catchUpChat(after, thread.lastSeq, async (cursor) => (await get<{ messages: ChatMessageView[] }>(`/api/chat/threads/${id}/messages?after=${cursor}&limit=200`)).messages,
+        (messages) => setMsgs((x) => ({ ...x, [id]: merge(x[id] ?? [], messages) })));
+    }
+    setError('');
   }, [get, clanId, send, open]);
 
   /** No composer while a direct conversation opens, so nothing typed meanwhile goes to the wrong conversation. */
-  const [opening, setOpening] = useState(false);
   const openDirect = useCallback(async (to: string) => {
     setOpening(true);
     try {
@@ -79,17 +111,17 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
   const post = useCallback((threadId: string, body: string, extra: Partial<Send> = {}) => {
     const m: Send = { t: 'chat.send', id: randomUUID(), thread: { id: threadId }, body, ...extra };
     outbox.add(clanId, m); // durable before it leaves
-    setPending((p) => ({ ...p, [m.id]: { m } }));
+    setPending((p) => ({ ...p, [m.id]: { m, at: Date.now() } }));
     send(m);
   }, [clanId, send]);
 
   const onServer = useCallback((m: ServerMessage) => {
-    if (m.t === 'hello' || (m.t === 'member.status' && m.status === 'approved')) void refresh().catch(() => {});
+    if (m.t === 'hello' || (m.t === 'member.status' && m.status === 'approved')) void refresh().catch((e) => setError((e as Error).message));
     else if (m.t === 'chat.ack') { outbox.sent(m.id); setPending(({ [m.id]: _, ...rest }) => rest); }
     else if (m.t === 'chat.nack' && m.code !== 'rate_limited') { outbox.sent(m.id); setPending((p) => (p[m.id] ? { ...p, [m.id]: { ...p[m.id]!, failed: m.message } } : p)); }
     else if (m.t === 'chat.message') {
       setMsgs((x) => ({ ...x, [m.thread.id]: merge(x[m.thread.id] ?? [], [m.message]) }));
-      const reading = ref.current.active === m.thread.id;
+      const reading = viewing.current && AppState.currentState === 'active' && ref.current.active === m.thread.id;
       setThreads((ts) => [...ts.filter((t) => t.id !== m.thread.id), reading ? { ...m.thread, unread: 0 } : m.thread]);
       if (m.message.author !== ref.current.me) {
         send({ t: 'chat.cursor', threadId: m.thread.id, delivered: m.message.seq, ...(reading ? { read: m.message.seq } : {}) });
@@ -98,6 +130,30 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
     }
   }, [refresh, send, conn.classTitle]);
   useEffect(() => { void Notifications.requestPermissionsAsync().catch(() => {}); }, []);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      for (const p of Object.values(ref.current.pending)) if (!p.failed && Date.now() - p.at >= 8000) { p.at = Date.now(); send(p.m); }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [send]);
+  const setViewing = useCallback((visible: boolean) => {
+    viewing.current = visible;
+    const id = ref.current.active, last = id ? ref.current.msgs[id]?.at(-1)?.seq : null;
+    if (visible && id && last && AppState.currentState === 'active') {
+      send({ t: 'chat.cursor', threadId: id, delivered: last, read: last });
+      setThreads((ts) => ts.map((t) => t.id === id ? { ...t, unread: 0 } : t));
+    }
+  }, [send]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => { if (state === 'active') setViewing(viewing.current); });
+    return () => sub.remove();
+  }, [setViewing]);
+  const retry = useCallback((id: string) => {
+    const p = ref.current.pending[id]; if (!p) return;
+    outbox.add(clanId, p.m);
+    setPending((x) => ({ ...x, [id]: { m: p.m, at: Date.now() } })); send(p.m);
+  }, [clanId, send]);
+  const discard = useCallback((id: string) => { outbox.sent(id); setPending(({ [id]: _, ...rest }) => rest); }, []);
 
   /** Attach a file to the OPEN conversation only: the audience is fixed before the upload starts. */
   const [sending, setSending] = useState<{ name: string; sent: number; size: number; error?: string } | null>(null);
@@ -111,11 +167,15 @@ export function useMobileChat(conn: Conn, clanId: string, send: (m: ClientMessag
       setSending(null);
     } catch (e) { setSending({ name: file.name, sent: 0, size: file.size, error: (e as Error).message }); }
   }, [conn, post]);
-  return { me, host, threads, msgs, pending, active, setActive, open, openDirect, post, onServer, opening, sendFile, sending };
+  return { me, host, threads, msgs, more, loadingEarlier, error, pending, retry, discard, active, setActive, setViewing, open, openDirect, loadEarlier, post, onServer, opening, sendFile, sending };
 }
 export type MobileChat = ReturnType<typeof useMobileChat>;
 
 export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat; conn: Conn; people: { name: string; handle: string; host: boolean }[] }) {
+  const [shown, setShown] = useState(false);
+  const [away, setAway] = useState(false);
+  const following = useRef(true);
+  const log = useRef<FlatList<ChatMessageView>>(null);
   // Drafts belong to one conversation: switching conversations never carries typed text to another audience.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [fromInbox, setFromInbox] = useState(false);
@@ -128,6 +188,8 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
   const others = people.filter((p) => p.handle && p.handle !== chat.me);
   const reach = others.length ? others : chat.host ? [{ name: 'Host', handle: chat.host, host: true }] : [];
   const list = t ? chat.msgs[t.id] ?? [] : [];
+  useEffect(() => { chat.setViewing(shown && !chat.opening); return () => chat.setViewing(false); }, [shown, t?.id, chat.opening, chat.setViewing]);
+  useEffect(() => { following.current = true; setAway(false); log.current?.scrollToOffset({ offset: 0, animated: false }); }, [t?.id, shown]);
   const waiting = Object.values(chat.pending).filter((p) => 'id' in p.m.thread && p.m.thread.id === t?.id && !list.some((m) => m.id === p.m.id));
   const get = (m: ChatMessageView) => {
     if (m.attachment?.kind !== 'file') return;
@@ -136,19 +198,37 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
   };
   return (
     <View style={[s.card, { borderColor: c.border, backgroundColor: c.surface }]} accessibilityLabel="Chat">
-      <View style={s.row}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Open chat" onPress={() => setShown(true)} style={[s.chip, { borderColor: c.accent, minHeight: 44, justifyContent: 'center' }]}>
+        <Text style={{ color: c.accent, fontWeight: '700' }}>Open chat{chat.threads.reduce((n, x) => n + x.unread, 0) ? ` · ${chat.threads.reduce((n, x) => n + x.unread, 0)} unread` : ''}</Text>
+      </Pressable>
+      {!shown && !!list.at(-1)?.body && <Text style={{ color: c.muted }} numberOfLines={2}>{list.at(-1)!.authorName}: {list.at(-1)!.body}</Text>}
+      <Modal visible={shown} animationType="slide" onRequestClose={() => setShown(false)}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: c.surface }}>
+      <KeyboardAvoidingView style={{ flex: 1, padding: 12, gap: 8 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <View style={[s.row, { justifyContent: 'space-between' }]}>
+        <Text style={{ color: c.text, fontSize: 20, fontWeight: '700' }}>Chat · {conn.classTitle}</Text>
+        <Pressable accessibilityRole="button" onPress={() => setShown(false)} style={[s.chip, { minHeight: 44, borderColor: c.border, justifyContent: 'center' }]}><Text style={{ color: c.accent }}>Close chat</Text></Pressable>
+      </View>
+      <ScrollView horizontal style={{ maxHeight: 64, flexGrow: 0 }} contentContainerStyle={[s.row, { flexWrap: 'nowrap' }]} keyboardShouldPersistTaps="handled" accessibilityLabel="Conversations">
         {chat.threads.map((x) => (
           <Pressable key={x.id} onPress={() => void chat.open(x.id)} accessibilityRole="button" style={[s.chip, { borderColor: x.id === chat.active ? c.accent : c.border }]}>
-            <Text style={{ color: c.text, fontWeight: x.id === chat.active ? '700' : '400' }}>{x.kind === 'group' ? 'Everyone' : x.with?.name}{x.unread ? ` · ${x.unread}` : ''}</Text>
+            <Text numberOfLines={1} style={{ maxWidth: 180, color: c.text, fontWeight: x.id === chat.active ? '700' : '400' }}>{x.kind === 'group' ? 'Everyone' : x.with?.name}{x.unread ? ` · ${x.unread}` : ''}</Text>
           </Pressable>
         ))}
         {reach.filter((p) => !chat.threads.some((x) => x.with?.handle === p.handle)).map((p) => (
           <Pressable key={p.handle} onPress={() => void chat.openDirect(p.handle)} accessibilityRole="button" style={[s.chip, { borderColor: c.border }]}><Text style={{ color: c.accent }}>Send to {p.name}</Text></Pressable>
         ))}
-      </View>
+      </ScrollView>
       <Text style={{ color: c.muted, fontSize: 12 }}>{t?.kind === 'direct' ? 'Direct conversation · relayed and kept by the host' : 'Group conversation · kept by the host'}</Text>
-      <View accessibilityLiveRegion="polite" style={{ gap: 6 }}>
-        {list.map((m) => (
+      <FlatList<ChatMessageView> ref={log} key={t?.id ?? 'loading'} inverted data={[...list].reverse()} keyExtractor={(m) => m.id}
+        style={{ flex: 1 }} contentContainerStyle={{ gap: 6, paddingVertical: 8 }} keyboardShouldPersistTaps="handled"
+        accessibilityLabel="Chat messages" maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        onScroll={(e) => { following.current = e.nativeEvent.contentOffset.y < 80; setAway(!following.current); }} scrollEventThrottle={32}
+        onContentSizeChange={() => { if (following.current) log.current?.scrollToOffset({ offset: 0, animated: false }); }}
+        ListEmptyComponent={<Text style={{ color: c.muted }}>No messages yet.</Text>}
+        ListHeaderComponent={waiting.length ? <View style={{ gap: 6 }}>{waiting.map((p) => <View key={p.m.id} style={[s.msg, s.own, { borderColor: c.border, opacity: 0.6 }]}><Text style={{ color: c.text }}>{p.m.body}</Text><Text style={{ color: p.failed ? c.danger : c.muted, fontSize: 11 }}>{p.failed ? `Not sent — ${p.failed}` : 'Sending…'}</Text>{p.failed && <View style={s.row}><Pressable accessibilityRole="button" onPress={() => chat.retry(p.m.id)} style={s.chip}><Text style={{ color: c.accent }}>Retry</Text></Pressable><Pressable accessibilityRole="button" onPress={() => chat.discard(p.m.id)} style={s.chip}><Text style={{ color: c.muted }}>Discard</Text></Pressable></View>}</View>)}</View> : null}
+        ListFooterComponent={t && chat.more[t.id] ? <Pressable accessibilityRole="button" disabled={chat.loadingEarlier} onPress={() => { following.current = false; void chat.loadEarlier(t.id); }} style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.accent }}>{chat.loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</Text></Pressable> : null}
+        renderItem={({ item: m }) => (
           <View key={m.id} style={[s.msg, m.author === chat.me && s.own, { borderColor: c.border }]}>
             {m.author !== chat.me && <Text style={{ color: c.accent, fontWeight: '700', fontSize: 12 }}>{m.authorName}</Text>}
             {m.replyTo && <Text style={{ color: c.muted, fontSize: 12 }}>↪ {list.find((x) => x.id === m.replyTo)?.body.slice(0, 60) ?? 'Earlier message'}</Text>}
@@ -161,9 +241,9 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
             )}
             <Text style={{ color: c.muted, fontSize: 11 }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{m.editedAt ? ' · edited' : ''}{m.reactions.map((r) => ` ${r.reaction}${r.by.length}`).join('')}</Text>
           </View>
-        ))}
-        {waiting.map((p) => <View key={p.m.id} style={[s.msg, s.own, { borderColor: c.border, opacity: 0.6 }]}><Text style={{ color: c.text }}>{p.m.body}</Text><Text style={{ color: p.failed ? c.danger : c.muted, fontSize: 11 }}>{p.failed ? `Not sent — ${p.failed}` : 'Sending…'}</Text></View>)}
-      </View>
+        )} />
+      {away && <Pressable accessibilityRole="button" style={[s.chip, { borderColor: c.accent, minHeight: 44, justifyContent: 'center' }]} onPress={() => { following.current = true; setAway(false); log.current?.scrollToOffset({ offset: 0, animated: false }); }}><Text style={{ color: c.accent }}>Jump to latest</Text></Pressable>}
+      {!!chat.error && <Text style={{ color: c.danger }} accessibilityLiveRegion="polite">{chat.error}</Text>}
       {chat.opening && <Text style={{ color: c.muted }} accessibilityLiveRegion="polite">Opening a conversation…</Text>}
       {t && fromInbox && (
         <View style={{ gap: 4 }} accessibilityLabel="Send from your Inbox">
@@ -185,9 +265,10 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
             style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>📎</Text></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Send something from your Inbox" onPress={() => setFromInbox(!fromInbox)} style={[s.chip, { borderColor: c.border, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.text }}>⇣</Text></Pressable>
           <TextInput style={[s.input, { color: c.text, borderColor: c.border }]} value={text} onChangeText={setText} maxLength={4000} placeholder="Message" placeholderTextColor={c.muted} accessibilityLabel="Message" multiline />
-          <Pressable accessibilityRole="button" disabled={!text.trim()} onPress={() => { chat.post(t.id, text.trim()); setText(''); }} style={[s.chip, { borderColor: c.accent, opacity: text.trim() ? 1 : 0.5 }]}><Text style={{ color: c.accent, fontWeight: '700' }}>Send</Text></Pressable>
+          <Pressable accessibilityRole="button" disabled={!text.trim()} onPress={() => { following.current = true; setAway(false); chat.post(t.id, text.trim()); setText(''); }} style={[s.chip, { borderColor: c.accent, opacity: text.trim() ? 1 : 0.5, minHeight: 44, justifyContent: 'center' }]}><Text style={{ color: c.accent, fontWeight: '700' }}>Send</Text></Pressable>
         </View>
       )}
+      </KeyboardAvoidingView></SafeAreaView></Modal>
     </View>
   );
 }
@@ -195,8 +276,8 @@ export function ChatSection({ c, chat, conn, people }: { c: C; chat: MobileChat;
 const s = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 16, padding: 12, gap: 8 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, minHeight: 44, justifyContent: 'center' },
   msg: { borderWidth: 1, borderRadius: 12, padding: 8, maxWidth: '88%', alignSelf: 'flex-start', gap: 2 },
   own: { alignSelf: 'flex-end' },
-  input: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10 },
+  input: { flex: 1, minHeight: 44, maxHeight: 120, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10 },
 });

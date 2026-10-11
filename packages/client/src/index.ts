@@ -1,6 +1,7 @@
 // Platform-neutral student client: Electron renderer, React Native and Node (tests, simulator).
 // All classroom traffic after pairing goes through a pinned `Transport` over HTTPS/WSS.
 import { WS_CLOSE, type ClientMessage, type JoinResponse, type ServerMessage } from '@classroom/protocol';
+export { catchUpChat, mergeChatMessages } from './chat-history.ts';
 
 export type Quality = 'excellent' | 'good' | 'poor' | 'disconnected';
 /** `alt`: other addresses the same host advertised; tried in parallel with `url`. */

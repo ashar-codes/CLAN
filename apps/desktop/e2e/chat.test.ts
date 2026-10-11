@@ -163,3 +163,42 @@ it('clan:// intake: a link from another app lands in the Inbox; malformed or dan
   await x.page.getByTestId('inbox').getByText('Lecture notes').waitFor({ timeout: 10_000 });
   expect(await x.page.getByTestId('inbox-item').count()).toBe(1);
 }, 60_000);
+
+it('chat scroll stays put while reading, jumps to latest, and preserves the visible message on pagination', async () => {
+  const h = await launch(), s = await launch();
+  const code = await hostClan(h.page, 'Study group', 'History Group');
+  await joinClan(s.page, 'Reader', code, h.page);
+  await h.page.getByTestId('chat-input').waitFor();
+  // Respect the real 30 messages / 10 s per-author limit.
+  for (let i = 0; i < 58; i++) await say(i % 2 ? s.page : h.page, `history ${String(i).padStart(2, '0')}`);
+  await expect.poll(() => log(s.page).getByTestId('chat-message').count()).toBe(58);
+  await log(s.page).evaluate((el) => { el.scrollTop = 100; el.dispatchEvent(new Event('scroll')); });
+  const top = await log(s.page).evaluate((el) => el.scrollTop);
+  await say(h.page, 'arrived while reading');
+  await log(s.page).getByText('arrived while reading').waitFor();
+  expect(Math.abs(await log(s.page).evaluate((el) => el.scrollTop) - top)).toBeLessThan(3);
+  await s.page.getByRole('button', { name: 'Jump to latest' }).click();
+  await expect.poll(() => log(s.page).evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(3);
+
+  await s.app.close();
+  const again = await launch(s.userData, s.downloads);
+  await again.page.getByRole('button', { name: 'CLANs', exact: false }).first().click();
+  await again.page.getByRole('button', { name: 'Join by Code' }).click();
+  await again.page.getByRole('button', { name: 'Rejoin', exact: false }).first().click();
+  await log(again.page).getByText('arrived while reading').waitFor();
+  expect(await log(again.page).getByTestId('chat-message').count()).toBe(50);
+  await log(again.page).evaluate((el) => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
+  const anchor = log(again.page).getByTestId('chat-message').first();
+  const label = await anchor.getAttribute('aria-label'), y = (await anchor.boundingBox())!.y;
+  await again.page.getByRole('button', { name: 'Load earlier messages' }).click();
+  await expect.poll(() => log(again.page).getByTestId('chat-message').count()).toBe(59);
+  const same = log(again.page).getByTestId('chat-message').filter({ has: again.page.getByText('history 09', { exact: true }) });
+  expect(await same.getAttribute('aria-label')).toBe(label);
+  expect(Math.abs((await same.boundingBox())!.y - y)).toBeLessThan(3);
+  for (const width of [1440, 1024, 390, 360]) {
+    await again.page.setViewportSize({ width, height: 844 });
+    expect(await log(again.page).evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight > 100)).toBe(true);
+    expect(await again.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await expect.poll(() => again.page.getByTestId('chat-input').isVisible()).toBe(true);
+  }
+}, 180_000);

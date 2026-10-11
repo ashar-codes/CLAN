@@ -120,14 +120,36 @@ def main():
         find('Share to CLAN'); tap('Save to my Inbox'); tap('Keep in Inbox'); find('~Inbox, '); ok('shared link + text saved to the Inbox (offline, private)')
 
         print('live CLAN')
+        # A real history longer than the API's first page; respect the host's send rate.
+        for i in range(55):
+            if i in (25, 50): time.sleep(11)
+            http(47499, '/chat', {'body': f'History {i:02d}'})
         tap('Home'); tap('Join a CLAN'); type_('Six digit classroom code', cls['code']); type_('Host address', cls['bootstrap']); tap('Join')
-        for b in ('Don’t allow', 'Allow'):
-            try: tap(b)
-            except AssertionError: pass
+        # Dismiss only an actual OS permission prompt; searching absent buttons must not scroll the room.
+        for n in nodes():
+            if n.get('resource-id') == 'com.android.permissioncontroller:id/permission_allow_button':
+                x, y = center(n); adb('shell', 'input', 'tap', str(x), str(y)); break
         until(lambda: any(m['status'] == 'approved' and m['connected'] for m in http(47499, '/state')['members']), 'member connected')
         ok('joined over OPAQUE + pinned TLS')
+        tap('Open chat'); find('Close chat', scroll=False)
         http(47499, '/chat', {'body': 'Welcome from the host'}); find('Welcome from the host'); ok('host message shown on the phone')
-        type_('Message', 'Hello from the phone'); tap('Send'); find('Hello from the phone'); ok('phone message accepted by the host')
+        type_('Message', 'Hello from the phone'); tap('Send'); find('Hello from the phone')
+        until(lambda: any(m['body'] == 'Hello from the phone' for m in http(47499, '/state')['messages']), 'phone chat persisted by host')
+        ok('phone message accepted by the host')
+        def earlier(label):
+            for _ in range(16):
+                try:
+                    point = find(label, tries=1, scroll=False)
+                    if point[0] > 0 and point[1] > 0: return point
+                except AssertionError: pass
+                adb('shell', 'input', 'swipe', '540', '700', '540', '1600', '300')
+            raise AssertionError(f'chat history not reachable: {label}')
+        x, y = earlier('Load earlier messages'); adb('shell', 'input', 'tap', str(x), str(y))
+        old_position = earlier('History 00')
+        http(47499, '/chat', {'body': 'New while reading'})
+        assert abs(find('History 00', tries=2, scroll=False)[1] - old_position[1]) < 20, 'new message moved the reader'
+        tap('Jump to latest'); find('New while reading'); ok('chat: older page reachable, reading position kept, jump to latest works')
+        tap('Close chat')
         http(47499, '/wall', {'mode': 'WHITEBOARD'}); http(47499, '/draw', {'text': 'Host sticky'}); find('Host sticky'); ok('host board op on the phone')
         board_text = 'Phone text ' + os.urandom(4).hex()  # disposable correlation tag, no personal data
         tap('Text'); x, y = find('board-canvas', scroll=False); adb('shell', 'input', 'tap', str(x), str(y + 200)); type_('Text to place', board_text, dismiss=False)
