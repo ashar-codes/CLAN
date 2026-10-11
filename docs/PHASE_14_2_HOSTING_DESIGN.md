@@ -33,3 +33,32 @@ Required deterministic tests: unauthorized delegation, copied public key, wrong 
 ## Notifications and Raise Hand
 
 Join requests and raised hands are session-scoped authenticated events. Only the host sees the full pending roster; members see their own status. Raising/lowering a hand never grants presenting, file or hosting permissions. A removed member loses the ability to raise a hand. Deduplicate repeat events, bound rates, clear hands on leave/end, and keep notifications local with privacy-preserving text. Background mobile notices require OS permission; no push service is added.
+
+
+### Session attention implementation contract
+
+`hand.set { raised }` is strict and caller-scoped; authenticated approved members with SEND_MESSAGE may change only
+their own state. `hand.dismiss { memberId }` requires host principal plus MANAGE_CLAN and validates same-session
+membership. Duplicate requested state is idempotent; state transitions are limited to one per second per member.
+The host receives the queue (name, session member ID, raised timestamp); each approved member gets only their own
+acknowledged boolean, never classmates' IDs or names through this signal. It grants no other capability.
+Hands are session memory only: cleared on removal/block/rejection, final socket departure and end; surviving concurrent
+sockets retain their state and reconnects read the current authoritative state. Clients do not replay stale raises.
+Controls appear only after the host advertises state, retaining older-host compatibility. Current alerts are in-app
+status/badges, with generic text and deduplication; background host OS notices are not yet implemented or tested.
+
+
+## Embedded runtime investigation (2026-10-11)
+
+The existing server requires Node >=24 and `node:sqlite`; mobile Hermes SQLCipher shims currently serve local modules,
+not Fastify/Node streams/TLS/listeners. Do not weaken the existing host security or add a second whiteboard/data model.
+The [official Node.js Mobile release](https://github.com/nodejs-mobile/nodejs-mobile/releases/tag/v18.20.4) and
+[React Native plugin package](https://github.com/nodejs-mobile/nodejs-mobile-react-native/blob/main/package.json)
+remain 18.20.4. That published runtime cannot execute the existing Node SQLite server unchanged.
+[Node 24 PR #158](https://github.com/nodejs-mobile/nodejs-mobile/pull/158) is open, includes a SQLite-support change,
+and supersedes [PR #151](https://github.com/nodejs-mobile/nodejs-mobile/pull/151). It is a potential source-build
+investigation, not a tested CLAN dependency or proof that Node 24 hosting is impossible. No fork/binary installed yet.
+Before adopting a pinned candidate, audit its current Node/security patch level, MIT/third-party notices, reproducible
+Android arm64 + 16 KB builds, React Native/foreground-service integration, app-private encrypted storage, SQLite,
+pinned TLS, OPAQUE, signing-key ownership and all existing server tests. Missing build/runtime evidence remains a gate.
+A maintained compatible runtime or a separately reviewed native server adapter is required; no server/permission bypass.

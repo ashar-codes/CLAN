@@ -43,6 +43,8 @@ export class Classroom extends EventEmitter {
   readonly teacherToken = newToken();
   private teacherTokenHash = Buffer.from(sha256(this.teacherToken), 'hex');
   private connections = new Map<string, number>();
+  private hands = new Map<string, number>();
+  private handChanges = new Map<string, number>();
   // Per-source lockout plus a classroom-wide limit so a distributed guesser can't sweep the 10^6 space.
   readonly ipThrottle: Throttle;
   readonly globalThrottle: Throttle;
@@ -132,7 +134,7 @@ export class Classroom extends EventEmitter {
         .run(memberId, this.id, fingerprint, p.devicePublicKey, trust, p.fullName, p.rollNo, p.deviceName, status, sha256(token), t + TOKEN_IDLE_MS, t, t, t);
     }
     this.log(status === 'approved' ? 'member.joined' : 'member.requested', memberId, { name: p.fullName, rollNo: p.rollNo, trust });
-    if (status === 'approved') this.remember(memberId);
+    if (status === 'approved') this.remember(memberId); else this.clearHand(memberId);
     this.emit('roster');
     return { memberId, token, status };
   }
@@ -189,10 +191,34 @@ export class Classroom extends EventEmitter {
     if (status === 'approved' && cur !== 'pending') throw new JoinError(409, 'not_pending', 'Only pending requests can be approved.');
     if (status === 'rejected' && cur !== 'pending') throw new JoinError(409, 'not_pending', 'Only pending requests can be rejected.');
     this.db.prepare('UPDATE members SET status = ? WHERE id = ?').run(status, memberId);
-    if (status === 'approved') this.remember(memberId);
+    if (status === 'approved') this.remember(memberId); else this.clearHand(memberId);
     this.log(`member.${status}`, memberId, {});
     this.emit('member', memberId, status);
     this.emit('roster');
+  }
+
+  /** Session-only attention signal. It never changes presenting, sharing or hosting permissions. */
+  handView(p: Principal) {
+    return { t: 'hands' as const, mine: p.role === 'student' && this.hands.has(p.memberId),
+      hands: p.role === 'teacher' ? [...this.hands].map(([memberId, raisedAt]) => ({ memberId, name: this.member(memberId)?.fullName ?? 'Member', raisedAt })) : [] };
+  }
+  setHand(p: Principal, raised: boolean) {
+    if (p.role !== 'student' || this.info().ended || this.status(p.memberId) !== 'approved' || !this.can(p, 'SEND_MESSAGE')) throw new JoinError(403, 'forbidden', 'Approved members only.');
+    if (this.hands.has(p.memberId) === raised) return; // duplicate delivery is harmless
+    const t = this.now(), previous = this.handChanges.get(p.memberId);
+    if (previous !== undefined && t - previous < 1000) throw new JoinError(429, 'rate_limited', 'Wait briefly before changing your hand.');
+    this.handChanges.set(p.memberId, t);
+    if (raised) this.hands.set(p.memberId, t); else this.hands.delete(p.memberId);
+    this.emit('hands');
+  }
+  dismissHand(p: Principal, memberId: string) {
+    if (p.role !== 'teacher' || this.info().ended || !this.can(p, 'MANAGE_CLAN')) throw new JoinError(403, 'forbidden', 'Host only.');
+    if (!this.member(memberId)) throw new JoinError(404, 'no_member', 'No such member in this session.');
+    if (this.hands.delete(memberId)) this.emit('hands');
+  }
+  private clearHand(memberId: string) {
+    this.handChanges.delete(memberId);
+    if (this.hands.delete(memberId)) this.emit('hands');
   }
 
   setLocked(locked: boolean) {
@@ -240,6 +266,7 @@ export class Classroom extends EventEmitter {
   end() {
     if ((this.db.prepare('SELECT ended_at e FROM sessions WHERE id = ?').get(this.id) as { e: number | null }).e !== null) return;
     this.db.prepare('UPDATE sessions SET ended_at = ? WHERE id = ?').run(this.now(), this.id);
+    this.hands.clear(); this.handChanges.clear(); this.emit('hands');
     this.log('class.ended', null, {});
     this.emit('state');
   }
@@ -250,6 +277,7 @@ export class Classroom extends EventEmitter {
     const after = Math.max(0, before + (open ? 1 : -1));
     this.connections.set(memberId, after);
     if ((before === 0) === (after === 0)) return;
+    if (after === 0) this.clearHand(memberId);
     const seenBefore = !!this.db.prepare('SELECT 1 FROM presence WHERE member_id = ? LIMIT 1').get(memberId);
     const kind = open ? (seenBefore ? 'reconnected' : 'connected') : 'disconnected';
     this.db.prepare('INSERT INTO presence (session_id, member_id, kind, ts) VALUES (?,?,?,?)').run(this.id, memberId, kind, this.now());

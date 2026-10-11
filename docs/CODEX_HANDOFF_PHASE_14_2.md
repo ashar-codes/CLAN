@@ -170,3 +170,14 @@ fixed; run2 INTERRUPTED exit130 before verifying fix. Do not call native cleanup
 User requested to free >=15GB; no further large builds/tests until space is available. Xcode now DOES recognize iOS26.5
 and iPhone17 simulator; component installation resolved, compile still pending. Recheck storage, restart only the
 owned emulator, rerun android_lifecycle.py, then attention/sharing and final gates. No physical Windows results yet.
+
+
+Raise Hand/session attention implementation is committed separately: host-only queue/ack, caller-only private state,
+dedup/rate limits, revoke/disconnect/end cleanup, old-host-compatible controls and in-app generic join/hand alerts.
+3 security/WSS tests, 1 actual Electron E2E and final typecheck PASS. Background host OS notifications/native execution
+are NOT TESTED/unfinished. `android_attention_sharing.py` is prepared but NOT RUN; execute only on disposable emulator
+after rebuilding final source, then final complete suites/reliability/install-update. Existing test APK predates final
+storage-error handling. Mobile cleanup completion rerun was interrupted, not PASS. Runtime PR research shows potential
+Node24/SQLite source candidates, not a compatible audited installed runtime. Persistent delegation/Android hosting and
+iOS compile/signing/packaging remain incomplete. Storage is the immediate safe-progress blocker; wait for user to free
+>=15GB. No new public deployment/cloud database, tags moved, signing changes, or candidate installers created.

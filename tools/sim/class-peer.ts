@@ -49,8 +49,12 @@ createServer((req, res) => {
         return json(res, { code: s.classroom.code, bootstrap: s.bootstrapUrl.replace(/^http:\/\//, ''), members: s.classroom.roster().map((m) => ({ id: m.id, name: m.fullName, status: m.status, connected: m.connected })),
           messages: g ? clan.chat.localPage(p, g.id, {}).map((m) => ({ who: m.authorName, body: m.body, attachment: m.attachment })) : [],
           board: (() => { const bd = clan.whiteboard.boardFor(clanId); const st = clan.whiteboard.state(bd.id); return [...st.objects.values()].filter((o) => !o.deleted).map((o) => ({ kind: o.kind, text: o.text ?? null, op: createHash('sha256').update(o.v.op).digest('hex').slice(0, 12) })); })(),
-          files: s.resources.listForTeacher().map((r) => ({ name: r.name, size: r.size })) });
+          hands: s.classroom.handView({ role: 'teacher' }).hands, filePolicy: s.classroom.info().fileSharingPolicy, pendingShares: s.shares.pending({ role: 'teacher' }),
+          files: s.resources.listForTeacher().map((r) => ({ name: r.name, size: r.size, sha256: r.sha256 })) });
       }
+      if (u === '/hand/dismiss') { s.classroom.dismissHand({ role: 'teacher' }, b.memberId); return json(res, { ok: true }); }
+      if (u === '/file-policy') { s.classroom.setFilePolicy(b.policy); return json(res, { ok: true }); }
+      if (u === '/share/review') { await s.shares.decide({ role: 'teacher' }, b.uploadId, b.accept); return json(res, { ok: true }); }
       if (u === '/chat') { send({ t: 'chat.send', id: randomUUID(), thread: { kind: 'group' }, body: b.body }); return json(res, { ok: true }); }
       if (u === '/wall') { send({ t: 'wb.wall', mode: b.mode ?? 'WHITEBOARD', takeover: true }); send({ t: 'wb.memberEdit', on: true }); return json(res, { ok: true }); }
       if (u === '/draw') { send({ t: 'wb.ops', ops: [{ t: 'put', id: randomUUID(), obj: randomUUID(), clock: ++wbClock, data: { kind: 'sticky', page: 0, x: 40, y: 40, w: 170, h: 120, color: '#17233b', fill: '#fde68a', width: 1, z: 1, text: b.text ?? 'From the host' } }] }); return json(res, { ok: true }); }

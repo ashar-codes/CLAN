@@ -39,6 +39,7 @@ export const MESSAGE_CAPABILITY: Partial<Record<ClientMessage['t'], ClanCapabili
   'assignment.create': 'CREATE_ASSIGNMENT', 'assignment.close': 'CREATE_ASSIGNMENT',
   'present.approve': 'MANAGE_PRESENTERS', 'present.decline': 'MANAGE_PRESENTERS', 'present.policy': 'MANAGE_PRESENTERS',
   'present.request': 'REQUEST_TO_PRESENT',
+  'hand.set': 'SEND_MESSAGE', 'hand.dismiss': 'MANAGE_CLAN',
   'chat.edit': 'SEND_MESSAGE', 'chat.react': 'SEND_MESSAGE', 'chat.typing': 'SEND_MESSAGE',
   // whiteboard: editing is decided per op by the relay (Classroom member editing can be switched on by the host)
   'wb.sync': 'VIEW_WHITEBOARD', 'wb.memberEdit': 'MANAGE_WHITEBOARD',

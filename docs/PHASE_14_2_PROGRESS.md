@@ -10,7 +10,8 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | IMPLEMENTED; host + desktop PASS, native UI pending | see git log | 70 targeted units + 5 desktop chat/sharing E2Es PASS |
 | P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | `7d16b04` | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
 | P0-5 | CLAN archive / remove from device / leave / delete | IMPLEMENTED; desktop PASS; native cleanup completion pending | see git log | Core/security units, desktop removal/delete E2Es PASS; native archive/leave PASS; cleanup confirmation defect fixed, rerun interrupted by low storage |
-| P1-6…10 | Notifications + Raise Hand, persistent mobile CLANs (standby hosts, epochs), Android hosting, iOS parity, installers | NOT STARTED | — | — |
+| P1-6 | In-app join alerts + Raise Hand | IMPLEMENTED; server + desktop PASS; native execution pending | see git log | 3 security/transport tests + desktop E2E PASS; native script prepared, blocked by storage |
+| P1-7…10 | Persistent mobile CLANs, Android hosting, iOS parity, installers | DESIGN/PREFLIGHT; implementation incomplete | see git log | Hosting design/runtime investigation; iOS prebuild/Pods PASS, compile pending storage; no candidates |
 
 ## P0-1 root cause and fix
 Two independent source defects, both consistent with "Windows host is discovered but nobody can connect" and
@@ -243,3 +244,22 @@ Xcode now lists iOS26.5 generic destinations and iPhone17 simulator; earlier com
 storage (790MiB free at stop). User asked to free >=15GB; do not delete user data/signing material. No IPA or iOS PASS.
 Machine load during checks ~23–33; available tests ran sequentially, and software gates remain distinguishable from
 physical hardware evidence. Final complete suites/reliability/install-update/candidate packaging remain pending.
+
+### Session attention and native sharing verification preparation
+
+Added caller-scoped strict Raise Hand messages, host-only acknowledgment, idempotence, one-second transition limit,
+and session cleanup on removal/final socket close/end. Host-only queue; other members receive only their own state.
+Controls wait for advertised host support; no new presenting/sharing/hosting rights. Desktop in-app join/hand alerts use
+generic deduplicated status text. Background host OS notifications are not implemented. Whiteboard protocol unchanged.
+PASS: 3 dedicated security/pinned-WSS tests (in **22/22** scoped run, 2.57 s, `/tmp/clan-142-hands-cleanup-unit.log`),
+1 real Electron E2E, 10.02 s (`/tmp/clan-142-hands-desktop-e2e.log`), final typecheck
+(`/tmp/clan-142-hands-cleanup-typecheck-final.log`). Final Outbox/filesystem mock contracts **5/5**, 343ms,
+`/tmp/clan-142-cleanup-contract-final.log`. Current source also reports storage failures without clearing typed drafts.
+
+Prepared `android_attention_sharing.py` for actual native Raise Hand and Classroom teacher-only/approval transitions,
+OS picker upload, quarantine, host approval and verified SHA. **NOT RUN**: storage gate. The existing loopback-only
+class-peer controller adds hands/policy/review visibility through actual authorized host APIs, not permission bypasses.
+Latest source differs from installed test APK by final storage-error handling; rebuild before final native verification.
+Node mobile published runtime is 18.20.4; open Node24/SQLite PRs are possible candidates but not audited/installed.
+See hosting design for primary source URLs and required safety/build evidence. Persistent delegation/native hosting remain
+unfinished; do not report durable availability, final software gates or Phase14.2 completion. No installer distribution.

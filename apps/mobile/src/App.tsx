@@ -193,6 +193,8 @@ function recordJoined(j: PairedJoin, info: ClassroomInfo) {
 
 function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
   const [leaving, setLeaving] = useState(false);
+  const [handSupported, setHandSupported] = useState(false);
+  const [handRaised, setHandRaised] = useState(false), [handError, setHandError] = useState('');
   const [joined, setJoined] = useState(first);
   const [status, setStatus] = useState<MemberStatus>(joined.status);
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
@@ -217,6 +219,8 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
         if (m.t.startsWith('wb.')) return boardRef.current?.onServer(m as never);
         if (m.t === 'hello') boardRef.current?.connected();
         chatRef.current.onServer(m);
+        if (m.t === 'hands') { setHandSupported(true); setHandRaised(m.mine); setHandError(''); }
+        if (m.t === 'error' && ['rate_limited', 'forbidden'].includes(m.code)) setHandError(m.message);
         if (m.t === 'members') setPeople(m.members);
         if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); recordJoined(joined, m.classroom); }
         if (m.t === 'class.state') setInfo(m.classroom);
@@ -269,6 +273,8 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
           {board.view?.wall === 'WHITEBOARD' && !presenting && <MobileBoard c={c} board={board} title={`${info.title} board`} />}
           <ChatSection c={c} chat={chat} conn={conn} people={people} canSendFiles={info.clanType !== 'CLASSROOM' || (info.fileSharingPolicy ?? 'teacher') !== 'teacher'} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
+          {handSupported && <Button c={c} disabled={quality === 'disconnected'} label={handRaised ? 'Lower hand' : 'Raise hand'} onPress={() => send({ t: 'hand.set', raised: !handRaised })} />}
+          {!!handError && <Text accessibilityRole="alert" style={{ color: c.danger }}>{handError}</Text>}
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />
           <Button c={c} label={leaving ? 'Leaving membership…' : 'Leave membership'} onPress={() => {
             if (leaving) return;

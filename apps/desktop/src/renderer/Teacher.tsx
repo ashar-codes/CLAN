@@ -131,6 +131,9 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
   const [stats, setStats] = useState<TransferStats | null>(null);
   const [can, setCan] = useState<ClanCapability[]>([]);
   const [shared, setShared] = useState('');
+  const [roomNotice, setRoomNotice] = useState('');
+  const [hands, setHands] = useState<{ memberId: string; name: string; raisedAt: number }[]>([]);
+  const pendingSeen = useRef(new Set<string>()), handsSeen = useRef(new Set<string>());
   const [pendingShares, setPendingShares] = useState<PendingShare[]>([]);
   const [reviewingShare, setReviewingShare] = useState<string | null>(null);
   const [presMsg, setPresMsg] = useState<PresentationMsg | null>(null);
@@ -158,7 +161,15 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         chatRef.current.onServer(m);
         if (m.t === 'hello') setCan(m.capabilities);
         if (m.t === 'hello' || m.t === 'class.state') setInfo(m.classroom);
-        else if (m.t === 'roster') setMembers(m.members);
+        else if (m.t === 'roster') {
+          const next = new Set(m.members.filter((member) => member.status === 'pending').map((member) => member.id));
+          if ([...next].some((id) => !pendingSeen.current.has(id))) setRoomNotice('A member is waiting for your approval.');
+          pendingSeen.current = next; setMembers(m.members);
+        } else if (m.t === 'hands') {
+          const next = new Set(m.hands.map((hand) => hand.memberId));
+          if ([...next].some((id) => !handsSeen.current.has(id))) setRoomNotice('A member raised their hand.');
+          handsSeen.current = next; setHands(m.hands);
+        }
         else if (m.t === 'timeline') setTimeline(m.events);
         else if (m.t === 'resources') setResources(m.resources as TeacherResourceView[]);
         else if (m.t === 'assignments') setAssignments(m.assignments as TeacherAssignmentView[]);
@@ -213,6 +224,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
           <button className="danger" onClick={end}>End {L.session}</button>
         </div>
       </header>
+      {roomNotice && <p role="status" onClick={() => setRoomNotice('')}>{roomNotice}</p>}
       {notice && <p className="error" onClick={() => setNotice('')}>{notice}</p>}
       {shared && <div className="toast" role="status">{shared}</div>}
       <RoomPresentation pres={pres} msg={presMsg} send={send} can={can} isHost ask={ask} boardOnWall={board.view?.wall === 'WHITEBOARD'} />
@@ -233,6 +245,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
         <TeacherFiles sessionId={info.sessionId} resources={resources} stats={stats} send={send} />
         {can.includes('CREATE_ASSIGNMENT') && <TeacherAssignments assignments={assignments} send={send} />}
         <div className="card">
+          <div aria-label="Raised hands" aria-live="polite"><h3>Raised hands ({hands.length})</h3>{hands.map((hand) => <div className="row between" key={hand.memberId}><span>{hand.name}</span><button className="small" onClick={() => send({ t: 'hand.dismiss', memberId: hand.memberId })}>Acknowledge hand</button></div>)}</div>
           <h3>Waiting to join {pending.length > 0 && <span className="badge">{pending.length}</span>}</h3>
           {pending.length === 0 && <p className="muted">{L.members} enter <b>{started.code}</b> in the CLAN app on the same network.</p>}
           {pending.map((m) => (

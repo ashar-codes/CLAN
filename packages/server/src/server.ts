@@ -454,6 +454,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const toMembers = () => {
     for (const [ws, p] of sockets) if (p.role === 'student' && classroom.status(p.memberId) === 'approved' && classroom.can(p, 'VIEW_MEMBERS')) send(ws, memberRoster(p));
   };
+  classroom.on('hands', () => { for (const [ws, p] of sockets) if (p.role === 'teacher' || classroom.status(p.memberId) === 'approved') send(ws, classroom.handView(p)); });
   classroom.on('roster', () => { toTeachers(hostRoster); toMembers(); schedule(); });
 
   // Coalesce bursts (40 students reporting progress) into at most one list broadcast per 150 ms.
@@ -486,6 +487,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   });
   // Removal/blocking revokes the peer role and tells every peer to refuse that device from now on.
   classroom.on('member', (memberId: string, status: string) => {
+    if (status === 'approved') for (const [ws, p] of sockets) if (p.role === 'student' && p.memberId === memberId) send(ws, classroom.handView(p));
     if (status === 'approved') return;
     void presentations.removed(memberId); // stops their presentation and drops their media connection now
     const fp = peers.revoke(memberId);
@@ -561,6 +563,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
           schedule();
           if (memberId) { classroom.connected(memberId, true); presentations.presence(memberId, true); }
           send(ws, presentationMsg(principal));
+          if (principal.role === 'teacher' || classroom.status(principal.memberId) === 'approved') send(ws, classroom.handView(principal));
           if (whiteboard?.canView(principal)) send(ws, { t: 'wb.wall', mode: whiteboard.wallMode(), by: whiteboard.wallBy, board: whiteboard.view(principal) });
           return;
         }
@@ -581,6 +584,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
         };
         try {
           switch (msg.t) {
+            case 'hand.set': classroom.setHand(principal, msg.raised); return send(ws, classroom.handView(principal));
+            case 'hand.dismiss': return classroom.dismissHand(principal, msg.memberId);
             case 'member.approve': return classroom.setStatus(msg.memberId, 'approved');
             case 'member.reject': return classroom.setStatus(msg.memberId, 'rejected');
             case 'member.remove': return classroom.setStatus(msg.memberId, 'removed');

@@ -65,3 +65,13 @@ This route is the unauthenticated discovery probe only; do not use `curl -k` for
 ## Return evidence
 
 Add `design/hardware/YYYY-MM-DD-windows-14.2.md` on `win/phase-14.2-retest`: full source commit, Windows version, network class/client isolation, selected adapter, Mac/Android model and OS, APK hash/certificate, commands and counts, plus PASS/FAIL/NOT TESTED for discovery join, manual join, chat, file hash, whiteboard, reconnect, host restart and revocation. No installer, database, raw log or private data belongs in Git. Share the evidence commit/PR with Mac Codex; do not merge or push to integration/release tags automatically.
+
+
+### Latest Phase 14.2 follow-up
+
+Fetch/pull only `phase-14.2`, record `git rev-parse HEAD`, and retain an isolated disposable test profile. In addition to
+join/file actions, verify native chat scrolling, Classroom approval policy, archive/leave and stored-copy removal after
+leave, plus host Raise Hand acknowledgment. End a local host before deleting its CLAN; verify cancel and last-copy
+warning, retry after failure, private notes and unrelated files retained. Test each platform using the actual tested
+source commit; earlier source-only/Mac/emulator results do not make Windows PASS. Return tested SHA, host/client OS,
+join/approval/reconnect results and sanitized errors. No public distribution or signing identity changes authorized.

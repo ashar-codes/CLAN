@@ -117,6 +117,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [info, setInfo] = useState<ClassroomInfo>(joined.classroom);
   const [quality, setQuality] = useState<Quality>('disconnected');
   const [closed, setClosed] = useState('');
+  const [handSupported, setHandSupported] = useState(false);
+  const [handRaised, setHandRaised] = useState(false), [handError, setHandError] = useState('');
   const [leaving, setLeaving] = useState(false), [leaveError, setLeaveError] = useState('');
   const [teacherWarn, setTeacherWarn] = useState(joined.teacherTrust === 'changed');
   const [resources, setResources] = useState<ResourceView[]>([]);
@@ -150,6 +152,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         chatRef.current.onServer(m);
         if (m.t === 'hello') boardRef.current.connected();
         if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
+        if (m.t === 'hands') { setHandSupported(true); setHandRaised(m.mine); setHandError(''); }
+        if (m.t === 'error' && m.code === 'rate_limited') setHandError(m.message);
         if (m.t === 'members') setPeople(m.members);
         if (m.t === 'presentation') setPresMsg(m);
         if (m.t === 'error' && ['presenting', 'whiteboard', 'not_shared'].includes(m.code)) boardRef.current.onServer(m);
@@ -218,6 +222,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       ) : null}
       <header className="bar">
         <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.hostName && <p className="muted small-text" data-testid="host-name">Hosted by {info.hostName}</p>}{info.description && <p className="muted small-text">{info.description}</p>}</div>
+        {handSupported && <button disabled={quality === 'disconnected'} aria-pressed={handRaised} onClick={() => send({ t: 'hand.set', raised: !handRaised })}>{handRaised ? 'Lower hand' : 'Raise hand'}</button>}
+        {handError && <p role="alert">{handError}</p>}
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button><button disabled={leaving} onClick={async () => {
           if (!confirm('Leave this CLAN membership? Personal data and stored copies stay. If the host is unavailable, remote revocation cannot be confirmed.')) return;
           setLeaving(true); setLeaveError(''); connRef.current?.close();

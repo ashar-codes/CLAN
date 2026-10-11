@@ -278,6 +278,8 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('assignment.close'), assignmentId: id }),
   z.object({ t: z.literal('class.peerAssist'), enabled: z.boolean() }),
   // student
+  z.object({ t: z.literal('hand.set'), raised: z.boolean() }).strict(),
+  z.object({ t: z.literal('hand.dismiss'), memberId: id }).strict(),
   z.object({ t: z.literal('transfer.state'), resourceId: id, state: TransferState, bytes: z.number().int().nonnegative() }),
   // presentation (screen sharing) — authority checked server-side per capability; see MESSAGE_CAPABILITY
   z.object({ t: z.literal('present.request') }),
@@ -295,9 +297,9 @@ export const ClientMessage = z.discriminatedUnion('t', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export const TEACHER_ONLY: ReadonlySet<ClientMessage['t']> = new Set([
   'member.approve', 'member.reject', 'member.remove', 'member.block', 'class.lock', 'class.policy', 'class.filePolicy', 'class.end',
-  'resource.available', 'resource.remove', 'resource.push', 'assignment.create', 'assignment.close', 'class.peerAssist',
+  'resource.available', 'resource.remove', 'resource.push', 'assignment.create', 'assignment.close', 'class.peerAssist', 'hand.dismiss',
 ]);
-export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.state', 'peer.probeResult']);
+export const STUDENT_ONLY: ReadonlySet<ClientMessage['t']> = new Set(['transfer.state', 'peer.probeResult', 'hand.set']);
 
 // ---- WebSocket: server -> client ----
 export type ServerMessage =
@@ -305,6 +307,8 @@ export type ServerMessage =
   | { t: 'hello'; role: 'teacher' | 'student'; memberId: string | null; status: MemberStatus | null; classroom: ClassroomInfo; serverTime: number; capabilities: ClanCapability[] }
   /** Member-visible roster for CLANs that grant VIEW_MEMBERS: names + CLAN-scoped chat handles (never device keys or ids). */
   | { t: 'members'; members: { name: string; host: boolean; connected: boolean; handle: string }[]; me: string }
+  /** Raised hands are host-only; members receive only their own acknowledged state. */
+  | { t: 'hands'; mine: boolean; hands: { memberId: string; name: string; raisedAt: number }[] }
   | { t: 'pong'; n: number; serverTime: number }
   | { t: 'class.state'; classroom: ClassroomInfo; capabilities?: ClanCapability[] }
   | { t: 'roster'; members: Member[] }
