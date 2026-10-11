@@ -61,7 +61,7 @@ export const CLAN_TABLES: Record<string, string> = {
   core_consumed: 'device-local', core_grants: 'personal', identity_users: 'device-local', identity_devices: 'device-local', identity_local: 'device-local',
   hosting_authority: 'hosting control', hosting_transitions: 'hosting control', hosting_revocations: 'hosting control', hosting_staging: 'hosting control',
   hosting_anchors: 'hosting control', hosting_checkpoints: 'hosting control', hosting_resolutions: 'hosting control', hosting_requests: 'hosting control', hosting_superseded: 'hosting control (retains this device\'s unchosen copy)',
-  ...Object.fromEntries(['ai_', 'reminders_', 'tasks_', 'rec_', 'notes_', 'notify_', 'exams_', 'courses_', 'flashcards_', 'sync_', 'capture_', 'diary_', 'saved_', 'study_']
+  ...Object.fromEntries(['ai_', 'reminders_', 'tasks_', 'rec_', 'notes_', 'notify_', 'exams_', 'courses_', 'flashcards_', 'sync_', 'capture_', 'diary_', 'saved_', 'study_', 'people_']
     .map((p) => [p, 'personal: the owner\'s own data, carried between their devices by personal sync, never by CLAN hosting'])),
 };
 export const classifyTable = (t: string) => CLAN_TABLES[t] ?? Object.entries(CLAN_TABLES).find(([k]) => k.endsWith('_') && t.startsWith(k))?.[1] ?? null;

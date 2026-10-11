@@ -31,10 +31,11 @@ import { Whiteboard, schema as whiteboardSchema } from './modules/whiteboard/ind
 import { Recordings, TapeChanged, schema as recordingsSchema } from './modules/recordings/index.ts';
 import { PersonalSync, profileProvider, schema as syncSchema } from './modules/sync/index.ts';
 import { HostAuthority, schema as hostingSchema } from './modules/hosting/index.ts';
+import { People, schema as peopleSchema } from './modules/people/index.ts';
 import type { AIProvider } from '@classroom/protocol';
 
 export const SCHEMAS: ModuleSchema[] = [eventsSchema, permissionsSchema, identitySchema, resourcesSchema, searchSchema, clansSchema, notesSchema, savedSchema, diarySchema, remindersSchema, chatSchema, captureSchema, notifySchema,
-  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema, syncSchema, hostingSchema];
+  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema, syncSchema, hostingSchema, peopleSchema];
 
 export type ClanApp = ReturnType<typeof openClan>;
 
@@ -79,6 +80,8 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   for (const m of [courses, tasks, exams, flashcards]) search.register(m.searchProvider());
   const whiteboard = new Whiteboard(db, bus, permissions, { courseOwner: (id) => courses.ownerOf(id), sessionOwner: (id) => study.ownerOf(id) }, now);
   const recordings = new Recordings(db, bus, { courses, files, notes }, now);
+  // Nearby people, friends, private conversations, direct files/voice notes and call logs (Phase 14.3 A+B).
+  const people = new People(db, bus, store, now, local);
   search.register(recordings.searchProvider());
   // timeline entries are their own search documents (so a hit opens the tape at that moment)
   bus.subscribe('search.recordings.events', TapeChanged, (e) => { search.forget('recordings', `${e.payload.tapeId}:`); for (const k of recordings.eventKeys(e.payload.tapeId)) search.reindex('recordings', k); }, { persistent: true });
@@ -90,7 +93,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   // Personal device sync: only the owner's personal data, each module through its own provider.
   const sync = new PersonalSync(db, identity, { tmpDir: join(opts.storageDir, 'sync-incoming'), ingest: async (p, mime) => { await mkdir(join(opts.storageDir, 'sync-incoming'), { recursive: true }); return store.ingest(p, mime); }, freeBytes: opts.freeBytes }, now);
   sync.register(profileProvider(identity));
-  for (const p of [notifications, courses, notes, saved, capture, diary, tasks, reminders, exams, flashcards, study, whiteboard, files, recordings].flatMap((m) => m.syncProviders())) sync.register(p);
+  for (const p of [notifications, courses, notes, saved, capture, diary, tasks, reminders, exams, flashcards, study, whiteboard, files, recordings, people].flatMap((m) => m.syncProviders())) sync.register(p);
   const SEARCH: Record<string, string> = { note: 'notes', 'saved-item': 'saved', course: 'courses', task: 'tasks', exam: 'exams', deck: 'flashcards', tape: 'recordings' };
   sync.onApplied((kind, id) => { if (SEARCH[kind]) search.reindex(SEARCH[kind], id); });
 
@@ -125,7 +128,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
     });
   };
 
-  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, hosting, me, syncClassrooms, tick, purgeClanProjection };
+  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, hosting, people, me, syncClassrooms, tick, purgeClanProjection };
 }
 
 export type { Principal, Scope } from './core/permissions.ts';
@@ -158,6 +161,7 @@ export { AGENTS } from './modules/ai/index.ts';
 export type { Board, BoardOwner } from './modules/whiteboard/index.ts';
 export type { Tape, TapeEvent, TapeEventKind } from './modules/recordings/index.ts';
 export { PersonalSync, SyncAuthError, contentHash, verifyEd25519, linkProof, fpOf, SMALL_FILE, type SyncSettings, type DeviceView, type ConflictView, type SelfDevice } from './modules/sync/index.ts';
+export { People, PeerError, PeopleChanged, type Contact, type Conversation, type Message as PeopleMessage, type Transfer as PeopleTransfer } from './modules/people/index.ts';
 export { HostAuthority, HostingError, CLAN_TABLES, classifyTable, type HostState, type HostStatus } from './modules/hosting/index.ts';
 export { clock as tapeClock } from './modules/recordings/index.ts';
 export * as ScreenShareEvents from './modules/screenshare/index.ts';
