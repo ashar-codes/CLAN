@@ -104,10 +104,13 @@ the delegation chain during pairing, conflict recovery UX, Android hosting runti
 5. Revocation: owner-signed, delivered over `/host/push/revoke` (or `addRevocation`); a revoked head stops writing but
    may hand back to the owner.
 
-Not implemented: hand-over UI (desktop/phone), phone-side `pushClan` wiring to the native pinned transport and
-keystore signer, conflict-recovery UX, member warning UI, free-space preflight on staging, carrying assignments,
-submissions and pending share reviews (they stay on the previous host), local module writes on a frozen device outside
-the host server (not fenced; the host UI writes through the fenced server).
+Since then implemented (see progress checkpoints G–K): complete CLAN data with table classification and explicit
+preflight; local-module and commit-point fencing; owner-signed conflict resolution with retained unchosen copies;
+storage preflight; rollback fence outside the database; desktop Hosting panel; phone owner → computer push.
+Still open: conflict resolution from the phone UI (desktop only), hand-over requests are not retried automatically when
+the host computer was offline (the owner re-sends), offline owner revocation reaches only reachable linked computers
+(listed), full-disk/profile restores (not just database backups) can still roll back state, and all hardware
+verification (docs/HOSTING_HARDWARE_TESTS_PHASE_14_2.md).
 
 ### Android runtime re-check (2026-10-11)
 

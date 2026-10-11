@@ -181,3 +181,15 @@ storage-error handling. Mobile cleanup completion rerun was interrupted, not PAS
 Node24/SQLite source candidates, not a compatible audited installed runtime. Persistent delegation/Android hosting and
 iOS compile/signing/packaging remain incomplete. Storage is the immediate safe-progress blocker; wait for user to free
 >=15GB. No new public deployment/cloud database, tags moved, signing changes, or candidate installers created.
+
+
+## Cloud continuation (Phase 14.2 persistent hosting) — read this first
+Branch `claude/laughing-clarke-yql2cy`, draft PR ashar-codes/CLAN#1 (do not merge yet). Persistent hosting is implemented
+in software: signed authority/epochs, complete CLAN checkpoints, resumable pull/push over the device link, server and
+local fencing, owner-only conflict resolution, rollback fence, desktop Hosting panel and phone Me › Hosting (phone owns,
+computer hosts; phones never host — no supported runtime). Progress: PHASE_14_2_PROGRESS.md checkpoints A–K.
+Exact hardware steps: HOSTING_HARDWARE_TESTS_PHASE_14_2.md (Mac, Windows, Android; nothing run on hardware yet).
+Linux cloud E2E recipe: Electron binary installed by its own checksum-verifying installer, Xvfb, unprivileged user,
+proxy variables unset for LAN traffic, `CLASSROOM_DEV_INSECURE_KEYSTORE=1` (disposable profiles), `CLAN_TEST_LOOPBACK=1`
+for two local instances (development-only switch). Also fixed: startup sweep deleted quarantined share bytes awaiting
+review on every host restart.
