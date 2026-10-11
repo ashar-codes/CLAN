@@ -36,3 +36,16 @@ describe('join through a multi-address advertisement', () => {
     expect(pairStarts).toBe(1);
   });
 });
+
+describe('host interface choice on Windows', () => {
+  it('binds the real LAN adapter, not WSL/Hyper-V, VMware, VirtualBox, hotspot or Bluetooth adapters', async () => {
+    const { candidateInterfaces } = await import('../src/netinfo.ts');
+    const v4 = (address: string) => [{ address, family: 'IPv4' as const, internal: false, netmask: '255.255.255.0', mac: '00:00:00:00:00:00', cidr: `${address}/24` }];
+    const names = candidateInterfaces({
+      'VMware Network Adapter VMnet8': v4('192.168.233.1'), 'VirtualBox Host-Only Network': v4('192.168.56.1'),
+      'vEthernet (WSL)': v4('172.28.0.1'), 'Local Area Connection* 2': v4('192.168.137.1'), 'Bluetooth Network Connection': v4('169.254.10.1'),
+      'Wi-Fi': v4('192.168.18.40'),
+    }).map((i) => i.name);
+    expect(names).toEqual(['Wi-Fi']);
+  });
+});
