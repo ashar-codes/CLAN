@@ -20,6 +20,7 @@ import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
 import { registerStudy } from './study.ts';
 import { registerSync } from './sync.ts';
+import { registerHosting } from './hosting.ts';
 import { registerData } from './data.ts';
 import { registerFeedback } from './feedback.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
@@ -422,7 +423,9 @@ app.whenReady().then(() => {
   registerTapes(clan);
   registerData(clan, backupsDir(), () => backupDb(db(), backupsDir(), { keep: 3 }));
   registerFeedback(clan, keystore);
-  void registerSync(clan, keystore, () => loadProfile().deviceName).then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
+  const syncReady = registerSync(clan, keystore, () => loadProfile().deviceName);
+  syncReady.then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
+  registerHosting(clan, { sync: syncReady, liveClanId: () => (server && !server.classroom.info().ended ? server.classroom.clan.id ?? null : null) });
   // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).
   const backup = () => { try { backupDb(db(), backupsDir(), { keep: 3 }); } catch (e) { logError('backup', e); } };
   setTimeout(backup, 5_000).unref(); setInterval(backup, 24 * 3600_000).unref();

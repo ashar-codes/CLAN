@@ -6,6 +6,7 @@ import { api } from '../App.tsx';
 import { errText, useLoad } from './useLoad.ts';
 import type { Experience } from './experience.ts';
 import { NearbyMini } from './NearbyMini.tsx';
+import { HostingPanel } from './HostingPanel.tsx';
 import type { NearbyClan } from './Commons.tsx';
 
 export const TYPE_LABEL: Record<ClanType, string> = { CLASSROOM: 'Classroom', STUDY_GROUP: 'Study group', PROJECT_TEAM: 'Project team', FRIENDS: 'Friends', TEMPORARY: 'Temporary' };
@@ -86,6 +87,7 @@ function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experi
         {tab === 'Chat' && <OfflineChat clanId={d.clan.id} />}
         {tab === 'Saved' && (d.saved.length ? d.saved.map((s) => <a key={s.id} className="line" href={s.url} target="_blank" rel="noreferrer noopener">{s.title}<span className="muted">{s.source}</span></a>) : <p className="muted">Share a link from Saved.</p>)}
       </section>
+      <HostingPanel clanId={d.clan.id} />
       <section className="card"><button onClick={() => setArchiveConfirm(true)}>Archive on this device</button>{archiveConfirm && <div role="group" aria-label="Confirm archive"><p>Hide this CLAN from My CLANs on this device? Files and membership remain available in Archived CLANs.</p><div className="row"><button onClick={() => { void api.clan.archiveLocal(id, true).then(() => onBack(), (e) => setArchiveError(errText(e))); }}>Confirm archive</button><button onClick={() => setArchiveConfirm(false)}>Cancel</button></div></div>}{archiveError && <p role="alert">{archiveError}</p>}</section>
       {!d.mine && <section className="card"><button onClick={() => setLeaveConfirm(true)}>Leave CLAN</button>{leaveConfirm && <div role="group" aria-label="Confirm leave"><p>Leave this CLAN on this device? Personal study data and stored copies stay. This offline action cannot confirm that the host revoked your session. Join again through the host's current approval policy.</p><div className="row"><button onClick={() => { void api.clan.leaveLocal(id).then(() => onBack(), (e) => setArchiveError(errText(e))); }}>Confirm leave</button><button onClick={() => setLeaveConfirm(false)}>Cancel</button></div></div>}</section>}
       <section className="card"><button disabled={cleaning} onClick={() => setCleanupConfirm(true)}>{d.mine ? 'Delete CLAN from this device' : 'Remove CLAN copy from this device'}</button>{cleanupConfirm && <div role="group" aria-label="Confirm CLAN cleanup">

@@ -442,4 +442,15 @@ describe('persistent hosting authority', () => {
       await expect(w.desk.h.ensureSpace(w.clan.id, 0)).resolves.toBeTruthy();
     } finally { w.close(); }
   });
+
+  it('a computer hosting the owner\'s CLAN cannot remove its copy; the owner deleting on the owner device still can', async () => {
+    const w = world();
+    try {
+      await seed(w);
+      const h = await handoff(w);
+      await w.desk.h.accept(h.chain, w.deskKey.publicKey);
+      expect(() => w.desk.app.clans.requestCleanup(w.clan.id, w.desk.app.me, 'delete')).toThrow('hosts this CLAN for its owner');
+      expect(w.phone.h.cleanupBlocked(w.clan.id)).toBeNull(); // the owner device (now standby) may still delete its own copy
+    } finally { w.close(); }
+  });
 });

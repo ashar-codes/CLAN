@@ -119,6 +119,8 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [closed, setClosed] = useState('');
   const [handSupported, setHandSupported] = useState(false);
   const [handRaised, setHandRaised] = useState(false), [handError, setHandError] = useState('');
+  /** Persistent hosting: this host paused/handed over, or its session failed the CLAN's host check. */
+  const [hostWarning, setHostWarning] = useState('');
   const [leaving, setLeaving] = useState(false), [leaveError, setLeaveError] = useState('');
   const [teacherWarn, setTeacherWarn] = useState(joined.teacherTrust === 'changed');
   const [resources, setResources] = useState<ResourceView[]>([]);
@@ -154,6 +156,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
         if (m.t === 'hands') { setHandSupported(true); setHandRaised(m.mine); setHandError(''); }
         if (m.t === 'error' && m.code === 'rate_limited') setHandError(m.message);
+        if (m.t === 'error' && m.code === 'host_unavailable') setHostWarning(`${m.message} Your messages and files were not sent; they can be sent again once the CLAN's current host is available.`);
         if (m.t === 'members') setPeople(m.members);
         if (m.t === 'presentation') setPresMsg(m);
         if (m.t === 'error' && ['presenting', 'whiteboard', 'not_shared'].includes(m.code)) boardRef.current.onServer(m);
@@ -186,7 +189,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
 
   // Approved: this device now holds a canonical membership in that CLAN (profile and identity are not copied).
   useEffect(() => {
-    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt, hostName: info.hostName, authority: info.authority }).catch(() => {});
+    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt, hostName: info.hostName, authority: info.authority }).catch((e: Error) => { if (info.authority) setHostWarning(`This session could not be confirmed as run by the CLAN's current host: ${e.message.replace(/^Error invoking remote method '[^']+': (\w+: )?/, '')} Do not share anything here until the owner confirms.`); });
   }, [status, info.sessionId, info.clanId, info.clanType, info.title, info.expiresAt, joined.teacherPublicKey]);
   const L = clanLabels(info.clanType);
   const pres = usePresentation({ baseUrl: session.url, bearer: session.token, sessionId: info.sessionId, msg: presMsg, send: (m) => connRef.current?.send(m), me: session.memberId });
@@ -223,6 +226,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       <header className="bar">
         <div><h2>{info.title}</h2><span className="muted" data-testid="secure-state">🔒 Secure connection · {info.clanType !== 'CLASSROOM' && `${L.type} · `}{L.host.toLowerCase()} {shortFingerprint(joined.teacherFingerprint)}{joined.teacherTrust === 'known' ? ' ✓' : ''}</span>{info.hostName && <p className="muted small-text" data-testid="host-name">Hosted by {info.hostName}</p>}{info.description && <p className="muted small-text">{info.description}</p>}</div>
         {handSupported && <button disabled={quality === 'disconnected'} aria-pressed={handRaised} onClick={() => send({ t: 'hand.set', raised: !handRaised })}>{handRaised ? 'Lower hand' : 'Raise hand'}</button>}
+        {hostWarning && <p role="alert" className="error">{hostWarning}</p>}
         {handError && <p role="alert">{handError}</p>}
         <div className="row"><span className={`pill ${quality}`}><span className={`dot ${quality}`} /> {QUALITY_LABEL[quality]}</span><button onClick={onLeave}>Leave</button><button disabled={leaving} onClick={async () => {
           if (!confirm('Leave this CLAN membership? Personal data and stored copies stay. If the host is unavailable, remote revocation cannot be confirmed.')) return;

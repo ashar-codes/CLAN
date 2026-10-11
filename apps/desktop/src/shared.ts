@@ -304,6 +304,34 @@ export type SyncApi = {
   onData(cb: () => void): () => void;
 };
 
+/** Persistent CLAN hosting: who may host, hand-over progress and recovery (docs/PHASE_14_2_HOSTING_DESIGN.md). */
+export type PreflightIssueView = { section: string; code: string; count: number; blocking: boolean; message: string };
+export type HostingView = {
+  clanId: string; me: string; isOwner: boolean; live: boolean; running: boolean;
+  hosting: null | { epoch: number; hostKey: string; ownerKey: string; state: 'active' | 'frozen' | 'relinquished' | 'standby' | 'conflict'; writable: boolean; reason: string | null };
+  hostName: string | null; ownerName: string | null; role?: 'host' | 'other';
+  checkpoint?: { hash: string; files: number; bytes: number } | null;
+  staging?: { hash: string; state: 'staging' | 'verified'; total: number; received: number } | null;
+  transition?: { epoch: number } | null;
+  conflict?: { message: string; forkEpoch: number; ours: string; theirs: string | null } | null; conflictNames: { ours: string; theirs: string | null } | null;
+  superseded?: { epoch: number; at: number } | null;
+  request: { destKey: string; destName: string; expiresAt: number } | null;
+  preflight: PreflightIssueView[]; computers: { fp: string; name: string; publicKey: string }[];
+};
+export type HostingApi = {
+  status(clanId: string): Promise<HostingView>;
+  enable(clanId: string): Promise<unknown>;
+  request(clanId: string, fp: string): Promise<unknown>;
+  decline(clanId: string): Promise<void>;
+  handover(clanId: string, acknowledge: string[]): Promise<{ done: boolean; epoch: number; destName: string }>;
+  cancel(clanId: string): Promise<void>;
+  resolve(clanId: string, choice: 'ours' | 'theirs'): Promise<{ state: string; notReached: string[] }>;
+  exportCopy(clanId: string): Promise<{ path: string; files: number } | null>;
+  acknowledgeSuperseded(clanId: string): Promise<void>;
+  onProgress(cb: (p: { clanId: string; done: number; total: number }) => void): () => void;
+  onChanged(cb: (p: { clanId: string; activated?: boolean }) => void): () => void;
+};
+
 /** API exposed by the preload as window.classroom. */
 export type DesktopApi = {
   clan: ClanApi;
@@ -313,6 +341,7 @@ export type DesktopApi = {
   study: StudyApi;
   ai: AIApi;
   sync: SyncApi;
+  hosting: HostingApi;
   /** Beta feedback, saved to a file the student chooses; diagnostics only when ticked (previewable). Never uploaded. */
   feedback: { preview(): Promise<unknown>; save(f: { kind: 'problem' | 'idea' | 'other'; text: string; diagnostics: boolean }): Promise<{ path: string } | null> };
   /** Me › Your data: export / import (folder the student picks), automatic backups folder. */

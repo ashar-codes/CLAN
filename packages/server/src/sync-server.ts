@@ -32,7 +32,7 @@ export type ReplicationHost = {
 };
 /** Destination side when the current host pushes (a phone accepts no connections). Same authentication; the
  *  implementation requires the caller to be the CLAN's verified current host and the delegation to name this device. */
-export type ReplicationSink = { [K in 'begin' | 'blob' | 'complete' | 'activate' | 'revoke' | 'resolve']: (callerKey: string, body: unknown) => unknown };
+export type ReplicationSink = { [K in 'begin' | 'blob' | 'complete' | 'activate' | 'revoke' | 'resolve' | 'request']: (callerKey: string, body: unknown) => unknown };
 export type SyncServerOptions = { host: SyncHost; tls: { certPem: string; keyPem: string; spkiSha256: string }; objectPath(sha256: string): string | null; port?: number; bind?: string; onChange?(): void;
   replication?: ReplicationHost; sink?: ReplicationSink; deviceKey?(fp: string): string | null };
 export const SYNC_SERVICE = 'clansync';
@@ -118,7 +118,7 @@ export async function startSyncServer(o: SyncServerOptions) {
 
   if (o.sink) {
     const k = o.sink;
-    for (const step of ['begin', 'blob', 'complete', 'activate', 'revoke', 'resolve'] as const) {
+    for (const step of ['begin', 'blob', 'complete', 'activate', 'revoke', 'resolve', 'request'] as const) {
       app.post(`/host/push/${step}`, async (req, reply) => { try { const b = body(req); return await k[step](callerKey(authed(req, b.raw)), b.json); } catch (e) { return fail(reply, e); } });
     }
   }

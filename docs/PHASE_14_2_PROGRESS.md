@@ -394,3 +394,21 @@ replace it until the owner acknowledges (after exporting what they want). Resolu
 without room for remaining blobs + activation copies + 256 MB reserve before any byte moves (pull and push).
 `handoverStatus` reports role, checkpoint, staging progress, signed transition, conflict and superseded copy for the
 screens. PASS: conflict resolution (forged refused, both outcomes, data retained), storage refusal; clan + fence suites.
+
+### P1-7 checkpoint J: desktop hand-over screens (cloud, real Electron E2E)
+
+CLAN room › Hosting panel (`HostingPanel.tsx`, IPC `apps/desktop/src/main/hosting.ts`): owner opt-in "Allow moving
+hosting" (signs epoch 0 with this computer's device key), owner request "Move hosting to <linked computer>" (sent to
+the current host over the device link when that is another computer), host confirmation listing blocking issues and
+checkbox acknowledgments, an explicit pause confirmation, progress, Retry (resumes; never silently resumes hosting)
+and Cancel (only before the transition is signed), incoming-transfer progress on the destination, conflict alert with
+owner-only "Keep …" choices (delivered to reachable linked computers, unreached ones listed) and export of this device's
+copy, retained-copy notice with export/acknowledge, host-unavailable warnings for members (desktop member screen) and
+the phone hosting limitation text. Deleting a CLAN copy is refused while this computer hosts it for another owner device
+or while records conflict. Development-only `CLAN_TEST_LOOPBACK=1` (unpackaged) lets two local instances link.
+
+Linux E2E environment (first time in cloud): Electron 44.5.1 binary via its checksum-verifying installer, Xvfb,
+unprivileged user (Chromium refuses root without `--no-sandbox`; the sandbox was NOT disabled), proxy variables
+cleared for local LAN traffic, `CLASSROOM_DEV_INSECURE_KEYSTORE=1` (no OS keychain in the container; disposable
+profiles only). PASS: `e2e/hosting.test.ts` (two app instances: link, allow, ask, confirm pause, hand over, destination
+hosts, source refuses "Host again" with the fence reason) and the existing `e2e/lifecycle.test.ts`.

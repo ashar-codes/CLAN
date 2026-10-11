@@ -204,7 +204,12 @@ export class Clans implements MembershipQuery {
   archive(id: string) { this.db.prepare('UPDATE clans_clans SET archived_at = ? WHERE id = ? AND archived_at IS NULL').run(this.now(), id); }
 
   /** Internal lifecycle controller: commit intent before any filesystem or network work. Not an erasure receipt. */
+  private cleanupGuard: (clanId: string) => string | null = () => null;
+  /** Persistent hosting: a reason this device's copy must not be removed (e.g. it is the live host of another device's CLAN). */
+  setCleanupGuard(f: (clanId: string) => string | null) { this.cleanupGuard = f; }
   requestCleanup(clanId: string, userId: string, kind: 'remove' | 'delete') {
+    const guarded = this.cleanupGuard(clanId);
+    if (guarded) throw new Error(guarded);
     const member = this.members(clanId).find((m) => m.userId === userId);
     if (!member || !this.get(clanId)) throw new Error('Not allowed.');
     if (kind !== 'remove' && kind !== 'delete') throw new Error('Invalid cleanup action.');

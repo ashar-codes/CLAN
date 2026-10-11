@@ -3,7 +3,7 @@
 // acknowledged and enforces the local state machine: active → frozen → relinquished (never back to writing at that
 // epoch), and staging → verified → acknowledged → active on the destination. It never stores private keys: callers
 // pass a signer backed by the OS keystore. It grants no session, membership or file rights by itself.
-import { mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
+import { copyFile, mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   authorityHash, b64u, CheckpointHeader, HostResolution, HostSessionAuthority, resolutionValid, sessionAuthorityProblem, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
@@ -43,6 +43,9 @@ export const schema: ModuleSchema = {
       PRIMARY KEY (clan_id, epoch));
     CREATE TABLE hosting_superseded (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), epoch INTEGER NOT NULL, chain TEXT NOT NULL, prev_state TEXT NOT NULL,
       created_at INTEGER NOT NULL, acknowledged_at INTEGER);
+  `, `
+    -- The owner's request that this host hand the CLAN to the delegated device (it acts only on the host user's confirmation).
+    CREATE TABLE hosting_requests (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), delegation TEXT NOT NULL, created_at INTEGER NOT NULL);
   `],
 };
 
@@ -57,7 +60,7 @@ export const CLAN_TABLES: Record<string, string> = {
   chat_me: 'device-local', chat_outbox: 'device-local', assign_seen: 'device-local (member cache)', search_docs: 'derived index', core_events: 'device-local',
   core_consumed: 'device-local', core_grants: 'personal', identity_users: 'device-local', identity_devices: 'device-local', identity_local: 'device-local',
   hosting_authority: 'hosting control', hosting_transitions: 'hosting control', hosting_revocations: 'hosting control', hosting_staging: 'hosting control',
-  hosting_anchors: 'hosting control', hosting_checkpoints: 'hosting control', hosting_resolutions: 'hosting control', hosting_superseded: 'hosting control (retains this device\'s unchosen copy)',
+  hosting_anchors: 'hosting control', hosting_checkpoints: 'hosting control', hosting_resolutions: 'hosting control', hosting_requests: 'hosting control', hosting_superseded: 'hosting control (retains this device\'s unchosen copy)',
   ...Object.fromEntries(['ai_', 'reminders_', 'tasks_', 'rec_', 'notes_', 'notify_', 'exams_', 'courses_', 'flashcards_', 'sync_', 'capture_', 'diary_', 'saved_', 'study_']
     .map((p) => [p, 'personal: the owner\'s own data, carried between their devices by personal sync, never by CLAN hosting'])),
 };
@@ -201,6 +204,15 @@ export class HostAuthority {
     return r.state === 'frozen' ? 'Hosting is paused for a hand-over.' : r.state === 'conflict' ? 'Conflicting hosting records; writes are unavailable until resolved.' : 'This device handed hosting over.';
   }
 
+  /** Removing this device's copy would destroy the CLAN's authoritative data: it hosts (or pauses) a CLAN owned by
+   *  another device, or its records are in conflict. The owner deleting their own CLAN on the owner device stays allowed. */
+  cleanupBlocked(clanId: string): string | null {
+    const r = this.row(clanId); if (!r) return null;
+    if (r.state === 'conflict') return 'This CLAN has conflicting hosting records; the owner must resolve them before any copy is removed.';
+    if ((r.state === 'active' || r.state === 'frozen') && this.anchorOf(clanId)?.source !== 'owner') return 'This computer currently hosts this CLAN for its owner. Hand hosting back or to another computer before removing it.';
+    return null;
+  }
+
   /** Gate for every host write at the current epoch. */
   assertWritable(clanId: string, localKey: string) {
     const s = this.status(clanId, localKey);
@@ -241,6 +253,22 @@ export class HostAuthority {
     if (free < need) throw new HostingError('insufficient_storage', `This device needs about ${Math.ceil(need / 1e6)} MB free to receive this CLAN; ${Math.floor(free / 1e6)} MB are available. Free some space and try again — nothing was changed.`);
     return { need, free };
   }
+  /** The owner's (verified) request to move hosting to the delegated device; the host user confirms before anything pauses. */
+  requestHandover(raw: unknown) {
+    const d = HostDelegation.safeParse(raw);
+    const r = d.success ? this.row(d.data.clanId) : undefined;
+    if (!d.success || !r) throw new HostingError('invalid', 'Malformed hand-over request.');
+    const problem = delegationProblem(d.data, { clanId: r.clan_id, ownerKey: r.owner_key, destKey: d.data.destKey, at: this.now(), revoked: this.revoked(r) });
+    if (problem) throw new HostingError('invalid_delegation', problem);
+    if (d.data.destKey === this.head(r).hostKey) throw new HostingError('invalid', 'That device already hosts this CLAN.');
+    this.db.prepare('INSERT INTO hosting_requests (clan_id, delegation, created_at) VALUES (?, ?, ?) ON CONFLICT (clan_id) DO UPDATE SET delegation = excluded.delegation, created_at = excluded.created_at').run(r.clan_id, JSON.stringify(d.data), this.now());
+    return d.data;
+  }
+  pendingRequest(clanId: string): HostDelegation | null {
+    const x = this.db.prepare('SELECT delegation FROM hosting_requests WHERE clan_id = ?').get(clanId) as { delegation: string } | undefined;
+    return x ? HostDelegation.parse(JSON.parse(x.delegation)) : null;
+  }
+  clearRequest(clanId: string) { this.db.prepare('DELETE FROM hosting_requests WHERE clan_id = ?').run(clanId); }
   /** Owner: signs which record is authoritative at a forked epoch. */
   resolve(clanId: string, owner: HostSigner, epoch: number, chosenHash: string): HostResolution {
     const r = this.must(clanId);
@@ -276,6 +304,20 @@ export class HostAuthority {
     return this.status(res.clanId, '')!;
   }
   resolutionsOf(clanId: string) { return (this.db.prepare('SELECT record FROM hosting_resolutions WHERE clan_id = ? ORDER BY epoch').all(clanId) as { record: string }[]).map((x) => HostResolution.parse(JSON.parse(x.record))); }
+  /** A readable copy of this device's CLAN data (all sections as JSON plus file bytes) in `<dir>/clan-<id>-<time>/`. */
+  async exportCopy(clanId: string, dir: string) {
+    const out = join(dir, `clan-${clanId}-${this.now()}`);
+    await mkdir(join(out, 'files'), { recursive: true });
+    let files = 0;
+    for (const p of this.providers.values()) {
+      let e;
+      try { e = p.export(clanId); } catch (err) { throw new HostingError('bad_state', `${p.section}: ${(err as Error).message}`); }
+      const fh = await open(join(out, `${p.section}.json`), 'a');
+      try { await fh.write(new TextEncoder().encode(JSON.stringify(e.rows, null, 1))); } finally { await fh.close(); }
+      for (const f of e.files) { if (SHA.test(f.sha256)) { await copyFile(f.path, join(out, 'files', f.sha256)).catch(() => {}); files++; } }
+    }
+    return { path: out, files };
+  }
   superseded(clanId: string) {
     const x = this.db.prepare('SELECT epoch, created_at FROM hosting_superseded WHERE clan_id = ? AND acknowledged_at IS NULL').get(clanId) as { epoch: number; created_at: number } | undefined;
     return x ? { epoch: x.epoch, at: x.created_at } : null;
@@ -414,6 +456,7 @@ export class HostAuthority {
     if (!chk.ok) throw new HostingError('invalid', chk.reason);
     // Relinquishment and the signed record commit together, before anything is sent.
     tx(this.db, () => {
+      this.db.prepare('DELETE FROM hosting_requests WHERE clan_id = ?').run(clanId);
       this.db.prepare('INSERT INTO hosting_transitions (clan_id, epoch, record, created_at) VALUES (?, ?, ?, ?)').run(clanId, r.epoch, JSON.stringify(t), at);
       this.setState(clanId, 'relinquished');
     });
@@ -522,6 +565,7 @@ export class HostAuthority {
         return { epoch: st.epoch, writable: st.writable };
       },
       revoke: (_callerKey: string, raw: unknown) => { this.addRevocation(raw); return { ok: true }; },
+      request: (_callerKey: string, raw: unknown) => { const d = this.requestHandover(raw); return { clanId: d.clanId, destKey: d.destKey }; },
       resolve: (_callerKey: string, raw: unknown) => {
         const b = z.object({ resolution: z.unknown(), chain: z.array(z.unknown()).max(1000).optional() }).strict().parse(raw);
         const st = this.resolveConflict(b.resolution, b.chain);

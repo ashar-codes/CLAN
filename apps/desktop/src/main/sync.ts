@@ -2,13 +2,13 @@
 // keystore), the LAN sync server, DNS-SD discovery of the account's own devices, a background schedule, and IPC for
 // Me › My Devices. Linking authorizes personal sync only: no CLAN host keys, memberships, OPAQUE material, TLS session
 // keys, AI credentials or other people's data are ever part of it (see docs/SYNC.md).
-import { BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { createHash, createHmac } from 'node:crypto';
 import { hostname } from 'node:os';
 import { z } from 'zod';
 import type { ClanApp } from '@clan/core';
 import { advertiseSync, browseSync, candidateInterfaces, createClassroomTls, logError, startSyncServer } from '@classroom/server';
-import { newEd25519, nodeSigner } from '@classroom/client/node';
+import { newEd25519, nodeSigner, pinnedTransport } from '@classroom/client/node';
 import { joinWithCode, lanSyncTransport } from '@classroom/client/sync';
 import { normalizeLinkCode } from '@classroom/protocol';
 import type { Keystore } from './keystore.ts';
@@ -32,7 +32,9 @@ export async function registerSync(c: ClanApp, keystore: Keystore, deviceName: (
   const server = await startSyncServer({ host: s, tls, objectPath: (sha) => c.files.personalObject(c.me, sha), onChange: arrived,
     deviceKey: (fp) => s.deviceKey(fp), replication: c.hosting.replicationSource({ localKey: signer.publicKey, signer }),
     sink: c.hosting.replicationSink({ localKey: signer.publicKey, signer }) }); // a phone pushes its CLAN here (phones accept no connections)
-  const endpoints = () => candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${server.port}`).slice(0, 8);
+  // Development/E2E only (unpackaged builds): also offer loopback so two local app instances can link without a LAN.
+  const loopback = !app.isPackaged && process.env.CLAN_TEST_LOOPBACK === '1' ? [`127.0.0.1:${server.port}`] : [];
+  const endpoints = () => [...candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${server.port}`), ...loopback].slice(0, 8);
 
   // ---- discovery: an hourly-rotating account tag (no names or ids on the network) ----
   let stopAd: (() => Promise<void>) | null = null, openCode: string | null = null;
@@ -95,5 +97,23 @@ export async function registerSync(c: ClanApp, keystore: Keystore, deviceName: (
   handle('sync:conflicts', () => s.conflicts());
   handle('sync:resolve', (id, choice) => { s.resolve(z.uuid().parse(id), z.enum(['mine', 'theirs', 'both']).parse(choice)); void syncAll(); });
   handle('sync:setSettings', (patch) => { const r = s.setSettings(z.object({ syncDiary: z.boolean(), files: z.enum(['all', 'small', 'off']), paused: z.boolean() }).partial().parse(patch)); void syncAll(); return r; });
-  return { close: async () => { await stopAd?.(); await server.close(); } };
+  /** One signed JSON POST to a linked computer, pinned to its registered certificate, trying its known addresses. */
+  const callLinked = async (fp: string, path: string, body: unknown) => {
+    const d = s.devices().find((x) => x.fp === fp && !x.current && !x.revoked);
+    if (!d || d.tlsSpki === 'none') throw new Error('That device is not a linked computer.');
+    const raw = JSON.stringify(body), t = pinnedTransport({ certificate: d.tlsCa, spkiSha256: d.tlsSpki });
+    const lan = [...seen.entries()].filter(([, at]) => Date.now() - at < 10 * 60_000).map(([ep]) => ep);
+    let last: Error = new Error('Your other computer could not be reached. Make sure it is on, on this network, and CLAN is open.');
+    for (const ep of [...new Set([...d.endpoints, ...lan])]) {
+      let res: Response;
+      try { res = await t.fetch(`https://${ep}${path}`, { method: 'POST', headers: { ...s.authHeaders('POST', path, raw), 'content-type': 'application/json' }, body: raw, signal: AbortSignal.timeout(60_000) }); }
+      catch (e) { last = e as Error; continue; } // unreachable at this address: try the next
+      const json = await res.json().catch(() => ({})) as { error?: string; message?: string };
+      if (!res.ok) throw Object.assign(new Error(json.message ?? `The other computer refused (${res.status}).`), { code: json.error });
+      s.setEndpoints(d.fp, [ep, ...d.endpoints.filter((x) => x !== ep)]);
+      return json;
+    }
+    throw last;
+  };
+  return { close: async () => { await stopAd?.(); await server.close(); }, callLinked, signer };
 }
