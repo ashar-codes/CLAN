@@ -182,3 +182,4 @@ export const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((re
 
 export * from './file-view.ts';
 export { pushClan, type PushSource } from './hosting-push.ts';
+export { peerAuthHeaders, peerSocketAuth, type PeerKeySigner } from './people-auth.ts';

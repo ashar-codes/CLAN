@@ -16,7 +16,7 @@ async function launch() {
 it('owner deletion confirms the last-copy risk, fences rehosting across restart and preserves personal data/source files', async () => {
   let page = await launch();
   await page.evaluate(() => window.classroom.clan.createNote({ title: 'Personal note stays', body: 'Private' }));
-  await page.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await page.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await page.getByRole('button', { name: 'Create CLAN', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Owner delete group');
   await page.getByRole('button', { name: 'Start CLAN', exact: true }).click(); await page.getByLabel('Join code').waitFor();
@@ -26,7 +26,7 @@ it('owner deletion confirms the last-copy risk, fences rehosting across restart 
   await app!.evaluate(({ dialog }, path) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [path] })) as never; }, source);
   expect(await page.evaluate(() => window.classroom.addFiles())).toMatchObject({ added: 1 });
   page.once('dialog', (dialog) => dialog.accept()); await page.getByRole('button', { name: 'End CLAN', exact: true }).click();
-  await page.getByRole('button', { name: 'CLANs', exact: true }).click(); await page.locator('.clan-card', { hasText: 'Owner delete group' }).click();
+  await page.getByRole('button', { name: 'My CLANs', exact: true }).click(); await page.locator('.clan-card', { hasText: 'Owner delete group' }).click();
   await page.getByRole('button', { name: 'Delete CLAN from this device', exact: true }).click();
   await page.getByText('This device may hold the only copy.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();

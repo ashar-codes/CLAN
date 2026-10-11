@@ -53,6 +53,18 @@ export function firstContactPost(base: string): { post: SeeingPost; release(): v
   };
 }
 
+/** People first contact: one signed POST to a computer whose code named its certificate; reports the SPKI it saw. */
+export async function firstContactRequest(base: string, path: string, headers: Record<string, string>, body: string): Promise<{ status: number; json: unknown; spki: string }> {
+  if (!/^https:\/\//.test(base)) throw new TransferError('insecure', 'People connections need HTTPS.');
+  const conn = newId('peer');
+  Native.configureFirstContact(conn);
+  try {
+    const r = await Native.request(conn, 'POST', `${base}${path}`, headers, body);
+    let json: unknown = {}; try { json = JSON.parse(r.body || '{}'); } catch { /* non-JSON error page */ }
+    return { status: r.status, json, spki: Native.seenPin(conn) ?? '' };
+  } finally { Native.release(conn); }
+}
+
 function on(event: 'progress' | 'wsOpen' | 'wsMessage' | 'wsClose', id: string, cb: (e: Ev) => void) {
   const sub = Native.addListener(event, (e) => { if (e.id === id) cb(e); });
   return () => sub.remove();

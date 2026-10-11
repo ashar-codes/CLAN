@@ -26,7 +26,7 @@ async function launch(env: Record<string, string> = {}): Promise<{ app: Electron
 }
 
 async function joinByCode(page: Page, name: string, code: string) {
-  await page.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await page.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await page.getByRole('button', { name: 'Join by Code' }).click();
   await page.getByLabel('Full name').fill(name);
   await page.getByLabel('Student / roll number').fill(`R-${name}`);
@@ -39,7 +39,7 @@ async function joinByCode(page: Page, name: string, code: string) {
 
 it('Study Group: create → join by code → approve → host file → peer-assisted → remove → end', async () => {
   const { app: hostApp, page: host } = await launch();
-  await host.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await host.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await host.getByRole('button', { name: 'Create CLAN' }).click();
   await expect.poll(() => host.getByRole('radio', { name: 'Study group' }).getAttribute('aria-checked')).toBe('true');
   await host.getByLabel('Name', { exact: true }).fill('OS Study Group');
@@ -97,6 +97,6 @@ it('Study Group: create → join by code → approve → host file → peer-assi
   expect(sha(readFileSync(join(dlB, 'OS Study Group', 'Notes.pdf')))).toBe(sha(big));
   await B.page.getByRole('button', { name: 'OK' }).click();
   await B.page.getByRole('button', { name: '← Back' }).click();
-  await B.page.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await B.page.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await B.page.locator('.clan-card', { hasText: 'OS Study Group' }).waitFor();
 }, 300_000);

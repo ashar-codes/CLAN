@@ -12,7 +12,7 @@ import { nativeFileActions } from '../modules/file-actions';
 import { downloadedFile, type Conn } from './transfers';
 
 type C = { text: string; muted: string; border: string; surface: string; accent: string; danger: string };
-async function verify(file: File, expected: string) {
+export async function verify(file: File, expected: string) {
   const fh = file.open(), hash = sha256.create(); let blocks = 0;
   try { for (;;) { const chunk = fh.readBytes(1 << 20); if (!chunk.length) break; hash.update(chunk); if (++blocks % 4 === 0) await new Promise((r) => setTimeout(r, 0)); } }
   finally { fh.close(); }

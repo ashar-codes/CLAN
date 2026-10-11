@@ -18,3 +18,4 @@ export { Shares } from './shares.ts';
 export { startSyncServer, advertiseSync, browseSync, SYNC_SERVICE, type SyncHost, type ReplicationHost, type ReplicationSink } from './sync-server.ts';
 export { purgeStoppedSessions } from './lifecycle.ts';
 export { serverCheckpointSection, SERVER_TABLES } from './hosting-sections.ts';
+export { startPeopleServer, advertisePeople, browsePeople, type PeopleHost } from './people-server.ts';

@@ -17,6 +17,15 @@ type Live = { tapeId: string; w: ChunkWriter; path: string; startedAt: number; m
 let micArmedUntil = 0;
 /** The microphone is granted only right after the student started a tape with “Microphone” ticked. */
 export const micArmed = () => Date.now() < micArmedUntil;
+let camArmedUntil = 0;
+/** The camera is granted only right after the student pressed “Scan with camera” (video only, never with audio). */
+export const camArmed = () => Date.now() < camArmedUntil;
+/** Arms the microphone or camera for the next request (15 s), asking macOS first. Throws if the OS refuses. */
+export async function armMedia(kind: 'microphone' | 'camera') {
+  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus(kind) !== 'granted' && !(await systemPreferences.askForMediaAccess(kind)))
+    throw new Error(`CLAN may not use the ${kind} (System Settings › Privacy & Security › ${kind === 'camera' ? 'Camera' : 'Microphone'}).`);
+  if (kind === 'camera') camArmedUntil = Date.now() + 15_000; else micArmedUntil = Date.now() + 15_000;
+}
 
 /** Must run before app ready. */
 export function registerMediaScheme() {
@@ -48,10 +57,7 @@ export function registerTapes(c: ClanApp) {
       courseId: Id.nullable().optional(), lectureId: Id.nullable().optional(), topicId: Id.nullable().optional(), studySessionId: Id.nullable().optional() }).parse(raw);
     if (live) throw new Error('A recording is already running.');
     if (await free() < CRITICAL_DISK) throw new Error('Not enough free disk space to record (less than 512 MB).');
-    if (o.mic) {
-      if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') !== 'granted' && !(await systemPreferences.askForMediaAccess('microphone'))) throw new Error('CLAN may not use the microphone (System Settings › Privacy & Security › Microphone).');
-      micArmedUntil = Date.now() + 15_000;
-    }
+    if (o.mic) await armMedia('microphone');
     const path = join(dir, `${crypto.randomUUID()}.webm.part`);
     const tape = c.recordings.start(me, { ...o, partPath: path });
     const w = await ChunkWriter.open(path, () => tell({ tapeId: tape.id, kind: 'write_failed', message: 'CLAN could not write the recording to disk. It stopped; what was recorded is kept.' }));

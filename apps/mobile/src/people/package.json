@@ -1,0 +1,4 @@
+{
+  "//": "ES module scope for the root type-check, which runs the phone runtime test in Node (Metro bundles these files the same either way).",
+  "type": "module"
+}

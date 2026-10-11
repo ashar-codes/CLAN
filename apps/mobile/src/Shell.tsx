@@ -1,6 +1,6 @@
 // The phone shell: Home · Study · Inbox · Diary · Me, a bottom bar with large targets, and the CLAN room look
 // (wall, wood, the student's CLANmate). Joining a live CLAN opens the existing pinned-TLS join flow.
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
 import { dataNotice, phoneClan, me } from './core/clan';
 import { syncNow } from './sync/phone';
@@ -10,19 +10,24 @@ import { InboxScreen } from './screens/Inbox';
 import { DiaryScreen } from './screens/Diary';
 import { DevicesScreen } from './screens/Devices';
 import { HostingScreen } from './screens/Hosting';
+import { PeopleScreen } from './screens/People';
+import { phonePeople } from './people/native';
 import { act, bump, Btn, Card, Field, Mate, Muted, RoomBand, Row, Screen, useC, useData, when } from './ui/kit';
 
-type Tab = 'home' | 'study' | 'inbox' | 'diary' | 'me';
-const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study', '✎'], ['inbox', 'Inbox', '⇣'], ['diary', 'Diary', '❦'], ['me', 'Me', '☺']];
+type Tab = 'home' | 'study' | 'people' | 'inbox' | 'diary' | 'me';
+const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study', '✎'], ['people', 'People', '☻'], ['inbox', 'Inbox', '⇣'], ['diary', 'Diary', '❦'], ['me', 'Me', '☺']];
 
 export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEditProfile(): void; intake?: ReactNode }) {
   const c = useC();
   const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false), [hosting, setHosting] = useState(false);
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
   const inboxCount = useData(() => phoneClan().capture.inbox(me()).length) ?? 0;
+  // people you already know reach you while the app is open (foreground only; nothing runs in the background)
+  useEffect(() => { try { if (phoneClan().people.contacts('all').length) void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
+  const peopleCount = useData(() => phoneClan().people.conversations().reduce((n, x) => n + x.unread + (x.state === 'invited_in' ? 1 : 0), 0) + phoneClan().people.contacts('requests').filter((r) => r.relation === 'incoming').length) ?? 0;
   const body = intake ?? (joining ? <Screen><Btn label="← Back" onPress={() => setJoining(false)} />{join}</Screen>
     : tab === 'home' ? <Home onJoin={() => setJoining(true)} go={setTab} onStudy={(t) => { setStudyInitial(t); setTab('study'); }} />
-    : tab === 'study' ? <StudyScreen initial={studyInitial} /> : tab === 'inbox' ? <InboxScreen /> : tab === 'diary' ? <DiaryScreen />
+    : tab === 'study' ? <StudyScreen initial={studyInitial} /> : tab === 'people' ? <PeopleScreen /> : tab === 'inbox' ? <InboxScreen /> : tab === 'diary' ? <DiaryScreen />
     : devices ? <View style={{ flex: 1 }}><DevicesScreen /><View style={{ position: 'absolute', top: 12, right: 16 }}><Btn small label="Done" onPress={() => setDevices(false)} /></View></View>
     : hosting ? <View style={{ flex: 1 }}><HostingScreen /><View style={{ position: 'absolute', top: 12, right: 16 }}><Btn small label="Done" onPress={() => setHosting(false)} /></View></View>
     : <MeScreen onDevices={() => setDevices(true)} onHosting={() => setHosting(true)} onEditProfile={onEditProfile} />);
@@ -32,10 +37,10 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
       {!intake && (
         <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface }}>
           {TABS.map(([t, l, ic]) => (
-            <Pressable key={t} accessibilityRole="tab" accessibilityLabel={t === 'inbox' && inboxCount ? `${l}, ${inboxCount} items` : l} accessibilityState={{ selected: tab === t }}
+            <Pressable key={t} accessibilityRole="tab" accessibilityLabel={t === 'inbox' && inboxCount ? `${l}, ${inboxCount} items` : t === 'people' && peopleCount ? `${l}, ${peopleCount} new` : l} accessibilityState={{ selected: tab === t }}
               onPress={() => { setTab(t); setJoining(false); setDevices(false); setHosting(false); }} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 18, color: tab === t ? c.text : c.muted }}>{ic}</Text>
-              <Text style={{ fontSize: 12, fontWeight: tab === t ? '800' : '500', color: tab === t ? c.text : c.muted }}>{l}{t === 'inbox' && inboxCount ? ` · ${inboxCount}` : ''}</Text>
+              <Text style={{ fontSize: 12, fontWeight: tab === t ? '800' : '500', color: tab === t ? c.text : c.muted }}>{l}{t === 'inbox' && inboxCount ? ` · ${inboxCount}` : t === 'people' && peopleCount ? ` · ${peopleCount}` : ''}</Text>
             </Pressable>
           ))}
         </View>

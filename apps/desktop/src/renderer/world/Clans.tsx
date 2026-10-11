@@ -28,7 +28,7 @@ export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { expe
       {notice && <p role="status">{notice}</p>}
       {!!pending?.length && <section className="card" aria-label="Pending CLAN cleanup"><h2>Cleanup pending</h2><p>These CLANs stay unavailable until cleanup finishes. Personal study data is retained.</p>{pending.map((item) => <div className="row between" key={item.id}><span>{item.name}</span><button disabled={retrying === item.id} onClick={() => { setRetrying(item.id); void api.clan.cleanup(item.id, item.kind).then((result) => { setNotice(`Cleanup finished. ${result.retained} modified or shared download copies retained.`); refresh(); }, (e) => setErr(errText(e))).finally(() => setRetrying(null)); }}>Retry cleanup</button></div>)}</section>}
       <header className="page-head">
-        <div><span className="eyebrow">Your places</span><h1 className="title world">CLANs</h1></div>
+        <div><span className="eyebrow">Your places</span><h1 className="title world">My CLANs</h1></div>
         <div className="row"><button className="primary" onClick={() => onCreate('STUDY_GROUP')}>Create CLAN</button><button onClick={onJoin}>Join by Code</button></div>
       </header>
       <div className="type-chips" aria-label="Start a CLAN of type">{(['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'] as const).map((t) => <button key={t} className={`chip-btn t-${t}`} onClick={() => onCreate(t)}>+ {TYPE_LABEL[t]}</button>)}</div>

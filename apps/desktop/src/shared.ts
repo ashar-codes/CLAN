@@ -304,6 +304,35 @@ export type SyncApi = {
   onData(cb: () => void): () => void;
 };
 
+/** Nearby People, friends, private chats, direct files, voice notes and calls (Phase 14.3 A+B). */
+export type PeopleContact = import('@clan/core').Contact & { safetyNumber?: string };
+export type PeopleConversation = import('@clan/core').Conversation;
+export type PeopleMessage = import('@clan/core').PeopleMessage;
+export type PeopleTransfer = import('@clan/core').PeopleTransfer;
+export type NearbyPersonView = { key: string; name: string; profile: import('@classroom/protocol').ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean };
+export type MyPeopleProfile = { key: string; fingerprint: string; qr: string; port: number; profile: { name: string; fields: Record<string, unknown>; fieldVisibility: Record<string, 'everyone' | 'friends' | 'nobody'>;
+  visibility: 'everyone' | 'friends' | 'invisible'; everyoneUntil: number | null; avatar: { sha256: string; size: number; mime: string; objectId: string } | null; updatedAt: number } };
+export type PeopleApi = {
+  me(): Promise<MyPeopleProfile>; qrImage(): Promise<string>; resetQr(): Promise<MyPeopleProfile>;
+  update(p: Record<string, unknown>): Promise<unknown>; pickAvatar(): Promise<unknown>; avatar(key: 'me' | string): Promise<string | null>;
+  visibility(v: 'everyone' | 'friends' | 'invisible', ms?: number): Promise<string>;
+  nearby(): Promise<NearbyPersonView[]>; contacts(f?: 'friends' | 'requests' | 'blocked' | 'all'): Promise<PeopleContact[]>; contact(key: string): Promise<PeopleContact | null>;
+  connectQr(text: string): Promise<PeopleContact>;
+  friend(action: 'request' | 'accept' | 'reject' | 'cancel' | 'remove' | 'block' | 'unblock' | 'verify', key: string, note?: string): Promise<void>;
+  conversations(): Promise<PeopleConversation[]>; invite(key: string, mode?: 'permanent' | 'temporary', ttlMs?: number | null): Promise<string>;
+  chat(action: 'accept' | 'decline' | 'end', convId: string): Promise<void>;
+  page(convId: string, before?: number | null, limit?: number): Promise<PeopleMessage[]>; send(convId: string, text: string): Promise<PeopleMessage>; retry(msgId: string): Promise<void>;
+  read(convId: string): Promise<void>; clear(convId: string): Promise<void>; remove(convId: string): Promise<void>;
+  sendFile(convId: string, files?: File[]): Promise<PeopleTransfer[]>; sendVoice(convId: string, bytes: Uint8Array, mime: string, durationMs: number): Promise<PeopleTransfer>;
+  file(action: 'accept' | 'decline' | 'cancel' | 'retry', transferId: string): Promise<void>; voiceBytes(transferId: string): Promise<Uint8Array>;
+  preview(transferId: string): Promise<FilePreview>; save(transferId: string): Promise<{ name: string } | null>; openWith(transferId: string): Promise<void>;
+  /** Lets the next microphone (voice note, call) or camera (QR scan) request through, for 15 s. */
+  armMedia(kind: 'microphone' | 'camera'): Promise<void>;
+  signal(key: string, body: Record<string, unknown>): Promise<boolean>; logCall(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }): Promise<void>;
+  onChanged(cb: (e: { what: string; convId?: string; key?: string }) => void): () => void;
+  onLive(cb: (e: { from: string; body: Record<string, unknown> & { kind: string; callId: string } }) => void): () => void;
+};
+
 /** Persistent CLAN hosting: who may host, hand-over progress and recovery (docs/PHASE_14_2_HOSTING_DESIGN.md). */
 export type PreflightIssueView = { section: string; code: string; count: number; blocking: boolean; message: string };
 export type HostingView = {
@@ -344,6 +373,7 @@ export type DesktopApi = {
   ai: AIApi;
   sync: SyncApi;
   hosting: HostingApi;
+  people: PeopleApi;
   /** Beta feedback, saved to a file the student chooses; diagnostics only when ticked (previewable). Never uploaded. */
   feedback: { preview(): Promise<unknown>; save(f: { kind: 'problem' | 'idea' | 'other'; text: string; diagnostics: boolean }): Promise<{ path: string } | null> };
   /** Me › Your data: export / import (folder the student picks), automatic backups folder. */

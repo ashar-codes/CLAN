@@ -44,3 +44,15 @@
   board; physical-phone frame time is unknown.
 * The SFU publish test spends ~15 s of its 20 s budget waiting for LiveKit to refuse an unauthorised publish (flake risk on
   a loaded machine).
+
+### Phase 14.3 A+B (people, chats, files, voice, calls)
+* Phones run no listener: phone-to-phone contact is impossible in this build; phones reach people on computers only,
+  and receive only while the app is in the foreground (no background connections by design).
+* Phones: no camera QR scanner (code text is pasted), no voice-note recording/playback, no calls — each needs a native
+  module and device validation (expo-camera, expo-audio, the existing react-native-webrtc). Desktop has all three.
+* Temporary chats rely on the other device honouring the agreed expiry; screenshots/saved copies cannot be prevented.
+* Profile pictures stay on the owner's device (peers see initials).
+* A friendship synced to your other linked devices is not known to the friend's devices until each of your devices
+  contacts them (each device key is a separate identity to them).
+* Calls are LAN-only (no STUN/TURN); networks with client isolation block discovery, chats and calls alike.
+* Nothing here has run on macOS/Windows/Android/iOS hardware yet — see PHASE_14_3_HARDWARE_TESTS.md.

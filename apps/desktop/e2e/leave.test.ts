@@ -11,7 +11,7 @@ async function launch(profile?: string) {
   const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded'); return { app, page, profile };
 }
 async function joinGroup(member: Page, host: Page, code: string, first: boolean) {
-  if (!await member.locator('.code-input').isVisible()) { await member.getByRole('button', { name: 'CLANs', exact: true }).click(); await member.getByRole('button', { name: 'Join by Code', exact: true }).click(); }
+  if (!await member.locator('.code-input').isVisible()) { await member.getByRole('button', { name: 'My CLANs', exact: true }).click(); await member.getByRole('button', { name: 'Join by Code', exact: true }).click(); }
   if (first) { await member.getByLabel('Full name').fill('Leaving student'); await member.getByLabel('Student / roll number').fill('TEST-LEAVE'); await member.getByLabel('Device name').fill('Disposable Mac'); await member.getByRole('button', { name: 'Save', exact: true }).click(); }
   await member.locator('.code-input').fill(code); await member.getByRole('button', { name: 'Join', exact: true }).click();
   await member.getByText('Waiting for the host').waitFor();
@@ -19,7 +19,7 @@ async function joinGroup(member: Page, host: Page, code: string, first: boolean)
 }
 it('membership leave revokes host rights, persists local leave, forgets reconnect and requires approval to rejoin', async () => {
   const host = await launch(); let member = await launch();
-  await host.page.getByRole('button', { name: 'CLANs', exact: true }).click(); await host.page.getByRole('button', { name: 'Create CLAN', exact: true }).click();
+  await host.page.getByRole('button', { name: 'My CLANs', exact: true }).click(); await host.page.getByRole('button', { name: 'Create CLAN', exact: true }).click();
   await host.page.getByLabel('Name', { exact: true }).fill('Leave study group'); await host.page.getByRole('button', { name: 'Start CLAN', exact: true }).click();
   const code = (await host.page.getByLabel('Join code').textContent())!.replace(/\D/g, '');
   await joinGroup(member.page, host.page, code, true);
@@ -38,7 +38,7 @@ it('membership leave revokes host rights, persists local leave, forgets reconnec
   // Disconnect retains membership. The separate offline leave explicitly describes its local-only effect.
   await member.page.getByRole('button', { name: 'Leave', exact: true }).click();
   await member.page.getByRole('button', { name: '← Back', exact: true }).click();
-  await member.page.getByRole('button', { name: 'CLANs', exact: true }).click();
+  await member.page.getByRole('button', { name: 'My CLANs', exact: true }).click();
   await member.page.locator('.clan-card', { hasText: 'Leave study group' }).click();
   await member.page.getByRole('button', { name: 'Leave CLAN', exact: true }).click();
   await member.page.getByRole('button', { name: 'Confirm leave', exact: true }).click();

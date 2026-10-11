@@ -349,3 +349,4 @@ export * from './whiteboard.ts';
 export * from './sync.ts';
 export * from './hosting.ts';
 export * from './checkpoint-rows.ts';
+export * from './people.ts';
