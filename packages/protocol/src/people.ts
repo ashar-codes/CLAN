@@ -6,6 +6,7 @@
 // the owner's visibility settings.
 import { z } from 'zod';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { hmac } from '@noble/hashes/hmac.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { b64u, canonicalBytes, ed25519Verify, keyFingerprint } from './trust.ts';
 
@@ -65,6 +66,8 @@ export type FileMeta = z.infer<typeof FileMeta>;
 export const PeerBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('friend.request'), note: Text(200).optional() }).strict(),
   z.object({ kind: z.literal('friend.accept') }).strict(),
+  /** Friend → friend: the secret that lets them recognise this person's anonymous nearby adverts (presenceTag). */
+  z.object({ kind: z.literal('presence.key'), key: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict(),
   z.object({ kind: z.literal('friend.reject') }).strict(),
   z.object({ kind: z.literal('friend.cancel') }).strict(),
   z.object({ kind: z.literal('friend.remove') }).strict(),
@@ -132,6 +135,13 @@ export function parseProfileQr(text: string): { key: string; endpoints: string[]
   if ((!endpoints.length && !links.length) || !/^[0-9a-f]{32}$/.test(invite)) return null;
   return { key: m[1]!, endpoints, spkiSha256: endpoints.length ? s : '', links, name: (q.get('n') ?? '').slice(0, 40), invite, intent: x === 'friend' || x === 'chat' ? x : 'profile' };
 }
+/**
+ * Nearby adverts carry a random id `r` and `t = presenceTag(presenceKey, r)`. Only friends hold the presence key, so
+ * only they can tell that an advert is this person; strangers see unlinkable random values. Devices connect on their
+ * own only to adverts that match a friend (or when they chose to be visible to everyone themselves), so nobody's
+ * identity leaks to an arbitrary advertiser.
+ */
+export const presenceTag = (presenceKey: string, r: string) => b64u.encode(hmac(sha256, b64u.decode(presenceKey), new TextEncoder().encode(`clan-presence/v1|${r}`)).slice(0, 12));
 /** Short fingerprint people compare to verify each other in person. */
 export const safetyNumber = (a: string, b: string) => {
   const h = sha256(new TextEncoder().encode(['clan-safety/v1', ...[keyFingerprint(a), keyFingerprint(b)].sort()].join('|')));

@@ -15,7 +15,7 @@
 // Identities stay hidden from passive observers; a responder discloses its identity only to someone its policy accepts;
 // signatures cover both ephemerals (no replay into another session) and the responder's covers the initiator's key
 // (no identity misbinding). Ephemeral keys are fresh per session (forward secrecy).
-import { x25519 } from '@noble/curves/ed25519.js';
+import { ed25519, x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -187,6 +187,12 @@ export function linkRespond(link: ByteLink, o: { signer: LinkSigner; accept(peer
     const dk = hkdf(sha256, dh, sha256(cat(h, te.encode(peer), te.encode(me))), te.encode(`${LINK_VERSION} data`), 64);
     return session(link, frames, 'responder', peer, dk.slice(32), dk.slice(0, 32));
   })(), o.timeoutMs ?? LINK_HANDSHAKE_MS, link);
+}
+
+/** A throwaway identity for looking at public profiles without revealing who is looking. */
+export function ephemeralSigner(): LinkSigner {
+  const sk = ed25519.utils.randomSecretKey();
+  return { publicKey: b64u.encode(ed25519.getPublicKey(sk)), sign: (b) => b64u.encode(ed25519.sign(b, sk)) };
 }
 
 /** In-memory connected pair of ByteLinks (tests, and same-process loopback). */

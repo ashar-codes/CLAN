@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { canonicalBytes, peerBindingValid, profileQr, parseProfileQr, PeerTlsBinding, ProfileView, type PeerEnvelope } from '@classroom/protocol';
 import { advertiseLinks, advertisePeople, browseLinks, browsePeople, listenLinks, startPeopleServer, tcpTransport } from '@classroom/server';
 import { hello, peerClient, PeerHttpError } from '@classroom/client/people';
-import { ConnectionManager, type LinkFiles, type People } from '@clan/core';
+import { ConnectionManager, probeAnonymously, type LinkFiles, type People } from '@clan/core';
+import { newEd25519, nodeSigner } from '@classroom/client/node';
 
 export type NearbyPerson = { key: string; name: string; profile: ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean };
 type Signer = { publicKey: string; sign(b: Uint8Array): string };
@@ -154,6 +155,9 @@ export async function startPeopleRuntime(o: {
   };
 
   // ---- discovery ----
+  // Adverts carry random ids plus our presence tag (recognisable only by friends). Adverts that match a friend get a
+  // real-identity connection; any other advert is looked at under a throwaway identity, so only people who chose
+  // Everyone Nearby answer, and nobody learns who is looking.
   const nearby = new Map<string, NearbyPerson>();
   let stopAd: (() => Promise<void>) | null = null, adVis = '', adAt = 0;
   const advertise = async () => {
@@ -162,41 +166,53 @@ export async function startPeopleRuntime(o: {
     await stopAd?.(); stopAd = null;
     adVis = vis; adAt = now();
     if (vis !== 'invisible' && o.discover) {
-      const r = randomBytes(12).toString('base64url'), a = advertisePeople({ port: server.port, r }), b = advertiseLinks({ port: linkPort, r: randomBytes(12).toString('base64url') });
+      const r1 = randomBytes(12).toString('base64url'), r2 = randomBytes(12).toString('base64url');
+      const a = advertisePeople({ port: server.port, r: r1, t: p.presenceTagFor(r1) }), b = advertiseLinks({ port: linkPort, r: r2, t: p.presenceTagFor(r2) });
       stopAd = async () => { await a(); await b(); };
     }
   };
-  const probe = async (endpoint: string, invite?: string) => {
-    const b = await hello(endpoint, o.signer, { invite });
-    const c = peerClient({ endpoint, tls: b, peerKey: b.key, signer: o.signer, invite });
+  const probe = async (endpoint: string, invite?: string, signer: Signer = o.signer) => {
+    const b = await hello(endpoint, signer, { invite });
+    const c = peerClient({ endpoint, tls: b, peerKey: b.key, signer, invite });
     const profile = await c.profile();
     const contact = p.meet({ profile, endpoints: [endpoint], tls: { certificate: b.certificate, spkiSha256: b.spkiSha256 } });
-    p.wake(b.key);
+    if (signer === o.signer) p.wake(b.key);
     return { binding: b, contact };
   };
+  const seen = (c: { key: string; name: string; profile: ProfileView | null; relation: string; verified: boolean } | null, endpoint: string, r: string) => {
+    if (!c?.profile || p.isBlocked(c.key)) return;
+    byAdvert.set(r, c.key);
+    nearby.set(c.key, { key: c.key, name: c.name, profile: c.profile, endpoint, relation: c.relation, seenAt: now(), verified: c.verified });
+    changed('nearby');
+  };
   const byAdvert = new Map<string, string>(); // advert id -> key
+  const lost = (r: string) => { const k = byAdvert.get(r); byAdvert.delete(r); if (k && ![...byAdvert.values()].includes(k) && nearby.delete(k)) changed('nearby'); };
+  const tried = new Map<string, number>();
+  const fresh = (r: string) => { if ((tried.get(r) ?? 0) > now() - 60_000) return false; tried.set(r, now()); return true; };
   const stopBrowse = o.discover ? browsePeople((s) => {
     const endpoint = `${s.addr}:${s.port}`;
     if (endpoint === `${o.bind ?? ''}:${server.port}` || s.port === server.port && o.endpoints(server.port).includes(endpoint)) return;
-    void probe(endpoint).then(({ contact }) => {
-      byAdvert.set(s.r, contact.key);
-      if (contact.profile) nearby.set(contact.key, { key: contact.key, name: contact.name, profile: contact.profile, endpoint, relation: contact.relation, seenAt: now(), verified: contact.verified });
-      changed('nearby'); void tick();
+    if (!fresh(s.r)) return;
+    const friend = s.t ? p.matchPresence(s.r, s.t) : null;
+    void probe(endpoint, undefined, friend ? o.signer : nodeSigner(newEd25519().privatePkcs8)).then(({ contact }) => {
+      if (friend && contact.key !== friend) return; // a presence tag copied by someone else: ignored
+      seen(contact, endpoint, s.r); void tick();
     }, () => { /* hidden or not reachable: never shown */ });
-  }, (r) => { const k = byAdvert.get(r); if (k && nearby.delete(k)) changed('nearby'); }) : () => {};
-  // link-only devices (phones) advertise a random id too: connect, and show them only if they let us in
-  const linkTried = new Map<string, number>();
+  }, lost) : () => {};
+  // link-only devices (phones) too
   const stopLinkBrowse = o.discover ? browseLinks((sv) => {
     const addr = `tcp:${sv.addr}:${sv.port}`;
     if (sv.port === linkPort && linkAddrs().includes(addr)) return;
-    if ((linkTried.get(sv.r) ?? 0) > now() - 60_000) return;
-    linkTried.set(sv.r, now());
-    void cm.connect(addr).then(async (session) => {
-      for (let i = 0; i < 20 && !p.contact(session.peerKey)?.profile; i++) await new Promise((r) => setTimeout(r, 100));
-      const c = p.contact(session.peerKey);
-      if (c?.profile && !p.isBlocked(c.key)) { nearby.set(c.key, { key: c.key, name: c.name, profile: c.profile, endpoint: addr, relation: c.relation, seenAt: now(), verified: c.verified }); changed('nearby'); }
-    }, () => { /* hidden or not reachable: never shown */ });
-  }) : () => {};
+    if (!fresh(sv.r)) return;
+    const friend = sv.t ? p.matchPresence(sv.r, sv.t) : null;
+    if (friend) {
+      void cm.connect(addr, { expectKey: friend }).then(() => seen(p.contact(friend), addr, sv.r), () => {});
+      return;
+    }
+    void tcpTransport().dial(addr).then((l) => probeAnonymously(l)).then(({ key, profile }) => {
+      try { seen(p.meet({ profile }), addr, sv.r); try { p.setLinkAddrs(key, [addr]); } catch { /* unusual address */ } } catch { /* no valid public profile */ }
+    }, () => { /* hidden or not reachable */ });
+  }, lost) : () => {};
   void advertise();
   const adTimer = setInterval(() => void advertise(), 30_000); adTimer.unref?.();
 

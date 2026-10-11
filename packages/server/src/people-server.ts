@@ -167,15 +167,19 @@ export async function startPeopleServer(o: PeopleServerOptions) {
 
 
 /** DNS-SD: TXT carries only a random id that the caller rotates; nothing identifies the person. */
-export function advertisePeople(o: { port: number; r: string }) {
+/** `r` random per advert; `t` the presence tag only friends can recognise (presenceTag). Nothing else is advertised. */
+export function advertisePeople(o: { port: number; r: string; t?: string }) {
   const bonjour = new Bonjour({ bind: '0.0.0.0' } as object, () => {});
-  bonjour.publish({ name: `CLAN person ${o.r.slice(0, 6)}`, type: PEER_SERVICE, port: o.port, txt: { v: '1', r: o.r }, disableIPv6: true });
+  bonjour.publish({ name: `CLAN person ${o.r.slice(0, 6)}`, type: PEER_SERVICE, port: o.port, txt: { v: '1', r: o.r, ...(o.t ? { t: o.t } : {}) }, disableIPv6: true });
   return () => new Promise<void>((r) => bonjour.unpublishAll(() => { bonjour.destroy(); r(); }));
 }
-export function browsePeople(onUp: (s: { addr: string; port: number; r: string }) => void, onDown?: (r: string) => void) {
+export function browsePeople(onUp: (s: { addr: string; port: number; r: string; t: string }) => void, onDown?: (r: string) => void, type: string = PEER_SERVICE) {
   const bonjour = new Bonjour({}, () => {});
-  const b = bonjour.find({ type: PEER_SERVICE });
-  b.on('up', (s) => { const txt = (s.txt ?? {}) as { v?: string; r?: string }; const addr = s.addresses?.find((a) => a.includes('.')) ?? s.referer?.address; if (txt.v === '1' && addr && txt.r && /^[A-Za-z0-9_-]{16,24}$/.test(txt.r)) onUp({ addr, port: s.port, r: txt.r }); });
+  const b = bonjour.find({ type });
+  b.on('up', (s) => {
+    const txt = (s.txt ?? {}) as { v?: string; r?: string; t?: string }; const addr = s.addresses?.find((a) => a.includes('.')) ?? s.referer?.address;
+    if (txt.v === '1' && addr && txt.r && /^[A-Za-z0-9_-]{8,24}$/.test(txt.r)) onUp({ addr, port: s.port, r: txt.r, t: typeof txt.t === 'string' && /^[A-Za-z0-9_-]{16}$/.test(txt.t) ? txt.t : '' });
+  });
   b.on('down', (s) => { const r = (s.txt as { r?: string } | undefined)?.r; if (r) onDown?.(r); });
   const t = setInterval(() => b.update(), 4000);
   return () => { clearInterval(t); b.stop(); bonjour.destroy(); };

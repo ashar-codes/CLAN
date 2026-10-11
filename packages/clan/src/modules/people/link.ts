@@ -2,7 +2,7 @@
 // Wi-Fi Aware, Apple peer-to-peer). The same People rules and storage apply as on the HTTPS path: envelopes are signed
 // end to end and applied by People.receive with the link-authenticated key; a message counts as delivered only when
 // the other device's authenticated reply says it was applied; files move only after consent and are verified.
-import { b64u, linkInitiate, linkRespond, type ByteLink, type LinkSigner, type PeerEnvelope, type SecureLink } from '@classroom/protocol';
+import { b64u, ephemeralSigner, linkInitiate, linkRespond, type ByteLink, type LinkSigner, type PeerEnvelope, type SecureLink } from '@classroom/protocol';
 import type { People } from './index.ts';
 
 /** File access the session needs (Node fs on computers, expo-file-system on phones). */
@@ -271,4 +271,20 @@ export class ConnectionManager {
     }
   }
   stop() { if (this.timer) clearInterval(this.timer); for (const s of this.sessions.values()) s.link.close('stopped'); this.sessions.clear(); }
+}
+
+/**
+ * Look at whoever answers on `link` under a throwaway identity: only people visible to Everyone Nearby answer, and
+ * they learn nothing about who looked. Returns their verified key and the public profile they chose to show.
+ */
+export async function probeAnonymously(link: ByteLink, timeoutMs = 5000): Promise<{ key: string; profile: unknown }> {
+  const sl = await linkInitiate(link, { signer: ephemeralSigner(), timeoutMs });
+  try {
+    const hi = await new Promise<Record<string, unknown>>((res, rej) => {
+      const t = setTimeout(() => rej(new Error('No profile.')), timeoutMs);
+      sl.onMessage((m) => { try { const x = JSON.parse(td.decode(m)) as Record<string, unknown>; if (x.t === 'hi') { clearTimeout(t); res(x); } } catch { /* ignore */ } });
+      sl.onClose(() => { clearTimeout(t); rej(new Error('Closed.')); });
+    });
+    return { key: sl.peerKey, profile: hi.profile };
+  } finally { sl.close('probe done'); }
 }

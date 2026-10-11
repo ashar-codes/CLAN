@@ -2,6 +2,7 @@
 // and a dialer for `tcp:host:port` addresses. Used by computers on any LAN or hotspot, and by tests.
 import { createServer, connect, type Socket } from 'node:net';
 import { Bonjour } from 'bonjour-service';
+import { browsePeople } from './people-server.ts';
 import type { ByteLink } from '@classroom/protocol';
 
 export const LINK_SERVICE = 'clanlink';
@@ -44,18 +45,10 @@ export const tcpTransport = (timeoutMs = 8000) => ({
   }),
 });
 
-/** DNS-SD for link listeners: only a random id, so a nearby observer learns nothing about who is listening. */
-export function advertiseLinks(o: { port: number; r: string }) {
-  const b = new Bonjour();
-  const svc = b.publish({ name: `clan-${o.r.slice(0, 8)}`, type: LINK_SERVICE, port: o.port, txt: { v: '1', r: o.r } });
-  return async () => { await new Promise<void>((r) => svc.stop?.(() => r()) ?? r()); b.destroy(); };
+/** DNS-SD for link listeners: a random id and the friends-only presence tag, nothing else. */
+export function advertiseLinks(o: { port: number; r: string; t?: string }) {
+  const bonjour = new Bonjour({ bind: '0.0.0.0' } as object, () => {});
+  bonjour.publish({ name: `clan-${o.r.slice(0, 8)}`, type: LINK_SERVICE, port: o.port, txt: { v: '1', r: o.r, ...(o.t ? { t: o.t } : {}) }, disableIPv6: true });
+  return () => new Promise<void>((r) => bonjour.unpublishAll(() => { bonjour.destroy(); r(); }));
 }
-export function browseLinks(onUp: (s: { addr: string; port: number; r: string }) => void) {
-  const b = new Bonjour();
-  const br = b.find({ type: LINK_SERVICE }, (s) => {
-    const r = String((s.txt as Record<string, unknown> | undefined)?.r ?? '');
-    const addr = (s.addresses ?? []).find((a) => /^[0-9.]+$/.test(a));
-    if (addr && /^[A-Za-z0-9_-]{8,24}$/.test(r)) onUp({ addr, port: s.port, r });
-  });
-  return () => { br.stop(); b.destroy(); };
-}
+export const browseLinks = (onUp: (s: { addr: string; port: number; r: string; t: string }) => void, onDown?: (r: string) => void) => browsePeople(onUp, onDown, LINK_SERVICE);

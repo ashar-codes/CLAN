@@ -4,11 +4,11 @@
 // consent) here; transports (desktop people server, phone client) only move signed envelopes and bytes. Calls are
 // live signaling only (never stored beyond a call log line). No private key is stored: a keystore-backed signer is
 // set at startup.
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { z } from 'zod';
 import {
-  CHAT_MODES, conversationId, envelopeValid, FILE_MAX, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
+  b64u, presenceTag, CHAT_MODES, conversationId, envelopeValid, FILE_MAX, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
   TEMP_TTLS, Visibility, VOICE_MAX, VOICE_MIME, type FileMeta, type PeerBody, type PeerSigner, type ProfileField,
 } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
@@ -52,6 +52,10 @@ export const schema: ModuleSchema = {
   `, `
     -- Where the person's secure link listener was last reachable ("tcp:host:port"), for router-free and hotspot links.
     ALTER TABLE people_contacts ADD COLUMN link_addrs TEXT NOT NULL DEFAULT '[]';
+  `, `
+    -- Presence: our secret for friends to recognise our anonymous adverts, and each friend's.
+    ALTER TABLE people_profile ADD COLUMN presence TEXT;
+    ALTER TABLE people_contacts ADD COLUMN presence_key TEXT;
   `],
 };
 
@@ -168,6 +172,24 @@ export class People {
     return this.visibility() === 'everyone';
   }
   /** The secret in this device's profile QR (created once; `reset` makes old printed/shared codes stop working). */
+  /** Our presence secret (shared only with friends). Rotated when someone stops being a friend. */
+  presenceKey(rotate = false) {
+    const r = this.db.prepare('SELECT presence FROM people_profile').get() as { presence: string | null } | undefined;
+    if (r?.presence && !rotate) return r.presence;
+    this.profileRow();
+    const k = b64u.encode(randomBytes(32));
+    this.db.prepare('UPDATE people_profile SET presence = ? WHERE one = 1').run(k);
+    if (rotate) for (const f of this.contacts('friends')) this.queue(f.key, { kind: 'presence.key', key: k });
+    return k;
+  }
+  /** The tag to put next to random id `r` in our adverts. */
+  presenceTagFor(r: string) { return presenceTag(this.presenceKey(), r); }
+  /** Which friend (if any) an advert {r, t} belongs to. */
+  matchPresence(r: string, t: string): string | null {
+    if (!/^[A-Za-z0-9_-]{8,24}$/.test(r) || !/^[A-Za-z0-9_-]{16}$/.test(t)) return null;
+    const rows = this.db.prepare("SELECT c.key, c.presence_key FROM people_contacts c JOIN people_relations r ON r.key = c.key WHERE r.state = 'friend' AND r.blocked = 0 AND c.presence_key IS NOT NULL").all() as { key: string; presence_key: string }[];
+    return rows.find((x) => presenceTag(x.presence_key, r) === t)?.key ?? null;
+  }
   inviteToken(reset = false) {
     const r = this.db.prepare('SELECT invite FROM people_profile').get() as { invite: string | null } | undefined;
     if (r?.invite && !reset) return r.invite;
@@ -238,7 +260,7 @@ export class People {
   }
   acceptFriend(key: string) {
     if (this.rel(key)?.state !== 'incoming') throw new PeerError('not_found', 'There is no request from this person.');
-    tx(this.db, () => { this.setRel(key, 'friend'); this.queue(key, { kind: 'friend.accept' }); this.ensureConversation(key, 'active', 'permanent', null); });
+    tx(this.db, () => { this.setRel(key, 'friend'); this.queue(key, { kind: 'friend.accept' }); this.queue(key, { kind: 'presence.key', key: this.presenceKey() }); this.ensureConversation(key, 'active', 'permanent', null); });
   }
   rejectFriend(key: string) {
     if (this.rel(key)?.state !== 'incoming') throw new PeerError('not_found', 'There is no request from this person.');
@@ -250,15 +272,22 @@ export class People {
   }
   removeFriend(key: string) {
     if (this.rel(key)?.state !== 'friend') throw new PeerError('not_found', 'This person is not a friend.');
-    tx(this.db, () => { this.setRel(key, 'none'); this.queue(key, { kind: 'friend.remove' }); });
+    tx(this.db, () => { this.setRel(key, 'none'); this.queue(key, { kind: 'friend.remove' }); this.forgetPresence(key); });
+  }
+  /** They are no longer a friend: stop recognising them and make our future adverts unrecognisable to them. */
+  private forgetPresence(key: string) {
+    this.db.prepare('UPDATE people_contacts SET presence_key = NULL WHERE key = ?').run(key);
+    this.presenceKey(true);
   }
   /** Blocking is local and silent: nothing from them is accepted, nothing is sent to them, pending requests end. */
   block(key: string) {
     if (!/^[A-Za-z0-9_-]{43}$/.test(key) || key === this.myKey()) throw new PeerError('invalid', 'Unknown person.');
     this.touch(key);
+    const wasFriend = this.rel(key)?.state === 'friend';
     tx(this.db, () => {
       this.db.prepare(`INSERT INTO people_relations (key, state, blocked, updated_at) VALUES (?, 'none', 1, ?) ON CONFLICT (key) DO UPDATE SET state = 'none', blocked = 1, updated_at = excluded.updated_at`).run(key, this.now());
       this.db.prepare('DELETE FROM people_outbox WHERE to_key = ?').run(key);
+      if (wasFriend) this.forgetPresence(key);
       this.db.prepare("UPDATE people_conversations SET state = 'ended', updated_at = ? WHERE peer_key = ? AND state <> 'ended'").run(this.now(), key);
     });
     this.changed('relations', { key });
@@ -570,12 +599,17 @@ export class People {
           this.setRel(e.from, 'incoming', body.note ?? null); break;
         case 'friend.accept':
           if (rel?.state !== 'outgoing' && rel?.state !== 'friend') throw new PeerError('refused', 'No request to accept.');
+          if (rel?.state !== 'friend') this.queue(e.from, { kind: 'presence.key', key: this.presenceKey() });
           this.setRel(e.from, 'friend');
           if (!c || c.state !== 'active') this.ensureConversation(e.from, 'active', 'permanent', null);
           break;
+        case 'presence.key':
+          if (!friend) throw new PeerError('refused', 'Only friends share presence.');
+          this.db.prepare('UPDATE people_contacts SET presence_key = ? WHERE key = ?').run(body.key, e.from);
+          break;
         case 'friend.reject': if (rel?.state === 'outgoing') this.setRel(e.from, 'none'); break;
         case 'friend.cancel': if (rel?.state === 'incoming') this.setRel(e.from, 'none'); break;
-        case 'friend.remove': if (rel?.state === 'friend') this.setRel(e.from, 'none'); break;
+        case 'friend.remove': if (rel?.state === 'friend') { this.setRel(e.from, 'none'); this.forgetPresence(e.from); } break;
         case 'chat.invite': {
           const same = c?.state === 'active' && c.mode === body.mode && c.ttl_ms === body.ttlMs;
           if (same) { this.queue(e.from, { kind: 'chat.accept', mode: body.mode, ttlMs: body.ttlMs }); break; }
