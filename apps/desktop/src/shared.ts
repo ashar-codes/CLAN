@@ -1,3 +1,4 @@
+import type { FilePreview } from '@classroom/client';
 import type { DiscoveredClassroom } from '@classroom/server/discovery';
 import type { Iface } from '@classroom/server';
 import type { ChatMessageView, ChatThreadView, ClassroomInfo, ClientMessage, JoinPolicy, MemberStatus, Receipt, ResourceView, ShareResult, ShareUploadStatus, PendingShare, StudentProfile, TransferState } from '@classroom/protocol';
@@ -350,6 +351,9 @@ export type DesktopApi = {
   pause(resourceId: string): Promise<void>;
   showFile(sessionId: string, resourceId: string): Promise<void>;
   openFile(sessionId: string, resourceId: string): Promise<void>;
+  previewFile(sessionId: string, resourceId: string): Promise<FilePreview>;
+  saveFile(sessionId: string, resourceId: string): Promise<{ name: string } | null>;
+  openWithFile(sessionId: string, resourceId: string): Promise<void>;
   onFileState(cb: (s: FileState) => void): () => void;
   pickSubmission(allowedExtensions: string[]): Promise<{ pickId: string; name: string; size: number } | null>;
   submit(c: Conn, assignmentId: string, pickId: string): Promise<StoredReceipt>;

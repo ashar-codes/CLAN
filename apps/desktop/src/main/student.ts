@@ -2,11 +2,15 @@
 // The renderer only ever passes opaque ids (resource ids, pick ids); it can never name a local path.
 import { app, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
-import { partPaths, uploadShareResult, uploadSubmission } from '@classroom/client/node';
+import { access, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { basename, extname, join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { windowsOpenWith } from './open-with.ts';
+import { partPaths, sha256File, uploadShareResult, uploadSubmission } from '@classroom/client/node';
 import { completedFileReader, PeerAgent } from '@classroom/client/peer';
-import { api, type PeerInfo } from '@classroom/client';
+import { api, IMAGE_PREVIEW_BYTES, TEXT_PREVIEW_BYTES, previewImageMime, previewKind, type FilePreview, type PeerInfo } from '@classroom/client';
 import { candidateInterfaces } from '@classroom/server';
 import { safeFileName, verifyReceipt, type Receipt, type ResourceView, type ShareResult, type SignedManifest } from '@classroom/protocol';
 import type { Conn, FileState, StoredReceipt } from '../shared.ts';
@@ -32,6 +36,7 @@ export class StudentFiles {
   private picks = new Map<string, { path: string; name: string; size: number }>();
   private win: () => BrowserWindow | undefined;
   private trust: Trust;
+  private hostFile: (sessionId: string, id: string) => { path: string; name: string; sha256: string } | null;
   private dataDir = app.getPath('userData');
 
   // ---- data plane (Milestone 2.75) ----
@@ -42,7 +47,7 @@ export class StudentFiles {
   private offeredCompleted = new Set<string>();
   sharing = true; // "Share with classmates" (student can pause seeding)
 
-  constructor(win: () => BrowserWindow | undefined, trust: Trust) { this.win = win; this.trust = trust; }
+  constructor(win: () => BrowserWindow | undefined, trust: Trust, hostFile: (sessionId: string, id: string) => { path: string; name: string; sha256: string } | null = () => null) { this.win = win; this.trust = trust; this.hostFile = hostFile; }
 
   /** Serve only on the interface that reaches the teacher (same subnet), never on other networks. */
   private classroomInterface(teacherHost: string) {
@@ -198,8 +203,54 @@ export class StudentFiles {
     return d.path;
   }
   async show(c: Pick<Conn, 'sessionId'>, resourceId: string) { shell.showItemInFolder(await this.pathOf(c, resourceId)); }
-  async open(c: Pick<Conn, 'sessionId'>, resourceId: string) {
+  private async verified(c: Pick<Conn, 'sessionId'>, resourceId: string) {
+    const hosted = this.hostFile(c.sessionId, resourceId);
+    if (hosted) {
+      if ((await sha256File(hosted.path)) !== hosted.sha256) throw new Error('The hosted file failed verification.');
+      return hosted;
+    }
     const p = await this.pathOf(c, resourceId);
+    const d = (await this.completed())[`${c.sessionId}:${resourceId}`]!;
+    if ((await sha256File(p)) !== d.sha256) throw new Error('This file changed after download. Download it again before opening or saving it.');
+    return { path: p, name: basename(p), sha256: d.sha256 };
+  }
+  async preview(c: Pick<Conn, 'sessionId'>, id: string): Promise<FilePreview> {
+    const { path, name } = await this.verified(c, id), kind = previewKind(name), size = (await stat(path)).size;
+    if (kind === 'text' && size <= TEXT_PREVIEW_BYTES) {
+      const text = await readFile(path, 'utf8');
+      if (!text.includes('\0')) return { kind: 'text', text };
+    }
+    if (kind === 'image' && size <= IMAGE_PREVIEW_BYTES) {
+      const bytes = await readFile(path), mime = previewImageMime(bytes);
+      if (mime) return { kind: 'image', uri: `data:${mime};base64,${bytes.toString('base64')}` };
+    }
+    return { kind: 'metadata', reason: 'No embedded preview for this file or size. Use a viewer or save a copy.' };
+  }
+  async save(c: Pick<Conn, 'sessionId'>, id: string) {
+    const file = await this.verified(c, id), win = this.win();
+    if (!win) return null;
+    const result = await dialog.showSaveDialog(win, { title: 'Save a verified copy', defaultPath: file.name });
+    if (result.canceled || !result.filePath) return null;
+    await copyFile(file.path, result.filePath, constants.COPYFILE_EXCL);
+    if ((await sha256File(result.filePath)) !== file.sha256) { await rm(result.filePath, { force: true }); throw new Error('The file changed while saving. No copy was kept.'); }
+    return { name: basename(result.filePath) };
+  }
+  async openWith(c: Pick<Conn, 'sessionId'>, id: string) {
+    const { path, name } = await this.verified(c, id);
+    if (!canOpen(name)) throw new Error('This file type can contain code. Save it or show it in its folder.');
+    if (process.platform === 'win32') {
+      await windowsOpenWith(path);
+    } else if (process.platform === 'darwin') {
+      const win = this.win(); if (!win) return;
+      const selected = await dialog.showOpenDialog(win, { title: 'Choose a viewer application', defaultPath: '/Applications', properties: ['openFile'], filters: [{ name: 'Applications', extensions: ['app'] }] });
+      if (selected.canceled) return;
+      const viewer = selected.filePaths[0];
+      if (!viewer || extname(viewer).toLowerCase() !== '.app' || !(await stat(viewer)).isDirectory()) throw new Error('Choose an installed application.');
+      await promisify(execFile)('/usr/bin/open', ['-a', viewer, path]);
+    } else await this.open(c, id);
+  }
+  async open(c: Pick<Conn, 'sessionId'>, resourceId: string) {
+    const { path: p } = await this.verified(c, resourceId);
     if (!canOpen(p)) throw new Error('This type of file is not opened directly (it can contain macros or run code). Use Show in folder.');
     const err = await shell.openPath(p);
     if (err) throw new Error(err);

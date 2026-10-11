@@ -73,6 +73,14 @@ export function fileStates(c: Conn, resources: ResourceView[]): FileState[] {
   });
 }
 
+export function downloadedFile(c: Conn, r: ResourceView): File {
+  const entry = readJson<Index>(indexFile(), {})[key(c, r.id)];
+  if (!entry || !r.sha256 || entry.sha256 !== r.sha256 || !entry.uri.startsWith(root().uri.replace(/\/+$/, '') + '/')) throw new Error('Download and verify this file first.');
+  const file = new File(entry.uri);
+  if (!file.exists || file.size !== r.size) throw new Error('File not found or changed. Download it again.');
+  return file;
+}
+
 /** Chunk store over expo-file-system: positional writes into `.partial/<id>.part`, verified-chunk bitmap in meta. */
 class ExpoChunkStore implements ChunkStore {
   readonly chunkCount: number;

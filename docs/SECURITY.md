@@ -239,3 +239,12 @@ membership, target scope and policy are rechecked on retries and immediately bef
 copying; the originally declared SHA-256 is checked again. Approval cannot restore a removed student's rights.
 Review IDs are session-scoped, moderation is idempotent, and pending uploads count against bounded upload quotas.
 The existing pinned transport and teacher-only checks remain mandatory. Other CLAN types retain their permissions.
+
+### Phase 14.2 file views and export
+
+Preview, Open With and Save recheck the recorded SHA-256 and accept resource/session IDs rather than renderer-selected
+paths. Embedded preview is limited to bounded plain text and validated PNG/JPEG; active documents never enter an
+embedded browser. Open With retains the safe extension allowlist. All types may be exported as a new verified copy.
+Android sources are canonical regular files inside the app sandbox; viewer URIs receive temporary read grants.
+SAF export streams into a new empty document and verifies size/hash by reading back the destination, removing only
+the new failed copy. Desktop uses exclusive creation. Private keys and unrelated files are outside these interfaces.

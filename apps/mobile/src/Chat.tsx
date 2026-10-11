@@ -13,6 +13,7 @@ import { api, catchUpChat, mergeChatMessages as merge, formatBytes } from '@clas
 import type { ChatMessageView, ChatThreadView, ClientMessage, ResourceView, ServerMessage } from '@classroom/protocol';
 import { download, shareFile, type Conn, type FileState } from './transfers';
 import { phoneClan, me as meP } from './core/clan';
+import { MobileFileActions } from './FileActions';
 
 Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }) });
 /** A local notice for a message that arrives while you're not looking at that conversation (text only if short). */
@@ -240,6 +241,7 @@ export function ChatSection({ c, chat, conn, people, canSendFiles }: { c: C; cha
                 <Text style={{ color: c.text }}>▤ {m.attachment.name} · {formatBytes(m.attachment.size)} · {files[m.attachment.resourceId]?.state === 'completed' ? 'verified ✓' : m.author === chat.me ? 'sent' : files[m.attachment.resourceId] ? files[m.attachment.resourceId]!.state : 'tap to download'}</Text>
               </Pressable>
             )}
+            {m.attachment?.kind === 'file' && files[m.attachment.resourceId]?.state === 'completed' && <MobileFileActions c={c} conn={conn} resource={{ id: m.attachment.resourceId, name: m.attachment.name, size: m.attachment.size, sha256: m.attachment.sha256, mime: m.attachment.mime, addedAt: 0, status: 'ready', available: true, pushed: false }} />}
             <Text style={{ color: c.muted, fontSize: 11 }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{m.editedAt ? ' · edited' : ''}{m.reactions.map((r) => ` ${r.reaction}${r.by.length}`).join('')}</Text>
           </View>
         )} />

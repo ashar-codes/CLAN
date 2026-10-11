@@ -2,9 +2,10 @@
 // Wording is deliberate: the host relays and stores these messages, so nothing here says "private" or "encrypted".
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { EDIT_WINDOW_MS, REACTIONS, type ChatAttachment, type ChatMessageView, type ChatThreadView, type ResourceView } from '@classroom/protocol';
-import { formatBytes } from '@classroom/client';
+import { canOpenFile, formatBytes } from '@classroom/client';
 import type { Conn, FileState, SavedItem } from '../../../shared.ts';
 import { api } from '../../App.tsx';
+import { FileActions } from '../../FileActions.tsx';
 import type { ChatPerson, ChatState } from './useChat.ts';
 import { useAI } from '../ai/ctx.tsx';
 
@@ -202,11 +203,11 @@ function Attachment({ a, own, direct, role, conn }: { a: ChatAttachment; own: bo
     <div className="chat-file" data-testid="chat-file">
       <span className="tag">{a.name.split('.').pop()?.toUpperCase().slice(0, 5) ?? 'FILE'}</span>
       <span className="grow"><b>{a.name}</b><br /><small className="muted">{formatBytes(a.size)}{direct ? ' · only the two of you' : ' · everyone in the CLAN'}{st?.state === 'completed' ? ' · verified ✓' : ''}</small></span>
-      {role === 'host' && !own && <button className="small" onClick={() => api.chat.hostSave(a.resourceId).then(() => setErr(''), (e) => setErr(errText(e)))}>Save a copy</button>}
+      {role === 'host' && conn && <FileActions sessionId={conn.sessionId} id={a.resourceId} name={a.name} canOpen={canOpenFile(a.name)} />}
       {role === 'member' && !own && conn && rv && (
         !st || st.state === 'not_started' || st.state === 'failed' ? <button className="small" data-testid="chat-download" onClick={() => api.download(conn, rv, true)}>{st?.state === 'failed' ? 'Retry' : 'Download'}</button>
           : st.state === 'paused' ? <button className="small" onClick={() => api.download(conn, rv, true)}>Resume ({pct}%)</button>
-          : st.state === 'completed' ? <span className="row tight">{st.canOpen && <button className="small" onClick={() => api.openFile(conn.sessionId, rv.id).catch((e) => setErr(errText(e)))}>Open</button>}<button className="small" onClick={() => api.showFile(conn.sessionId, rv.id)}>Show</button></span>
+          : st.state === 'completed' ? <span className="row tight"><FileActions sessionId={conn.sessionId} id={rv.id} name={rv.name} canOpen={!!st.canOpen} />{st.canOpen && <button className="small" onClick={() => api.openFile(conn.sessionId, rv.id).catch((e) => setErr(errText(e)))}>Open</button>}<button className="small" onClick={() => api.showFile(conn.sessionId, rv.id)}>Show</button></span>
           : <span className="row tight"><small>{st.state === 'verifying' ? 'Verifying…' : `${pct}%`}</small><button className="small" onClick={() => api.pause(rv.id)}>Pause</button></span>
       )}
       {own && <small className="muted">sent</small>}

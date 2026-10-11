@@ -298,7 +298,7 @@ function registerIpc() {
     await shell.openPath(dir); // a folder: opens the file manager, executes nothing
   });
 
-  const files = (studentFiles = new StudentFiles(() => BrowserWindow.getAllWindows()[0], trust));
+  const files = (studentFiles = new StudentFiles(() => BrowserWindow.getAllWindows()[0], trust, (sid, id) => server?.classroom.id === sid ? server.resources.openForDownload({ role: 'teacher' }, id) : null));
   const conn = (c: unknown): Conn => ConnArgs.parse(c);
   const res = (r: unknown): ResourceView => ResourceArgs.parse(r) as ResourceView;
   ipcMain.handle('student:fileStatus', (_e, c, list: unknown) => files.status(conn(c), z.array(ResourceArgs).max(1000).parse(list) as ResourceView[]));
@@ -306,6 +306,9 @@ function registerIpc() {
   ipcMain.handle('student:pause', (_e, id) => files.pause(z.uuid().parse(id)));
   ipcMain.handle('student:show', (_e, sid, id) => files.show({ sessionId: z.uuid().parse(sid) }, z.uuid().parse(id)));
   ipcMain.handle('student:open', (_e, sid, id) => files.open({ sessionId: z.uuid().parse(sid) }, z.uuid().parse(id)));
+  ipcMain.handle('student:preview', (_e, sid, id) => files.preview({ sessionId: z.uuid().parse(sid) }, z.uuid().parse(id)));
+  ipcMain.handle('student:save', (_e, sid, id) => files.save({ sessionId: z.uuid().parse(sid) }, z.uuid().parse(id)));
+  ipcMain.handle('student:openWith', (_e, sid, id) => files.openWith({ sessionId: z.uuid().parse(sid) }, z.uuid().parse(id)));
   ipcMain.handle('student:pick', (e, ext) => files.pick(e, z.array(z.string().regex(/^[a-z0-9]{1,10}$/)).max(30).parse(ext)));
   ipcMain.handle('student:submit', (_e, c, a, p) => files.submit(conn(c), z.uuid().parse(a), z.uuid().parse(p)));
   ipcMain.handle('student:receipts', (_e, sid) => files.receipts(sid === undefined ? undefined : z.uuid().parse(sid)));

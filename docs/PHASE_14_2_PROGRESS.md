@@ -6,10 +6,10 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | # | Item | State | Commit | Evidence |
 |---|---|---|---|---|
 | P0-1 | Windows-hosted CLAN: Mac/Android discover but can't connect | **Fixed in source, NOT TESTED on Windows** | `fd8249c`, `a833dd1` | `packages/server/test/multi-address.test.ts` (3 PASS); join/discovery/security/mobile/integration suites 138 PASS; typecheck PASS |
-| P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | IMPLEMENTED; desktop PASS, Android verification in progress | see git log | 4 desktop E2Es + 17 targeted unit tests PASS |
+| P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | IMPLEMENTED; desktop + Android emulator PASS | see git log | 4 desktop E2Es + 17 targeted unit tests + full emulator cross-device run PASS; physical Android NOT TESTED |
 | P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | IMPLEMENTED; host + desktop PASS, native UI pending | see git log | 70 targeted units + 5 desktop chat/sharing E2Es PASS |
-| P0-4 | File preview / open / save-export (SAF, iOS Files) | NOT STARTED | — | — |
-| P0-5 | CLAN archive / remove from device / leave / delete | NOT STARTED | — | — |
+| P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | pending commit | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
+| P0-5 | CLAN archive / remove from device / leave / delete | IN PROGRESS; local archive/restore source added | pending commit | Tests pending; removal/delete and leave coordination remain |
 | P1-6…10 | Notifications + Raise Hand, persistent mobile CLANs (standby hosts, epochs), Android hosting, iOS parity, installers | NOT STARTED | — | — |
 
 ## P0-1 root cause and fix
@@ -96,3 +96,37 @@ reported an empty local projection even for persisted messages. Host persistence
 A focused emulator run has passed both-way chat, host persistence, older-page access, retained reading position and
 Jump to latest (`/tmp/clan-142-chat-native-focused3.log`). Whiteboard/file checks and an updated-APK full rerun are still
 pending; no timeout increases and no physical-device claims.
+
+## P0-4 file actions
+
+Desktop and mobile share passive preview policy (256 KiB text, 8 MiB PNG/JPEG, validated headers and dimensions).
+Unknown/active-content types show metadata; every file can be saved. All actions recheck the recorded SHA-256.
+Desktop supports host/member table and chat files, exclusive Save Copy with post-copy verification, macOS application
+selection and Windows SHOpenWithDialog (Windows runtime NOT TESTED). Android adds a small sandbox-restricted native
+bridge for FileProvider viewer grants and streaming SAF export with independent destination size/hash verification.
+iOS uses the existing system sharing interface; native build and Files behavior remain NOT TESTED.
+
+PASS: typecheck (`/tmp/clan-142-preview-typecheck4.log`); 3 preview security units
+(`/tmp/clan-142-preview-unit1.log`); 6 desktop chat/sharing/preview E2Es, 56.53 s
+(`/tmp/clan-142-preview-e2e1.log`). The strengthened preview/export case passed a focused rerun, 8.56 s
+(`/tmp/clan-142-preview-e2e-final.log`; five other cases intentionally unselected).
+Signed Android release build passed; the latest source was rebuilt successfully with existing signing identity
+(`/tmp/clan-142-preview-android-build3.log`, Gradle quiet mode), installed on `clan_phase142` only.
+Full native cross-device and SAF/viewer runtime verification are in progress. See [file actions](FILE_ACTIONS_PHASE_14_2.md).
+
+### Updated-APK full emulator cross-device result
+
+PASS: `python3 -u apps/mobile/e2e/android_cross_device.py`, one complete successful updated-APK run
+(`/tmp/clan-142-preview-android-cross-device.log`, exit 0, approximately nine minutes). Real native app/emulated Android
+and real Mac test peers covered personal sync, offline conflicts/Keep both, revocation, private share inbox, OPAQUE +
+pinned TLS join, both-way persisted chat, older pages/reader position/Jump latest, whiteboard both ways and verified
+1.5 MB download. No increased timeouts. Load was approximately 16 at start and 38 at finish; this is not physical-device
+performance evidence. A subsequent focused export driver initially started before peer teardown finished and failed
+its preflight with EADDRINUSE; it was rerun after the full suite exited. That failed preflight is not a product PASS.
+Focused native Android file-action checks then passed: literal HTML markup displayed as plain text with no WebView;
+system folder selection/grant scoped to the disposable `Documents/CLAN_Phase142_Test` folder; streamed SAF copy and
+app destination hash verification; independent adb readback SHA-256 equal to the original host file; native viewer
+chooser offered installed viewers and Back returned safely to CLAN. This was emulator UI inspection/automation,
+not physical testing. The temporary driver `/tmp/clan-142-native-export.py` uses the production API and native UI;
+it does not stub the picker or native bridge. iOS prerequisite recheck confirms Command Line Tools only, no Xcode.app;
+the user has agreed to install Xcode and complete first launch. Windows chooser execution remains NOT TESTED.

@@ -1,0 +1,67 @@
+// Native viewer choice and streaming export. Sources must be regular files inside CLAN's private sandbox.
+package expo.modules.fileactions
+
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.File
+import java.security.MessageDigest
+
+class FileActionsModule : Module() {
+  private fun source(uri: String): File {
+    val ctx = appContext.reactContext ?: error("No context")
+    val u = Uri.parse(uri); require(u.scheme == "file") { "Only private downloaded files are allowed." }
+    val f = File(u.path ?: error("No path")).canonicalFile
+    require(f.isFile && listOf(ctx.filesDir, ctx.cacheDir).any { f.path.startsWith(it.canonicalPath + File.separator) }) { "File is outside private storage." }
+    return f
+  }
+  private fun hash(f: File): String {
+    val h = MessageDigest.getInstance("SHA-256")
+    f.inputStream().use { input -> val b = ByteArray(64 * 1024); while (true) { val n = input.read(b); if (n < 0) break; h.update(b, 0, n) } }
+    return h.digest().joinToString("") { "%02x".format(it) }
+  }
+  override fun definition() = ModuleDefinition {
+    Name("ClanFileActions")
+    AsyncFunction("openWith") { uri: String, expected: String ->
+      val ctx = appContext.reactContext ?: error("No context")
+      val f = source(uri)
+      val ext = f.extension.lowercase()
+      require(ext in setOf("pdf","txt","md","csv","png","jpg","jpeg","gif","webp","mp4","mov","webm","mp3","wav","m4a","docx","pptx","xlsx","odt","odp","ods")) { "This file type may contain code. Save a copy instead." }
+      require(expected.matches(Regex("[a-f0-9]{64}")) && hash(f) == expected) { "File changed after download." }
+      val content = FileProvider.getUriForFile(ctx, "${ctx.packageName}.FileSystemFileProvider", f)
+      val view = Intent(Intent.ACTION_VIEW).setDataAndType(content, MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      ctx.startActivity(Intent.createChooser(view, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    }
+    AsyncFunction("saveCopy") { uri: String, destination: String, expected: String, expectedSize: Double ->
+      val ctx = appContext.reactContext ?: error("No context")
+      val f = source(uri)
+      val target = Uri.parse(destination)
+      require(target.scheme == "content" && DocumentsContract.isDocumentUri(ctx, target)) { "Choose a document destination." }
+      require(expected.matches(Regex("[a-f0-9]{64}")) && expectedSize.isFinite() && expectedSize >= 0 && expectedSize == expectedSize.toLong().toDouble() && f.length() == expectedSize.toLong()) { "File size changed." }
+      var empty = false
+      ctx.contentResolver.query(target, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor -> empty = cursor.moveToFirst() && !cursor.isNull(0) && cursor.getLong(0) == 0L }
+      require(empty) { "Choose a new empty document; existing files are never overwritten." }
+      var total = 0L; val digest = MessageDigest.getInstance("SHA-256")
+      try {
+        f.inputStream().use { input ->
+          (ctx.contentResolver.openOutputStream(target, "w") ?: error("Cannot write destination")).use { output ->
+            val b = ByteArray(64 * 1024)
+            while (true) { val n = input.read(b); if (n < 0) break; total += n; require(total <= expectedSize.toLong()) { "File grew while saving." }; digest.update(b, 0, n); output.write(b, 0, n) }
+          }
+        }
+        require(total == expectedSize.toLong() && digest.digest().joinToString("") { "%02x".format(it) } == expected) { "Copy failed verification." }
+        val savedHash = MessageDigest.getInstance("SHA-256"); var savedSize = 0L
+        (ctx.contentResolver.openInputStream(target) ?: error("Cannot verify destination")).use { input ->
+          val b = ByteArray(64 * 1024)
+          while (true) { val n = input.read(b); if (n < 0) break; savedSize += n; require(savedSize <= expectedSize.toLong()) { "Saved size changed." }; savedHash.update(b, 0, n) }
+        }
+        require(savedSize == expectedSize.toLong() && savedHash.digest().joinToString("") { "%02x".format(it) } == expected) { "Saved copy failed verification." }
+      } catch (e: Exception) { runCatching { DocumentsContract.deleteDocument(ctx.contentResolver, target) }; throw e }
+    }
+  }
+}

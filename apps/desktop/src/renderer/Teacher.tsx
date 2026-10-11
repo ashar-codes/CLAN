@@ -230,7 +230,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
       </div>
 
       <section className="grid">
-        <TeacherFiles resources={resources} stats={stats} send={send} />
+        <TeacherFiles sessionId={info.sessionId} resources={resources} stats={stats} send={send} />
         {can.includes('CREATE_ASSIGNMENT') && <TeacherAssignments assignments={assignments} send={send} />}
         <div className="card">
           <h3>Waiting to join {pending.length > 0 && <span className="badge">{pending.length}</span>}</h3>

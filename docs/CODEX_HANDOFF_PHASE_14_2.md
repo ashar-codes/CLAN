@@ -17,6 +17,10 @@ early). Progress table: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md).
 |---|---|---|
 | `fd8249c` | Join tries every advertised IPv4 address and pairs once (P0-1 part 1) | `packages/protocol/src/index.ts` (`Advertisement.a`, `lanUrls`), `packages/server/src/discovery.ts`, `packages/client/src/{index,pairing}.ts` (`Candidate.alt`, `lanCarrier`), `apps/mobile/src/discovery.ts`, `packages/server/test/multi-address.test.ts` |
 | `a833dd1` | Windows host never binds virtual adapters (P0-1 part 2) | `packages/server/src/netinfo.ts`, same test file |
+| `bb4fb16` | Bounded desktop/mobile chat, paged catch-up and retained reading position | chat controllers/views, shared history helper, unit/desktop/native harness checks |
+| `bd8f545` | Classroom teacher/everyone/approval sharing policy and private review queue | server authorization/quarantine, client result, desktop/mobile controls, regression tests |
+| `249ae0c` | Native chat observation and simulated host persistence projection fixes | Android harness and simulated host mapping |
+| next file-action commit | Passive preview, native viewer choice and verified Save Copy / Android SAF | shared file-view policy, desktop IPC/views, Android native module and mobile controls |
 
 Root causes and reasoning: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md) › P0-1.
 
@@ -54,7 +58,7 @@ ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffect
    (capabilities via `MESSAGE_CAPABILITY` in `server.ts`); policy `everyone | approval | teacher` for `CLASSROOM` only
    (Study Group/Friends/Project keep current behaviour); a pending-share queue the host approves; tests in
    `packages/server/test/` (unauthorized and revoked senders).
-4. **P0-4 preview/open/save:** desktop "Open" is already restricted to safe types (docs/SECURITY.md); add Save-as for
+4. **P0-4 preview/open/save implemented:** desktop and Android emulator checks passed; native Windows/iOS execution remains pending. See `docs/FILE_ACTIONS_PHASE_14_2.md`. Desktop "Open" remains restricted to safe types (docs/SECURITY.md); Save-as supports
    any type; mobile save via SAF (`expo-file-system` StorageAccessFramework) / share sheet, images inline, PDF via OS
    viewer. Never execute content; keep SHA-256 checks.
 5. **P0-5 lifecycle:** archive (local flag), leave (member), delete (owner, confirmed), remove-local-copy with
@@ -71,7 +75,7 @@ ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffect
 Run long suites on macOS with normal QoS (e.g. `launchctl submit`); background shells time out.
 
 ## 8. Pushing
-Pushed through `40fa357` after review; native Windows feedback is pending. Exact retest: [WINDOWS_RETEST_PHASE_14_2.md](WINDOWS_RETEST_PHASE_14_2.md). For subsequent commits, review the diff (no keys, no binaries), then
+Pushed through `bd8f545` after review; `249ae0c` and file-action work will be pushed next. Native Windows feedback is pending. Exact retest: [WINDOWS_RETEST_PHASE_14_2.md](WINDOWS_RETEST_PHASE_14_2.md). For subsequent commits, review the diff (no keys, no binaries), then
 `git push https://github.com/ashar-codes/CLAN.git refs/heads/phase-14.2:refs/heads/phase-14.2` with the ashar-codes
 credential. Never force-push; never move `clan-beta-v0.1.0-rc1`.
 
@@ -102,3 +106,17 @@ disposable `CLASSROOM_USER_DATA`; never delete or replace the keychain items "Cl
 - [ ] Android key offline backup - [ ] P1 design doc before code - [ ] 14.2 installers + hardware pack
 
 Native chat focused checks now passed: bidirectional/persisted messages, older pages, reader position, Jump to latest. Harness fixes cover asynchronous notification prompts and Escape closing RN Modal; `tools/sim/class-peer.ts` now initializes the host local-reader mapping. Full updated-APK suites remain pending.
+
+Updated APK full cross-device emulator suite passed (exit 0): personal sync/conflicts/revocation/private inbox,
+secure join, persisted chat/history, whiteboard both ways and verified download. Android file-action runtime also
+passed passive text preview, actual SAF selection/grant/streamed export plus independent hash readback, and native
+viewer chooser cancellation. Physical Android and native Windows remain NOT TESTED. Android reliability suite and
+final full software suites remain pending. A focused export preflight failed because the preceding peers were still
+tearing down; rerun after exit passed. No timeout changes.
+
+P0-5 is being implemented separately: archive/restore is a local presentation preference, and permission/assignment/
+course/host-identity lookups retain archived membership. Core leave rejects sole owners. Desktop/mobile archive
+controls and new targeted tests are in the working tree; not yet committed. Destructive cleanup and live leave
+coordination remain unfinished. See `docs/CLAN_LIFECYCLE_PHASE_14_2.md` before extending this work.
+Xcode rechecked: Command Line Tools only, no Xcode.app. User agreed to install Xcode and complete first launch;
+recheck later before marking iOS unavailable. Preserve signing and original profiles as before.

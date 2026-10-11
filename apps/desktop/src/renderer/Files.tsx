@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatBytes } from '@classroom/client';
+import { canOpenFile, formatBytes } from '@classroom/client';
 import type {
   ClientMessage, ResourceView, StudentAssignmentView, TeacherAssignmentView, TeacherResourceView, TransferState, TransferStats,
 } from '@classroom/protocol';
 import type { Conn, FileState, StoredReceipt } from '../shared.ts';
 import { api } from './App.tsx';
+import { FileActions } from './FileActions.tsx';
 
 const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const dateTime = (ts: number) => new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -16,7 +17,7 @@ const STATE_LABEL: Record<TransferState, string> = {
 
 // ---------------- Teacher ----------------
 
-export function TeacherFiles({ resources, stats, send }: { resources: TeacherResourceView[]; stats: TransferStats | null; send(m: ClientMessage): void }) {
+export function TeacherFiles({ resources, stats, send, sessionId }: { sessionId?: string; resources: TeacherResourceView[]; stats: TransferStats | null; send(m: ClientMessage): void }) {
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [progress, setProgress] = useState<Record<string, number>>({});
@@ -53,6 +54,7 @@ export function TeacherFiles({ resources, stats, send }: { resources: TeacherRes
           </div>
           {r.status === 'ready' && (
             <div className="row wrap">
+              {sessionId && <FileActions sessionId={sessionId} id={r.id} name={r.name} canOpen={canOpenFile(r.name)} />}
               <button className="small" onClick={() => send({ t: 'resource.push', resourceId: r.id })}>Send to everyone</button>
               <button className="small" onClick={() => send({ t: 'resource.available', resourceId: r.id, available: !r.available })}>{r.available ? 'Hide' : 'Make available'}</button>
               <button className="small danger" onClick={() => confirm(`Remove ${r.name} from the class? Copies students already downloaded are not affected.`) && send({ t: 'resource.remove', resourceId: r.id })}>Remove</button>
@@ -191,6 +193,7 @@ export function StudentFiles({ conn, resources, pushed, send, host = 'teacher' }
               {s.state === 'paused' && <button className="primary small" onClick={() => act(() => api.download(conn, r))}>Resume</button>}
               {s.state === 'failed' && <button className="primary small" onClick={() => act(() => api.download(conn, r))}>Retry</button>}
               {s.state === 'completed' && s.canOpen && <button className="small" onClick={() => act(() => api.openFile(conn.sessionId, r.id))}>Open</button>}
+              {s.state === 'completed' && <FileActions sessionId={conn.sessionId} id={r.id} name={r.name} canOpen={!!s.canOpen} />}
               {s.state === 'completed' && <button className="small" onClick={() => act(() => api.showFile(conn.sessionId, r.id))}>Show in folder</button>}
             </div>
           </div>

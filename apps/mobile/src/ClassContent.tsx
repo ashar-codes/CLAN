@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as Sharing from 'expo-sharing';
 import { randomUUID } from 'expo-crypto';
 import { File } from 'expo-file-system';
+import { MobileFileActions } from './FileActions';
 import { formatBytes } from '@classroom/client';
 import { extensionOf, type ClientMessage, type ResourceView, type StudentAssignmentView, type TransferState } from '@classroom/protocol';
 import { check, clearIdempotencyKey, download, fileStates, idempotencyKeyFor, pause, receipts as loadReceipts, submit, type Conn, type FileState, type StoredReceipt } from './transfers';
@@ -74,7 +74,7 @@ export function ClassContent({ c, conn, resources, assignments, pushed, send }: 
                 {(s.state === 'not_started' || s.state === 'failed' || s.state === 'paused') && <Btn c={c} primary label={s.state === 'paused' ? 'Resume' : s.state === 'failed' ? 'Retry' : 'Download'} onPress={() => download(conn, r, onState)} />}
                 {s.state === 'downloading' && <Btn c={c} label="Pause" onPress={() => pause(r)} />}
                 {/* Share sheet hands the file to a viewer app chosen by the student; nothing is executed. */}
-                {s.state === 'completed' && s.uri && <Btn c={c} label="Open with…" onPress={() => Sharing.shareAsync(s.uri!)} />}
+                {s.state === 'completed' && s.uri && <MobileFileActions c={c} conn={conn} resource={r} />}
               </View>
             </View>
           );
