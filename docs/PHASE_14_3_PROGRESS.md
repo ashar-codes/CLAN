@@ -104,3 +104,8 @@ voice notes, profile pictures, a friend's other devices · hostile-peer tests ·
 | iOS Swift | NOT COMPILED (no Xcode in the cloud) |
 | Metro bundles (`expo export` Android + iOS) | PASS |
 | Any phone, Mac, Windows, radio, camera or microphone on hardware | NOT TESTED |
+
+
+## Local native QA — 2026-10-12
+
+See [the native QA/security and artifact record](LOCAL_QA_PHASE_14_3.md) and [draft PR #4](https://github.com/ashar-codes/CLAN/pull/4). Application repairs were built from `fa5bfc7d25b9b1ef56ef1e1b2749fc76e2c288c9`; **release remains BLOCKED**. Internal TEST/UNVERIFIED DMG/APK and an unsigned simulator app exist; Windows, physical-device and release-signing gates remain open. Full test failures and skips are retained in the record.

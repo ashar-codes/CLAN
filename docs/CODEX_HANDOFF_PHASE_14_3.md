@@ -1,5 +1,9 @@
 # Codex handoff — Phase 14.3 (A+B+C+D) cloud implementation
 
+**Local native QA update (2026-10-12):** See [LOCAL_QA_PHASE_14_3.md](LOCAL_QA_PHASE_14_3.md) for verified source,
+native builds, security repairs, actual failures, hardware limitations and the BLOCKED release decision. The
+historical cloud evidence below is not a substitute for this native record.
+
 Nothing here has run on a phone, a Mac, a Windows PC or real radios. Status words: **source** (written),
 **cloud tested** (ran on Linux/Node/Electron-under-Xvfb), **native build validated** (compiled for the platform),
 **hardware verified** (ran on the device). Only the first two apply to anything in this phase, plus a Kotlin

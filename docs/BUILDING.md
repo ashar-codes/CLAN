@@ -2,6 +2,11 @@
 
 Requirements: Node ≥ 24, pnpm 11. Runtime needs no internet; installing dependencies does.
 
+**Native QA update (2026-10-12):** [Current evidence and artifacts](LOCAL_QA_PHASE_14_3.md)
+supersede historical build claims below. Release is **BLOCKED**. For an embedded, standalone Android build
+without using the beta key, run `apps/mobile/scripts/android-qa.sh`; its `qa` variant uses debug signing and
+does not install automatically. It cannot update a beta APK signed with the existing upload identity.
+
 ## Desktop
 * `pnpm build:desktop` — Vite builds main, preload (CJS, sandboxed) and renderer into `apps/desktop/dist`.
 * `pnpm --filter @classroom/desktop dist:dir` — unpacked app (verified on macOS arm64: `release/mac-arm64/CLAN.app`, E2E passes against it).
@@ -13,7 +18,7 @@ Requirements: Node ≥ 24, pnpm 11. Runtime needs no internet; installing depend
 ## Mobile (Expo development build — not Expo Go, react-native-zeroconf is native)
 * Android: Android SDK + JDK 17, then `pnpm --filter @classroom/mobile android` (or `build:android`).
 * iOS: Xcode on macOS, then `pnpm --filter @classroom/mobile ios`.
-* On the current build machine the Android SDK + JDK 17 are installed (Android builds run); Xcode 26.6 and CocoaPods 1.17.0 are installed. iOS 26.5 platform support/runtime is still missing; native compilation is blocked.
+* The local QA Mac has Android SDK 36 + JDK 17, Xcode 26.6, CocoaPods 1.17.0 and iOS 26.5 SDK/runtime. Real Gradle QA and unsigned iOS simulator compilation passed; iOS simulator boot stalled in OS migration, so runtime validation remains incomplete.
 
 ## Beta release builds (v0.1.0, all from macOS arm64)
 Prerequisites built once (git-ignored binaries; packaging **fails** if one is missing — `apps/desktop/build/require-helpers.cjs`):
