@@ -44,26 +44,31 @@ export function RecorderHost({ children }: { children: ReactNode }) {
     const tape = await api.rec.start({ title: o.title, source: test ? 'test' : o.source.startsWith('window:') ? 'window' : 'screen', mic: o.mic, systemAudio: o.systemAudio, othersConsent: o.others, mime,
       courseId: o.courseId ?? null, lectureId: o.lectureId ?? null, topicId: o.topicId ?? null, studySessionId: o.studySessionId ?? null });
     let stream: MediaStream;
+    const ownedTracks: MediaStreamTrack[] = [];
+    let ctx: AudioContext | null = null;
     try {
       const size = test && (window as unknown as { __clanRecSize?: { w: number; h: number } }).__clanRecSize;
       const display = test ? testPatternStream('screen', size || { w: 1280, h: 720 }, size ? 30 : 15)
         : (await api.mediaChoose(o.source, o.systemAudio), await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: o.systemAudio }));
+      ownedTracks.push(...display.getTracks());
       const mic = o.mic ? await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }) : null;
+      ownedTracks.push(...(mic?.getTracks() ?? []));
       const audios = [...display.getAudioTracks(), ...(mic?.getAudioTracks() ?? [])];
-      let ctx: AudioContext | null = null;
       const tracks = [...display.getVideoTracks()];
       if (audios.length === 1) tracks.push(audios[0]!);
       else if (audios.length > 1) { ctx = new AudioContext(); const dest = ctx.createMediaStreamDestination(); for (const a of audios) ctx.createMediaStreamSource(new MediaStream([a])).connect(dest); tracks.push(dest.stream.getAudioTracks()[0]!); }
       stream = new MediaStream(tracks);
+      ownedTracks.push(...stream.getTracks());
       const video = Object.assign(document.createElement('video'), { muted: true, playsInline: true }); video.srcObject = new MediaStream(display.getVideoTracks()); void video.play();
       const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: (display.getVideoTracks()[0]?.getSettings().height ?? 720) > 800 ? 4_000_000 : 2_500_000, audioBitsPerSecond: 96_000 });
       rec.ondataavailable = (e) => { if (!e.data.size) return; flush.current = flush.current.then(async () => { const err = await api.rec.chunk(tape.id, new Uint8Array(await e.data.arrayBuffer())); if (err && live.current) void stop(err); }); };
       rec.onerror = () => { setToast('The recording failed; what was captured is kept.'); void stop('capture error'); };
       display.getVideoTracks()[0]?.addEventListener('ended', () => { setToast('The recorded window or screen closed. The recording was saved.'); void stop('source closed'); });
-      live.current = { tape, t0: performance.now(), rec, stream: display, video, audio: ctx };
+      live.current = { tape, t0: performance.now(), rec, stream: new MediaStream(ownedTracks), video, audio: ctx };
       rec.start(1000);
       setActive({ tape, t0: live.current.t0 }); setAsking(null);
     } catch (e) {
+      ownedTracks.forEach((t) => t.stop()); void ctx?.close();
       await api.rec.stop(tape.id, { durationMs: 0, reason: `capture failed: ${errText(e)}`.slice(0, 120) }).catch(() => {});
       throw e;
     }

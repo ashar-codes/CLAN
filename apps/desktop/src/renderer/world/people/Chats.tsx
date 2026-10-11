@@ -172,11 +172,18 @@ function VoiceNote({ t, mine, onError }: { t: PeopleTransfer; mine: boolean; onE
     const a = new Audio(u); el.current = a;
     // recorder output has no duration in its header: probing the end once makes it seekable
     await new Promise<void>((res) => { a.onloadedmetadata = () => res(); setTimeout(res, 2000); });
-    if (!Number.isFinite(a.duration)) { await new Promise<void>((res) => { a.ontimeupdate = () => res(); a.currentTime = 1e101; setTimeout(res, 2000); }); a.currentTime = 0; }
+    if (!Number.isFinite(a.duration)) {
+      const seek = (at: number) => new Promise<void>((res) => {
+        const timer = setTimeout(done, 2000);
+        function done() { clearTimeout(timer); a.removeEventListener('seeked', done); res(); }
+        a.addEventListener('seeked', done, { once: true }); a.currentTime = at;
+      });
+      await seek(1e101); await seek(0);
+    }
     a.ontimeupdate = () => setPos(a.currentTime); a.onended = () => { setPlaying(false); setPos(0); }; a.onpause = () => setPlaying(false); a.onplay = () => setPlaying(true);
     return a;
   };
-  const toggle = () => void load().then((a) => { if (a.paused) void a.play(); else a.pause(); }, (e) => onError(errText(e)));
+  const toggle = () => void load().then(async (a) => { if (a.paused) await a.play(); else a.pause(); }).catch((e) => onError(errText(e)));
   return (
     <div className="voice-note row" aria-label="Voice message">
       {ready ? <button className="small" aria-label={playing ? 'Pause' : 'Play'} onClick={toggle}>{playing ? '❚❚' : '▶'}</button> : <span aria-hidden>🎙</span>}
@@ -202,12 +209,32 @@ function VoiceRecorder({ convId, onError }: { convId: string; onError(e: string)
       await api.people.armMedia('microphone');
       const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       // AAC in MP4 plays everywhere (iPhones included); WebM/Opus where the OS offers no AAC encoder
-      const mime = ['audio/mp4;codecs=mp4a.40.2', 'audio/webm;codecs=opus', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m)) ?? 'audio/webm';
-      container.current = mime.startsWith('audio/mp4') ? 'audio/mp4' : 'audio/webm';
-      const r = new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 32_000 }); rec.current = r; chunks.current = [];
-      r.ondataavailable = (e) => { if (e.data.size) chunks.current.push(e.data); };
-      r.onstop = () => { s.getTracks().forEach((t) => t.stop()); setMs(Date.now() - started.current); blob.current = new Blob(chunks.current, { type: container.current }); setUrl(URL.createObjectURL(blob.current)); setState('review'); };
-      started.current = Date.now(); setMs(0); r.start(500); setState('recording');
+      const formats = ['audio/mp4;codecs=mp4a.40.2', 'audio/webm;codecs=opus', 'audio/webm'].filter((m) => MediaRecorder.isTypeSupported(m));
+      const record = (index: number) => {
+        if (!s.getAudioTracks().some((t) => t.readyState === 'live')) return;
+        const mime = formats[index];
+        if (!mime) { s.getTracks().forEach((t) => t.stop()); setState('idle'); onError('Audio recording could not start. Please try again.'); return; }
+        container.current = mime.startsWith('audio/mp4') ? 'audio/mp4' : 'audio/webm';
+        const r = new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 32_000 }); rec.current = r; chunks.current = [];
+        let failed = false;
+        r.onerror = () => { failed = true; };
+        r.ondataavailable = (e) => { if (e.data.size) chunks.current.push(e.data); };
+        r.onstop = () => {
+          // isTypeSupported can succeed while the OS encoder fails immediately (AAC on Electron/macOS).
+          // Retry only when no audio was produced; keep a partial recording and warn if it failed later.
+          if (failed && !chunks.current.length && index + 1 < formats.length) {
+            onError('Recording restarted. Please start your message again.');
+            try { record(index + 1); } catch { s.getTracks().forEach((t) => t.stop()); setState('idle'); onError('Audio recording could not start. Please try again.'); }
+            return;
+          }
+          s.getTracks().forEach((t) => t.stop());
+          if (!chunks.current.length) { setState('idle'); onError('No audio was recorded. Please try again.'); return; }
+          if (failed) onError('Recording stopped early. Listen to what was captured before sending.');
+          setMs(Date.now() - started.current); blob.current = new Blob(chunks.current, { type: container.current }); setUrl(URL.createObjectURL(blob.current)); setState('review');
+        };
+        started.current = Date.now(); setMs(0); r.start(500); setState('recording');
+      };
+      try { record(0); } catch (e) { s.getTracks().forEach((t) => t.stop()); throw e; }
     } catch (e) { const n = (e as DOMException).name; onError(n === 'NotAllowedError' ? 'Microphone access was denied. Allow CLAN to use the microphone in your system settings.' : n === 'NotFoundError' ? 'No microphone was found.' : errText(e)); }
   };
   const discard = () => { if (url) URL.revokeObjectURL(url); setUrl(null); blob.current = null; setState('idle'); };

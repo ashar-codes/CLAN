@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 
 const apps: ElectronApplication[] = [];
+const owners = new Map<Page, ElectronApplication>();
 const dirs: string[] = [];
 afterAll(async () => { await Promise.all(apps.map((a) => a.close().catch(() => {}))); for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
 async function launch() {
@@ -15,6 +16,7 @@ async function launch() {
   apps.push(app);
   if (process.env.DEBUG_E2E) app.process().stderr?.on('data', (d) => process.stderr.write(`[app] ${d}`));
   const page = await app.firstWindow();
+  owners.set(page, app);
   await page.waitForLoadState('domcontentloaded');
   page.on('dialog', (d) => d.accept());
   return page;
@@ -59,6 +61,8 @@ it('Study Group: member presents → host wall shows live frames → switch sour
   await present(sara, 'screen');
   await sara.getByTestId('presenter-bar').waitFor({ timeout: 15_000 });
   await host.getByTestId('screen-video').waitFor({ timeout: 20_000 });
+  await owners.get(host)!.evaluate(({ app, BrowserWindow }) => { app.focus({ steal: true }); BrowserWindow.getAllWindows()[0]?.focus(); });
+  await host.bringToFront(); // adaptive video reception follows the actual viewer's window visibility
   await expect.poll(async () => (await sample(host)).distinct, { timeout: 20_000 }).toBeGreaterThanOrEqual(4);
   expect(await host.getByTestId('wall-state').textContent()).toBe('Sara is presenting their screen');
   const navy = await sample(host);

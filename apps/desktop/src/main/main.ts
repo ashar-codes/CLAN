@@ -390,7 +390,8 @@ let chatHooks: ReturnType<typeof registerChat>;
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200, height: 800, minWidth: 720, minHeight: 540, title: PRODUCT_NAME,
-    webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
+    // Calls, recording and presenting must continue when another window is in front.
+    webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
   });
   // Links (Saved, chat) open in the system browser; the app window itself never navigates or opens pages.
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
@@ -402,7 +403,7 @@ function createWindow() {
 }
 
 registerMediaScheme(); // privileged scheme must be declared before ready
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   keystore = new Keystore(); // initialise OS key storage under the legacy storage identity…
   app.setName(PRODUCT_NAME); // …then present as CLAN
   trust = new Trust(keystore, app.getPath('userData'));
@@ -434,7 +435,7 @@ app.whenReady().then(() => {
   const syncReady = registerSync(clan, keystore, () => loadProfile().deviceName);
   syncReady.then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
   // Nearby People, friends, private chats, direct files/voice notes and call signaling (Phase 14.3 A+B).
-  void registerPeople(clan, { keystore, trust, dataDir: app.getPath('userData'), displayName: () => loadProfile().fullName })
+  await registerPeople(clan, { keystore, trust, dataDir: app.getPath('userData'), displayName: () => loadProfile().fullName })
     .then((pp) => app.on('will-quit', () => void pp.close()), (e) => logError('people', e));
   registerHosting(clan, { sync: syncReady, liveClanId: () => (server && !server.classroom.info().ended ? server.classroom.clan.id ?? null : null) });
   // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).

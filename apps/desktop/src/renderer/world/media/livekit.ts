@@ -7,7 +7,9 @@ import {
 import { SCREEN_PROFILES, type MediaDiagnostics, type MediaQuality, type MediaTransport, type ScreenProfile, type ScreenView } from '@classroom/client';
 
 export function createTransport(): MediaTransport {
-  const room = new Room({ adaptiveStream: true, dynacast: true, disconnectOnPageLeave: true });
+  // Separate publisher/subscriber connections avoid Chromium rejecting bundled VP8 payloads with different
+  // start-bitrate parameters when a member first watches, then presents. Media still uses the same local SFU.
+  const room = new Room({ adaptiveStream: true, dynacast: true, disconnectOnPageLeave: true, singlePeerConnection: false });
   let video: LocalVideoTrack | null = null, audio: LocalAudioTrack | null = null;
   const screenSubs = new Set<(v: ScreenView | null, who: string | null) => void>();
   const stateSubs = new Set<(s: 'connected' | 'reconnecting' | 'disconnected') => void>();
@@ -42,7 +44,7 @@ export function createTransport(): MediaTransport {
   return {
     topology: 'host-sfu',
     async connect(o) {
-      await room.connect(o.url, o.token, { autoSubscribe: true });
+      await room.connect(o.url, o.token, { autoSubscribe: true, rtcConfig: { iceServers: [] } });
       stateSubs.forEach((f) => f('connected'));
       emitScreen();
     },

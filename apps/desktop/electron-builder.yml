@@ -26,7 +26,9 @@ mac:
   target: [dmg, zip]
   extendInfo:
     NSLocalNetworkUsageDescription: CLAN finds people and CLANs on your local network. No internet is used.
-    NSBonjourServices: [_classroomlan._tcp, _clansync._tcp]
+    NSBonjourServices: [_classroomlan._tcp, _clansync._tcp, _clanpeer._tcp, _clanlink._tcp]
+    NSCameraUsageDescription: CLAN uses the camera only when you scan a person, device or optical transfer code.
+    NSMicrophoneUsageDescription: CLAN uses the microphone only while you record a voice message or join a call.
     NSBluetoothAlwaysUsageDescription: CLAN uses Bluetooth to find a nearby CLAN host when it runs its own network. Only pairing messages are exchanged.
   extraResources:
     - { from: ../../native/macos-ble/clan-ble, to: clan-ble }
