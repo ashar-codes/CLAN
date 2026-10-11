@@ -30,10 +30,11 @@ import { AI, schema as aiSchema, type ProviderSettings } from './modules/ai/inde
 import { Whiteboard, schema as whiteboardSchema } from './modules/whiteboard/index.ts';
 import { Recordings, TapeChanged, schema as recordingsSchema } from './modules/recordings/index.ts';
 import { PersonalSync, profileProvider, schema as syncSchema } from './modules/sync/index.ts';
+import { HostAuthority, schema as hostingSchema } from './modules/hosting/index.ts';
 import type { AIProvider } from '@classroom/protocol';
 
 export const SCHEMAS: ModuleSchema[] = [eventsSchema, permissionsSchema, identitySchema, resourcesSchema, searchSchema, clansSchema, notesSchema, savedSchema, diarySchema, remindersSchema, chatSchema, captureSchema, notifySchema,
-  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema, syncSchema];
+  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema, syncSchema, hostingSchema];
 
 export type ClanApp = ReturnType<typeof openClan>;
 
@@ -46,6 +47,8 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const bus = new EventBus(db, now);
   const identity = new Identity(db, now);
   const clans = new Clans(db, bus, identity, now);
+  // Persistent hosting authority (signed epochs). Not yet used by any host path; see docs/PHASE_14_2_HOSTING_DESIGN.md.
+  const hosting = new HostAuthority(db, clans, now);
   const permissions = new Permissions(db, clans, now);
   const store = new ResourceStore(db, bus, opts.storageDir, now);
   const files = new Files(db, bus, store, permissions, clans);
@@ -114,7 +117,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
     });
   };
 
-  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, me, syncClassrooms, tick, purgeClanProjection };
+  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, hosting, me, syncClassrooms, tick, purgeClanProjection };
 }
 
 export type { Principal, Scope } from './core/permissions.ts';
@@ -147,5 +150,6 @@ export { AGENTS } from './modules/ai/index.ts';
 export type { Board, BoardOwner } from './modules/whiteboard/index.ts';
 export type { Tape, TapeEvent, TapeEventKind } from './modules/recordings/index.ts';
 export { PersonalSync, SyncAuthError, contentHash, verifyEd25519, linkProof, fpOf, SMALL_FILE, type SyncSettings, type DeviceView, type ConflictView, type SelfDevice } from './modules/sync/index.ts';
+export { HostAuthority, HostingError, type HostState, type HostStatus } from './modules/hosting/index.ts';
 export { clock as tapeClock } from './modules/recordings/index.ts';
 export * as ScreenShareEvents from './modules/screenshare/index.ts';

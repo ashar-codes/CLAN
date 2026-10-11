@@ -62,3 +62,29 @@ Before adopting a pinned candidate, audit its current Node/security patch level,
 Android arm64 + 16 KB builds, React Native/foreground-service integration, app-private encrypted storage, SQLite,
 pinned TLS, OPAQUE, signing-key ownership and all existing server tests. Missing build/runtime evidence remains a gate.
 A maintained compatible runtime or a separately reviewed native server adapter is required; no server/permission bypass.
+
+
+## Authority layer implementation (cloud session, 2026-10-11)
+
+Implemented, **not wired to any host path or UI**: `packages/protocol/src/hosting.ts` (portable records + chain
+verification over RFC 8785 canonical bytes and Ed25519 via @noble) and `packages/clan/src/modules/hosting`
+(`hosting` migration 1, `HostAuthority`). Records: owner-signed genesis (epoch 0, owner device hosts), owner-signed
+delegation (CLAN, destination key, `host` action, expiry ≤365 days), owner-signed revocation, destination-signed
+acknowledgment of `(epoch, prevHash, checkpointHash, delegationId)`, and transition N+1 signed by host N.
+
+Local state machine: `active → frozen → relinquished` (transition and relinquished state commit in one transaction;
+afterwards the device may only replay that exact record, never resume or unfreeze); destination `staging → verified →
+ack`, and acceptance of a chain naming this device requires its verified staging of the same checkpoint. A different
+record at a known epoch, a successor the device did not sign, or a successor offered to a host that never relinquished
+marks the CLAN `conflict` (persisted outside the rolled-back transaction; writes unavailable until recovery). Older
+chains are refused as stale. Revocations never rewrite accepted history (devices cannot order them by clock): the
+relinquishing host and the destination refuse revoked/expired delegations, and a revoked or expired head stops being
+writable; such a host may still freeze and hand authority back. No private keys are stored; callers pass a keystore
+signer. Deterministic tests: `packages/clan/test/hosting.test.ts` (6 cases: owner-only genesis, full handoff with old-host
+restart/replay, forged/copied-key/wrong-CLAN/other-device/expired/revoked delegations and forged revocations, restart
+mid-staging and unverified activation, tampered records/stale chain/simultaneous handoff/equal-epoch fork, revoked head
+and return to owner, never-relinquished host conflict).
+
+Still required before any handoff is exposed: CLAN-scoped checkpoint builder + immutable file manifest, the separate
+authenticated replication transport, `assertWritable` gating in the host server write paths, client verification of
+the delegation chain during pairing, conflict recovery UX, Android hosting runtime (see above) and cross-device evidence.

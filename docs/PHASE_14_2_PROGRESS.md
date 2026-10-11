@@ -11,7 +11,8 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | `7d16b04` | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
 | P0-5 | CLAN archive / remove from device / leave / delete | IMPLEMENTED; desktop PASS; native cleanup completion pending | see git log | Core/security units, desktop removal/delete E2Es PASS; native archive/leave PASS; cleanup confirmation defect fixed, rerun interrupted by low storage |
 | P1-6 | In-app join alerts + Raise Hand | IMPLEMENTED; server + desktop PASS; native execution pending | see git log | 3 security/transport tests + desktop E2E PASS; native script prepared, blocked by storage |
-| P1-7…10 | Persistent mobile CLANs, Android hosting, iOS parity, installers | DESIGN/PREFLIGHT; implementation incomplete | see git log | Hosting design/runtime investigation; iOS prebuild/Pods PASS, compile pending storage; no candidates |
+| P1-7 | Persistent mobile CLANs: signed hosting authority / fencing layer | IMPLEMENTED (domain only, not wired/exposed) | see git log | 6 deterministic authority tests + 131 clan units PASS (Linux cloud); replication/checkpoint, host gating, UI NOT STARTED |
+| P1-8…10 | Android hosting, iOS parity, installers | DESIGN/PREFLIGHT; implementation incomplete | see git log | Hosting design/runtime investigation; iOS prebuild/Pods PASS, compile pending storage; no candidates |
 
 ## P0-1 root cause and fix
 Two independent source defects, both consistent with "Windows host is discovered but nobody can connect" and
@@ -263,3 +264,27 @@ Latest source differs from installed test APK by final storage-error handling; r
 Node mobile published runtime is 18.20.4; open Node24/SQLite PRs are possible candidates but not audited/installed.
 See hosting design for primary source URLs and required safety/build evidence. Persistent delegation/native hosting remain
 unfinished; do not report durable availability, final software gates or Phase14.2 completion. No installer distribution.
+
+## Cloud continuation (Linux container, 2026-10-11)
+
+Resumed at checkpoint `4b12b2f` (tip of `phase-14.2`, no later commits) on cloud branch `claude/laughing-clarke-yql2cy`.
+Environment: Linux x64, Node 24.21.0 (official tarball, SHA-256 verified), pnpm 11.20.0, `pnpm install --frozen-lockfile`
+with `ELECTRON_SKIP_BINARY_DOWNLOAD=1`. No Android SDK/emulator, Windows, Xcode or physical devices: none of those
+gates can be run or claimed from this environment. No signing material accessed.
+
+WIP checkpoint `4b12b2f` (test temp-dir registration in `packages/clan/test/helpers.ts`; SIGINT/SIGTERM cleanup in
+`tools/sim/class-peer.ts` and `tools/sim/sync-peer.ts`): typecheck PASS and the clan suite uses the shared teardown
+registry. The sim-peer signal handlers are typechecked only; they are exercised by the Mac/Android harnesses, NOT RUN here.
+
+Baseline full serial unit run (`vitest run --no-file-parallelism`): **351 PASS, 14 skipped, 1 FAIL** (44 files). The
+failure was genuine and pre-existing since `bd8f545`: the architecture test forbids security code branching on the
+`CLASSROOM` type name. Fixed by `hasMemberFilePolicy()` beside the capability table (behaviour unchanged; 98 sharing/
+security/mobile units + `clan.test.ts` 16 PASS). Note: that baseline run overlapped with new hosting files being written;
+the final full run below is the authoritative result.
+
+P1-7 authority layer: see [hosting design › Authority layer implementation](PHASE_14_2_HOSTING_DESIGN.md). Not wired
+to host write paths, pairing or UI; nothing advertises durable handoff.
+
+Final cloud gate on this branch: typecheck PASS; full serial unit **358 PASS / 14 skipped / 0 FAIL**, 42 files passed +
+3 skipped, 277.82 s. Skips are environment gates (no usable LAN interface for mDNS discovery, no local SFU binary for
+screen sharing), not passes. Desktop Electron E2E (`pnpm test:e2e`) and all Android/iOS/Windows suites NOT RUN here.
