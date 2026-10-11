@@ -51,7 +51,7 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   /** Called by the member UI once the host approved it. Values come from the authenticated session (hello) + the paired host key. */
   handle('clan:joined', (raw) => {
     const a = z.object({ sessionId: Id, clanId: Id.nullable(), type: ClanType, name: z.string().trim().min(1).max(80), hostKey: z.string().max(64), expiresAt: z.number().int().nullable(), hostName: z.string().trim().min(1).max(80).nullable().optional() }).parse(raw);
-    c.clans.recordJoined({ id: a.clanId ?? a.sessionId, type: a.type, name: a.name, hostDeviceId: keyFingerprint(a.hostKey), hostName: a.hostName ?? `${a.name} host`, expiresAt: a.expiresAt, me: c.me });
+    c.clans.recordJoined({ id: a.clanId ?? a.sessionId, type: a.type, name: a.name, hostDeviceId: keyFingerprint(a.hostKey), hostName: a.hostName ?? `${a.name} host`, expiresAt: a.expiresAt, me: c.me, sessionId: a.sessionId });
     if (a.type === 'CLASSROOM') c.courses.linkClassrooms(me); // a joined Classroom gets its linked Course right away
   });
   handle('clan:detail', (id) => {

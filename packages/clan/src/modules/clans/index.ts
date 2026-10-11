@@ -46,6 +46,9 @@ export const schema: ModuleSchema = {
     CREATE TABLE clans_cleanup (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), user_id TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('remove','delete')), requested_at INTEGER NOT NULL, completed_at INTEGER,
       object_ids TEXT NOT NULL DEFAULT '[]');
+  `, `
+    -- Authenticated member-side routes may outlive paired transport receipts. No server table dependency.
+    CREATE TABLE clans_local_sessions (session_id TEXT PRIMARY KEY, clan_id TEXT NOT NULL REFERENCES clans_clans(id), user_id TEXT NOT NULL);
   `],
 };
 
@@ -124,7 +127,7 @@ export class Clans implements MembershipQuery {
   }
 
   /** A member device records a CLAN it joined (same id as on the host). The host's device key identifies the host user. */
-  recordJoined(o: { id: string; type: ClanType; name: string; hostDeviceId: string; hostName: string; expiresAt?: number | null; me: string }) {
+  recordJoined(o: { id: string; type: ClanType; name: string; hostDeviceId: string; hostName: string; expiresAt?: number | null; me: string; sessionId?: string }) {
     return tx(this.db, () => {
       const cleanup = this.cleanup(o.id);
       if (cleanup?.kind === 'delete') throw new Error('This CLAN was deleted on this device.');
@@ -135,6 +138,12 @@ export class Clans implements MembershipQuery {
         this.create({ id: o.id, type: o.type, name: o.name, createdBy: host, expiresAt: o.expiresAt ?? undefined });
       }
       this.addMember(o.id, o.me, 'member');
+      if (o.sessionId) {
+        const session = z.uuid().parse(o.sessionId);
+        const existing = this.db.prepare('SELECT clan_id c, user_id u FROM clans_local_sessions WHERE session_id = ?').get(session) as { c: string; u: string } | undefined;
+        if (existing && (existing.c !== o.id || existing.u !== o.me)) throw new Error('This session is already associated with a different CLAN.');
+        this.db.prepare('INSERT OR IGNORE INTO clans_local_sessions (session_id, clan_id, user_id) VALUES (?, ?, ?)').run(session, o.id, o.me);
+      }
       return this.get(o.id)!;
     });
   }
@@ -182,6 +191,10 @@ export class Clans implements MembershipQuery {
 
   /** Classroom sessions (meetings) of a CLASSROOM CLAN, oldest first. */
   sessionsOf(clanId: string): string[] { return classroomSessions(this.db, clanId); }
+  /** Exact authenticated session IDs for device-local download cleanup; never infer scope from a class title. */
+  localSessionsOf(clanId: string, userId: string) {
+    return (this.db.prepare('SELECT session_id id FROM clans_local_sessions WHERE clan_id = ? AND user_id = ?').all(clanId, userId) as { id: string }[]).map((r) => r.id);
+  }
   clanOfSession(sessionId: string) { return (this.db.prepare('SELECT clan_id c FROM clans_classroom_sessions WHERE session_id = ?').get(sessionId) as { c: string } | undefined)?.c ?? null; }
 
   /** Maps classroom history into CLASSROOM CLANs. Idempotent; run at startup and after a class ends. */

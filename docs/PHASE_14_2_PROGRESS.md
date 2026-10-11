@@ -182,3 +182,22 @@ Earlier targeted run failed because the new test called the personal board creat
 to the existing host API, no production permission bypass. Xcode 26.6 now exists/selected; native SDK commands report
 unaccepted license. User has been asked to complete Xcode's license/first-launch setup. Windows feedback is still setup
 only; branch pushed through `385c623`, native Windows PASS remains unverified.
+
+### Stopped-host and download cleanup preparation
+
+Server-owned scoped cleanup now refuses live/invalid session scopes, validates all UUID paths, preserves adopted bytes
+through the Resource Store before erasure, and deletes server history in foreign-key order. Changed adopted bytes fail
+closed with cleanup pending. Canonical tombstones/private courses remain. `clans` migration 4 records authenticated
+member-side session ownership independently of expiring transport receipts. Rehosting now checks active ownership.
+Desktop downloads journal exact session/resource ownership before transfers, serialize atomic index updates, stop/wait
+only scoped jobs, and remove verified indexed copies/owned partials; changed files, shared paths, symlinks and external
+exports are retained. Legacy partials without ownership evidence must be retained, not guessed by class title.
+
+PASS: typecheck (`/tmp/clan-142-download-cleanup-typecheck-final.log`); **33/33** targeted core/server/download units,
+4.91 s (`/tmp/clan-142-download-cleanup-unit2.log`); **8/8** desktop chat/preview/archive/leave regressions, 70.56 s
+(`/tmp/clan-142-cleanup-desktop-regression.log`). Initial download cleanup check used the wrong return shape for the
+existing hash helper (string, not object); typecheck/test exposed it, corrected without timeout changes.
+Destructive cleanup coordinator/desktop and mobile controls remain pending; these helpers are not a completed removal
+feature. Final full suites, native cleanup controls and packaging remain pending. Machine load at gate finish ~36/46/37;
+no physical-device performance claim. Xcode license/SDK check now PASS (26.6, iOS SDK 26.5); no simulator runtime/device
+installed. CocoaPods setup and an isolated unsigned native compile script are being prepared; no IPA exists yet.

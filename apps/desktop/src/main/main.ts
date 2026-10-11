@@ -202,7 +202,7 @@ function registerIpc() {
     let title = a.title, type = a.type, clanId: string | null;
     if (a.clanId) {
       const c = clan.clans.get(a.clanId);
-      if (!c || c.archivedAt || !clan.clans.members(c.id).some((m) => m.userId === clan.me && m.role === 'owner')) throw new Error('You can only host your own CLANs again.');
+      if (!c || !clan.clans.isActiveMember(c.id, clan.me) || !clan.clans.members(c.id).some((m) => m.userId === clan.me && m.role === 'owner')) throw new Error('You can only host your own active CLANs again.');
       if (c.type === 'TEMPORARY') throw new Error('A Temporary CLAN cannot be hosted again; start a new one.');
       ({ name: title, type } = c); clanId = c.id;
     } else clanId = null;

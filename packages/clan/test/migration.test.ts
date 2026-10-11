@@ -1,9 +1,9 @@
 // Classroom → CLAN migration: ids, history, files, assignments, receipts and participants are preserved.
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { openDb } from '@classroom/server';
+import { openDb, purgeStoppedSessions } from '@classroom/server';
 import { setup, tmp } from './helpers.ts';
 
 const LEGACY_TABLES = ['sessions', 'members', 'resources', 'assignments', 'uploads', 'submissions', 'presence', 'events', 'trusted_devices', 'transfers'];
@@ -36,6 +36,52 @@ function legacyDb(storage: string) {
 }
 
 describe('classroom → CLAN migration', () => {
+  it('changed adopted bytes block erasure without dropping metadata or personal references', async () => {
+    const storage = tmp(), L = legacyDb(storage);
+    try {
+      const { app } = setup({ db: L.db, storageDir: storage });
+      const p = { kind: 'user' as const, userId: app.me };
+      const shared = app.files.list(p, { kind: 'clan', clanId: L.s1 })[0]!;
+      const personal = app.files.share(p, shared.refId, { kind: 'personal', ownerId: app.me });
+      app.clans.requestCleanup(L.s1, app.me, 'delete'); app.purgeClanProjection(L.s1);
+      const path = join(storage, 'resources', L.res); writeFileSync(path, 'unexpected changed content');
+      await expect(purgeStoppedSessions(L.db, storage, app.clans.sessionsOf(L.s1), {
+        preserve: (path) => app.store.preserveAdoptedAt(path), removed: (path) => app.store.forgetAdoptedAt(path),
+      })).rejects.toThrow('changed classroom file');
+      expect(readFileSync(path, 'utf8')).toBe('unexpected changed content');
+      expect(L.db.prepare('SELECT 1 FROM resources WHERE id = ?').get(L.res)).toBeDefined();
+      expect(app.files.get(p, personal.refId)).toBeTruthy();
+      expect(app.clans.cleanup(L.s1)?.completedAt).toBeNull();
+      expect(app.clans.isActiveMember(L.s1, app.me)).toBe(false);
+    } finally { L.db.close(); }
+  });
+  it('stopped host cleanup preserves personal adopted bytes and other sessions while deleting only scoped server history', async () => {
+    const storage = tmp(), L = legacyDb(storage);
+    try {
+      const { app } = setup({ db: L.db, storageDir: storage });
+      const p = { kind: 'user' as const, userId: app.me };
+      const shared = app.files.list(p, { kind: 'clan', clanId: L.s1 })[0]!;
+      const personal = app.files.share(p, shared.refId, { kind: 'personal', ownerId: app.me });
+      const original = join(storage, 'resources', L.res);
+      await expect(purgeStoppedSessions(L.db, storage, [L.s1, L.s3], { preserve: async () => {}, removed: () => {} })).rejects.toThrow('Stop');
+      await expect(purgeStoppedSessions(L.db, storage, ['../resources'], { preserve: async () => {}, removed: () => {} })).rejects.toThrow('Invalid');
+      expect(existsSync(original)).toBe(true);
+      app.clans.requestCleanup(L.s1, app.me, 'delete'); app.purgeClanProjection(L.s1);
+      const scope = app.clans.sessionsOf(L.s1);
+      const clean = () => purgeStoppedSessions(L.db, storage, scope, { preserve: (path) => app.store.preserveAdoptedAt(path), removed: (path) => app.store.forgetAdoptedAt(path) });
+      expect(await clean()).toMatchObject({ sessions: 2, resources: 1, submissions: 1 });
+      expect(await clean()).toMatchObject({ resources: 0 }); // crash/retry after bytes and rows removed
+      expect(existsSync(original)).toBe(false);
+      const kept = app.files.get(p, personal.refId)!;
+      expect(kept.sha256).toBe(L.sha);
+      expect(await app.store.verify(kept.objectId)).toBe(true);
+      expect(readFileSync(app.store.object(kept.objectId)!.location, 'utf8')).toBe('lecture 1 slides');
+      expect(app.store.collectOwned(kept.objectId)).toBe('retained');
+      expect(L.db.prepare('SELECT id FROM sessions').all()).toEqual([{ id: L.s3 }]);
+      expect(L.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(app.courses.forClan(p, L.s1)).toBeTruthy(); // personal course is never deleted
+    } finally { L.db.close(); }
+  });
   it('does not resurrect deleted authority or re-adopt files from retained legacy history', () => {
     const storage = tmp(), L = legacyDb(storage);
     try {

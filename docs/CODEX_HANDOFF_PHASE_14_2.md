@@ -138,3 +138,11 @@ downloads and stop-host cleanup are coordinated and tested. See lifecycle/progre
 `clans_cleanup`; never mark cleanup complete based on projection cleanup alone. File publication rechecks membership.
 Xcode 26.6 is installed/selected but license is not accepted; user asked to complete first launch. Windows actual tested
 commit/results still pending. No Phase 14.2 candidate packaging or completion tag yet.
+
+Further cleanup preparation: server `purgeStoppedSessions` only accepts stopped validated scopes and preserves adopted
+Resource Store bytes before removing UUID-owned server files/history. Desktop `removeSessionCopies` stops scoped jobs,
+serializes index updates and protects changed/shared/exported files. Authenticated session IDs persist in clans migration
+4. Helpers pass 33 targeted units/typecheck and 8 desktop regressions; removal UI/coordinator and native cleanup remain
+unfinished. Do not advertise helpers as complete erasure. Legacy unowned partials cannot be deleted by title guessing.
+Xcode user completed first launch; SDKs now query successfully. CocoaPods installing; isolated `ios-build.sh` is prepared
+but not yet executed. It compiles unsigned .app, never an IPA or signing identity change. Check logs/progress for evidence.

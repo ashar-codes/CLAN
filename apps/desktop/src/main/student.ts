@@ -2,9 +2,9 @@
 // The renderer only ever passes opaque ids (resource ids, pick ids); it can never name a local path.
 import { app, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { access, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { access, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { windowsOpenWith } from './open-with.ts';
@@ -33,6 +33,8 @@ const exists = (p: string) => access(p).then(() => true, () => false);
 
 export class StudentFiles {
   private jobs = new Map<string, Job>();
+  private tasks = new Map<Job, Promise<void>>();
+  private completedWrites: Promise<unknown> = Promise.resolve();
   private picks = new Map<string, { path: string; name: string; size: number }>();
   private win: () => BrowserWindow | undefined;
   private trust: Trust;
@@ -106,7 +108,65 @@ export class StudentFiles {
     return join(root, safeFileName(c.classTitle));
   }
   private completedPath() { return join(this.dataDir, 'downloads.json'); }
+  private copyOwnersPath() { return join(this.dataDir, 'download-copies.json'); }
+  private copyOwners(): Promise<Record<string, { sessionId: string; resourceId: string; dir: string }>> { return json(this.copyOwnersPath(), {}); }
   private async completed(): Promise<Record<string, { path: string; sha256: string }>> { return json(this.completedPath(), {}); }
+  private updateCompleted(change: (done: Record<string, { path: string; sha256: string }>) => void) {
+    const task = this.completedWrites.catch(() => {}).then(async () => {
+      const done = await this.completed(); change(done);
+      const tmp = `${this.completedPath()}.${randomUUID()}.tmp`;
+      try { await writeFile(tmp, JSON.stringify(done)); await rename(tmp, this.completedPath()); }
+      finally { await rm(tmp, { force: true }); }
+    });
+    this.completedWrites = task; return task;
+  }
+  private updateCopyOwners(change: (copies: Awaited<ReturnType<StudentFiles['copyOwners']>>) => void) {
+    const task = this.completedWrites.catch(() => {}).then(async () => {
+      const copies = await this.copyOwners(); change(copies);
+      const tmp = `${this.copyOwnersPath()}.${randomUUID()}.tmp`;
+      try { await writeFile(tmp, JSON.stringify(copies)); await rename(tmp, this.copyOwnersPath()); }
+      finally { await rm(tmp, { force: true }); }
+    });
+    this.completedWrites = task; return task;
+  }
+
+  /** Exactly indexed downloads only. Modified files, symlinks, shared paths and external exports are retained. */
+  async removeSessionCopies(sessionIds: string[]) {
+    const ids = new Set(sessionIds), removed = new Set<string>(); let retained = 0;
+    for (const id of ids) await this.stopSession(id);
+    await Promise.all([...this.tasks].filter(([job]) => ids.has(job.conn.sessionId)).map(([, task]) => task));
+    await this.completedWrites.catch(() => {});
+    const done = await this.completed(), copies = await this.copyOwners(), removedOwners = new Set<string>();
+    const root = await realpath((!app.isPackaged && process.env.CLASSROOM_DOWNLOADS_DIR) || join(app.getPath('downloads'), 'CLAN')).catch(() => null);
+    for (const [key, item] of Object.entries(done)) {
+      if (!ids.has(key.split(':')[0]!)) continue;
+      try {
+        const path = await realpath(item.path);
+        const owned = root && path.startsWith(root + sep) && !(await lstat(item.path)).isSymbolicLink();
+        const elsewhere = Object.entries(done).some(([k, d]) => k !== key && !ids.has(k.split(':')[0]!) && d.path === item.path);
+        if (!owned || elsewhere || (await sha256File(item.path)) !== item.sha256) { retained++; continue; }
+        await rm(item.path); removed.add(key);
+      } catch (e) { if ((e as { code?: string }).code === 'ENOENT') removed.add(key); else throw e; }
+    }
+    await this.updateCompleted((current) => { for (const key of removed) delete current[key]; });
+    for (const [key, copy] of Object.entries(copies)) {
+      if (!ids.has(copy.sessionId)) continue;
+      if (key !== `${copy.sessionId}:${copy.resourceId}` || !/^[0-9a-f-]{36}$/.test(copy.resourceId)) throw new Error('Invalid download ownership record.');
+      const partial = partPaths(copy.dir, copy.resourceId); let kept = false;
+      for (const path of [partial.part, partial.meta]) {
+        try {
+          const canonical = await realpath(path);
+          if (!root || !canonical.startsWith(root + sep) || (await lstat(path)).isSymbolicLink()) { retained++; kept = true; continue; }
+          await rm(path);
+        } catch (e) { if ((e as { code?: string }).code !== 'ENOENT') throw e; }
+      }
+      if (!kept) removedOwners.add(key);
+    }
+    await this.updateCopyOwners((current) => { for (const key of removedOwners) delete current[key]; });
+    for (const [key, job] of this.jobs) if (ids.has(job.conn.sessionId)) this.jobs.delete(key);
+    for (const key of this.cache.keys()) if (ids.has(key.split(':')[0]!)) this.cache.delete(key);
+    return { removed: removed.size, retained };
+  }
 
   private emit(s: FileState) { this.win()?.webContents.send('student:file', s); }
   private set(job: Job, patch: Partial<FileState>) {
@@ -165,7 +225,8 @@ export class StudentFiles {
     const running = [...this.jobs.values()].filter((j) => j.state.state === 'downloading' || j.state.state === 'verifying').length;
     const next = [...this.jobs.values()].find((j) => j.state.state === 'queued');
     if (!next || running >= CONCURRENCY) return;
-    void this.run(next).finally(() => this.pump());
+    const task = this.run(next).finally(() => { this.tasks.delete(next); this.pump(); });
+    this.tasks.set(next, task);
     this.pump();
   }
 
@@ -176,6 +237,8 @@ export class StudentFiles {
     try {
       const agent = this.agent(job.conn);
       const key = `${job.conn.sessionId}:${job.resource.id}`;
+      await this.updateCopyOwners((copies) => { copies[key] = { sessionId: job.conn.sessionId, resourceId: job.resource.id, dir: this.destDir(job.conn) }; });
+      if (ctl.signal.aborted) return;
       const cached = this.cache.get(key) ?? {};
       const peers = new Set<string>();
       let teacher = false;
@@ -190,9 +253,7 @@ export class StudentFiles {
       });
       if (out.manifest) this.cache.set(key, { ...this.cache.get(key), manifest: out.manifest });
       this.offeredCompleted.add(key);
-      const done = await this.completed();
-      done[`${job.conn.sessionId}:${job.resource.id}`] = { path: out.path, sha256: job.resource.sha256! };
-      await writeFile(this.completedPath(), JSON.stringify(done));
+      await this.updateCompleted((done) => { done[`${job.conn.sessionId}:${job.resource.id}`] = { path: out.path, sha256: job.resource.sha256! }; });
       this.set(job, {
         state: 'completed', bytes: job.resource.size, canOpen: canOpen(out.path),
         via: out.stats.mode === 'swarm' ? `${via(out.stats.teacherBytes > 0, out.stats.sources.filter((x) => x.kind === 'peer' && x.chunks > 0).length)} · teacher-signed ✓` : 'teacher',

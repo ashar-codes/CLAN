@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { file, setup, user } from './helpers.ts';
 
 describe('device-local CLAN lifecycle', () => {
+  it('retains authenticated session scope for cleanup after leave and rejects session reassignment', () => {
+    const { app: c, db, storageDir } = setup();
+    try {
+      const id = randomUUID(), sessionId = randomUUID();
+      const joined = { id, sessionId, type: 'FRIENDS' as const, name: 'Friends', hostDeviceId: 'scope-host', hostName: 'Host', me: c.me };
+      c.clans.recordJoined(joined); c.clans.leave(id, c.me);
+      expect(setup({ db, storageDir }).app.clans.localSessionsOf(id, c.me)).toEqual([sessionId]);
+      expect(c.clans.localSessionsOf(id, 'other-user')).toEqual([]);
+      const other = c.clans.create({ type: 'FRIENDS', name: 'Other', createdBy: c.me });
+      expect(() => c.clans.recordJoined({ ...joined, id: other.id })).toThrow('different CLAN');
+      expect(c.clans.localSessionsOf(id, c.me)).toEqual([sessionId]);
+    } finally { db.close(); }
+  });
   it('scoped projection cleanup preserves private study data, course file IDs and other CLAN references', async () => {
     const { app: c, db, storageDir } = setup();
     try {

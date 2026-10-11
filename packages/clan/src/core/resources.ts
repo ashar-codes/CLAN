@@ -149,6 +149,33 @@ export class ResourceStore {
     return 'removed';
   }
 
+  /** Before the stopped classroom server removes its UUID file, move referenced adopted bytes into our hash store.
+   * Copy + hash verification precede metadata replacement; the original remains for the server to clean up. */
+  async preserveAdoptedAt(location: string) {
+    const object = this.db.prepare("SELECT id, sha256, size, mime, location, origin FROM resources_objects WHERE location = ? AND origin = 'adopted'").get(location) as ObjectRow | undefined;
+    if (!object) return;
+    if (!/^[0-9a-f]{64}$/.test(object.sha256)) throw new Error('Invalid adopted content hash.');
+    this.activeWrites++;
+    const dest = join(this.dir, object.sha256.slice(0, 2), object.sha256), tmp = `${dest}.${randomUUID()}.tmp`;
+    try {
+      await mkdir(join(this.dir, object.sha256.slice(0, 2)), { recursive: true });
+      await copyFile(location, tmp);
+      const verified = await sha256File(tmp);
+      if (verified.sha256 !== object.sha256 || verified.size !== object.size) throw new Error('Cannot preserve a changed classroom file; cleanup remains pending.');
+      await rename(tmp, dest);
+      this.db.prepare("UPDATE resources_objects SET location = ?, origin = 'store' WHERE id = ? AND location = ? AND origin = 'adopted'").run(dest, object.id, location);
+    } finally { this.activeWrites--; await rm(tmp, { force: true }); }
+  }
+
+  /** Server cleanup has removed this exact managed UUID path; only unreferenced adopted metadata may follow. */
+  forgetAdoptedAt(location: string) {
+    const objects = this.db.prepare("SELECT id FROM resources_objects WHERE location = ? AND origin = 'adopted'").all(location) as { id: string }[];
+    for (const object of objects) {
+      if (this.refsOf(object.id).length || this.activeWrites || this.unattachedWrites.has(object.id)) throw new Error('Adopted content is still referenced or in flight.');
+      this.db.prepare('DELETE FROM resources_objects WHERE id = ?').run(object.id);
+    }
+  }
+
   /** Re-hashes the stored bytes. */
   async verify(objectId: string) {
     const o = this.object(objectId);
