@@ -39,7 +39,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   await mkdir(join(o.dataDir, 'people'), { recursive: true });
   const saved = Number(await readFile(portFile, 'utf8').catch(() => '')) || undefined;
   const start = (port?: number) => startPeopleRuntime({
-    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port,
+    people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port, allowLoopback: loopback,
     endpoints: (port) => [...candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${port}`), ...(loopback ? [`127.0.0.1:${port}`] : [])].slice(0, 3),
     onLive: (e) => send('people:live', { from: e.from, body: e.body }),
     onChange: (what) => send('people:changed', { what }),

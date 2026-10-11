@@ -66,7 +66,7 @@ function nodeEnv(dir: string): PhoneEnv {
 describe('phone people runtime (Node stand-ins for the native transport)', () => {
   it('connects by code, befriends, chats both ways over its socket, and exchanges verified files', async () => {
     const pcD = setup(), pcSigner = nodeSigner(newEd25519().privatePkcs8), tls = await createClassroomTls('people-pc', Date.now(), 1e10);
-    const pc = await startPeopleRuntime({ people: pcD.app.people, signer: pcSigner, tls, dir: join(pcD.storageDir, 'people'), bind: '127.0.0.1', discover: false, endpoints: (port) => [`127.0.0.1:${port}`], tickMs: 200 });
+    const pc = await startPeopleRuntime({ people: pcD.app.people, signer: pcSigner, tls, dir: join(pcD.storageDir, 'people'), bind: '127.0.0.1', discover: false, allowLoopback: true, endpoints: (port) => [`127.0.0.1:${port}`], tickMs: 200 });
     pcD.app.people.updateProfile({ name: 'Desk' });
     stops.push(() => pc.stop());
     const phD = setup(), ph = phD.app.people, dir = mkdtempSync(join(tmpdir(), 'phone-people-'));

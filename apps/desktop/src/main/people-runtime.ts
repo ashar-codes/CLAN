@@ -17,6 +17,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export async function startPeopleRuntime(o: {
   people: People; signer: Signer; tls: Tls; dir: string; port?: number; bind?: string; discover: boolean;
   endpoints(port: number): string[]; onLive?(e: PeerEnvelope): void; onChange?(what: string): void; now?: () => number; tickMs?: number;
+  /** Accept 127.x endpoints from introductions (tests and development only). */
+  allowLoopback?: boolean;
 }) {
   const p = o.people, now = o.now ?? (() => Date.now());
   p.setSigner(o.signer);
@@ -36,7 +38,7 @@ export async function startPeopleRuntime(o: {
         const i = raw as { binding?: unknown; endpoints?: unknown; profile?: unknown };
         const b = PeerTlsBinding.safeParse(i?.binding);
         const tls = b.success && b.data.key === from && peerBindingValid(b.data) ? { certificate: b.data.certificate, spkiSha256: b.data.spkiSha256 } : undefined;
-        const endpoints = tls && Array.isArray(i.endpoints) ? i.endpoints.filter((e): e is string => typeof e === 'string' && /^[0-9.]{7,15}:\d{2,5}$/.test(e)).slice(0, 6) : [];
+        const endpoints = tls && Array.isArray(i.endpoints) ? i.endpoints.filter((e): e is string => typeof e === 'string' && /^[0-9.]{7,15}:\d{2,5}$/.test(e) && (o.allowLoopback || !/^(127\.|0\.)/.test(e))).slice(0, 6) : [];
         const prof = i?.profile as { profile?: { key?: string } } | null;
         if (prof?.profile?.key === from) p.meet({ profile: prof, endpoints, tls });
       },

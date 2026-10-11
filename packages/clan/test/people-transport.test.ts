@@ -23,7 +23,7 @@ async function computer(name: string, base?: ReturnType<typeof setup>, keys?: { 
   const signer = keys?.signer ?? nodeSigner(newEd25519().privatePkcs8);
   const tls = keys?.tls ?? await createClassroomTls(`people-${name}`, Date.now(), 365 * 86_400_000);
   const live: PeerEnvelope[] = [];
-  const rt = await startPeopleRuntime({ people: d.app.people, signer, tls, dir: join(d.storageDir, 'people'), bind: '127.0.0.1', discover: false, endpoints: (port) => [`127.0.0.1:${port}`], onLive: (e) => live.push(e), tickMs: 200 });
+  const rt = await startPeopleRuntime({ people: d.app.people, signer, tls, dir: join(d.storageDir, 'people'), bind: '127.0.0.1', discover: false, allowLoopback: true, endpoints: (port) => [`127.0.0.1:${port}`], onLive: (e) => live.push(e), tickMs: 200 });
   d.app.people.updateProfile({ name });
   stops.push(() => rt.stop());
   return { ...d, p: d.app.people, rt, signer, tls, key: signer.publicKey, live };
