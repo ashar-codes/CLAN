@@ -7,7 +7,7 @@
 //   POST /note {title, body}    creates a note;  POST /note/:id {body} edits it
 //   POST /revoke/:fp            unlinks a device;  POST /resolve/:id/:choice
 import { createServer } from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -17,7 +17,8 @@ import { newEd25519, nodeSigner } from '@classroom/client/node';
 
 const { values } = parseArgs({ options: { port: { type: 'string', default: '47300' }, control: { type: 'string', default: '47399' } } });
 const dir = mkdtempSync(join(tmpdir(), 'sync-peer-'));
-const app = openClan(openDb(join(dir, 'db.sqlite')), { storageDir: dir, localName: 'Sara Ahmed' });
+const db = openDb(join(dir, 'db.sqlite'));
+const app = openClan(db, { storageDir: dir, localName: 'Sara Ahmed' });
 const me = { kind: 'user' as const, userId: app.me };
 const tls = await createClassroomTls('sync-peer', Date.now(), 86_400_000);
 const signer = nodeSigner(newEd25519().privatePkcs8);
@@ -46,3 +47,5 @@ createServer((req, res) => {
     } catch (e) { json(res, { error: (e as Error).message }, 500); }
   });
 }).listen(Number(values.control), '127.0.0.1', () => console.log(`sync peer: sync on :${srv.port}, control on 127.0.0.1:${values.control}`));
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { void srv.close().then(() => { db.close(); rmSync(dir, { recursive: true, force: true }); process.exit(0); }, () => process.exit(1)); });

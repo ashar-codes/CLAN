@@ -8,7 +8,7 @@
 //   POST /draw                        host draws a sticky on the CLAN board
 //   POST /file {path, to}             host shares a file to 'clan' or one member handle
 import { createServer } from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -72,4 +72,4 @@ createServer((req, res) => {
     } catch (e) { json(res, { error: (e as Error).message }, 500); }
   });
 }).listen(Number(values.control), '127.0.0.1', () => console.log(JSON.stringify({ code: s.classroom.code, bootstrap: s.bootstrapUrl, url: s.url, control: `127.0.0.1:${values.control}` })));
-for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { void s.close().finally(() => process.exit(0)); }); // stops the SFU child too
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { void s.close().then(() => { db.close(); rmSync(dir, { recursive: true, force: true }); process.exit(0); }, () => process.exit(1)); }); // stops the SFU child too
