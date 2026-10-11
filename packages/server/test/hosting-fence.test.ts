@@ -1,9 +1,10 @@
 // Persistent hosting: the host server fences every authoritative write on the device's current hosting epoch.
 import { afterEach, describe, expect, it } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { PassThrough } from 'node:stream';
 import { JOIN_POLICY, sessionAuthorityProblem, signHostStatement, type AuthorityRecord } from '@classroom/protocol';
-import { startClassroomServer, type RunningServer, type ServerOptions } from '../src/index.ts';
-import { device, secureJoin, socket, tmp, trFor, trustServer } from './helpers.ts';
+import { openDb, startClassroomServer, type RunningServer, type ServerOptions } from '../src/index.ts';
+import { device, makeFile, secureJoin, socket, tmp, trFor, trustServer } from './helpers.ts';
 
 const servers: RunningServer[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((s) => s.close())); });
@@ -68,5 +69,27 @@ describe('host-epoch fencing', () => {
     const w = socket(s.url, j.token); await w.opened;
     expect((await w.next('hello')).classroom.authority).toBeUndefined();
     w.close();
+  });
+
+  it('no time-of-check/time-of-use gap: a submission streaming when hosting pauses is not committed; host-side adds are fenced too', async () => {
+    const clanId = randomUUID(), a = authority(clanId);
+    const db = openDb(':memory:');
+    const s = await host({ clanId, authority: a, db });
+    s.classroom.setPolicy(JOIN_POLICY.CODE_ONLY);
+    const j = await secureJoin(s, 1);
+    const asg = s.assignments.create({ title: 'Essay', maxBytes: 1_000_000 });
+    const body = Buffer.alloc(200_000, 1);
+    const up = await s.assignments.init(j.memberId, { assignmentId: asg.id, fileName: 'essay.txt', size: body.length, sha256: createHash('sha256').update(body).digest('hex'), idempotencyKey: randomUUID() });
+    const stream = new PassThrough();
+    const sending = s.assignments.append(j.memberId, up.uploadId, 0, stream);
+    stream.write(body.subarray(0, 100_000));
+    await new Promise((r) => setTimeout(r, 50));
+    a.state.writable = false; // the host paused for a hand-over while the bytes were arriving (the request passed the fence)
+    stream.end(body.subarray(100_000));
+    await expect(sending).rejects.toThrow(/paused/);
+    expect(db.prepare('SELECT count(*) n FROM submissions').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT state FROM uploads WHERE id = ?').get(up.uploadId)).not.toEqual({ state: 'complete' });
+    await expect(s.resources.importFile(makeFile(10).path)).rejects.toThrow(/paused/); // the host's own in-process add
+    a.state.writable = true;
   });
 });

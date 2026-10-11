@@ -160,8 +160,14 @@ export class Files {
     this.bus.publish(ResourceShared, 'files', { refId: ref.id, objectId, scope, by: userOf(p) });
     return this.view(ref, new Map());
   }
+  private hostGate: (clanId: string) => string | null = () => null;
+  /** Persistent hosting: a reason this device may not make authoritative writes to a CLAN (paused, handed over, conflicted
+   *  or revoked host), or null. Member-side caching is never gated. */
+  guardHostWrites(f: (clanId: string) => string | null) { this.hostGate = f; }
   private assertWrite(p: Principal, scope: Scope) {
     if (p.kind !== 'user' || !this.perms.canRead(p, scope)) throw new Error('Not allowed.');
+    const why = scope.kind === 'clan' ? this.hostGate(scope.clanId) : null;
+    if (why) throw new Error(why);
     if (scope.kind === 'clan' && !this.clans.has(scope.clanId, 'files')) throw new Error('This CLAN does not share files.');
   }
   private nameOf(r: RefRow) { return r.name ?? classroomName(this.db, r.entityId) ?? 'file'; }

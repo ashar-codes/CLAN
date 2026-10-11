@@ -176,6 +176,15 @@ export class HostAuthority {
   }
   chainOf(clanId: string) { const r = this.row(clanId); return r ? this.chain(r) : null; }
 
+  /** Local CLAN-module writes on this device (no device key needed): refused once this device paused, handed over or
+   *  lost hosting rights, or the records conflict. Devices that never hosted (standby caches) are not gated. */
+  localWriteBlocked(clanId: string, at = this.now()): string | null {
+    const r = this.row(clanId); if (!r) return null;
+    if (r.state === 'standby') return null;
+    if (r.state === 'active') return hostAuthorized(this.head(r), at, this.revoked(r)) ? null : 'This device\'s hosting permission has expired or was revoked.';
+    return r.state === 'frozen' ? 'Hosting is paused for a hand-over.' : r.state === 'conflict' ? 'Conflicting hosting records; writes are unavailable until resolved.' : 'This device handed hosting over.';
+  }
+
   /** Gate for every host write at the current epoch. */
   assertWritable(clanId: string, localKey: string) {
     const s = this.status(clanId, localKey);

@@ -77,10 +77,17 @@ export class Whiteboard {
     return toBoard(this.row(id)!);
   }
   /** Appends ops in one transaction; duplicates (same op id) are skipped. Returns only the newly logged ops. */
+  private hostGate: (clanId: string) => string | null = () => null;
+  /** Persistent hosting: a reason this device may not make authoritative writes to a CLAN (paused, handed over, conflicted
+   *  or revoked host), or null. Member-side caching is never gated. */
+  guardHostWrites(f: (clanId: string) => string | null) { this.hostGate = f; }
+  private hostWrite(b: { owner_kind: string; owner_id: string }) { const why = b.owner_kind === 'clan' ? this.hostGate(b.owner_id) : null; if (why) throw new Error(why); }
+
   append(boardId: string, author: string, raw: unknown[]): WbLogged[] {
     const ops = raw.map((o) => WbOp.parse(o));
     return tx(this.db, () => {
       const b = this.row(boardId); if (!b) throw new Error('Board not found.');
+      this.hostWrite(b);
       let seq = b.head_seq; const t = this.now(), out: WbLogged[] = [];
       const ins = this.db.prepare('INSERT OR IGNORE INTO wb_ops (board_id, seq, op_id, author, at, op) VALUES (?, ?, ?, ?, ?, ?)');
       for (const op of ops) { if (ins.run(boardId, seq + 1, op.id, author, t, JSON.stringify(op)).changes) { seq++; out.push({ seq, author, at: t, op }); } }
@@ -119,7 +126,7 @@ export class Whiteboard {
       .run(boardId, s.seq, JSON.stringify([...s.objects.values()]), this.now());
   }
   memberEdit(boardId: string) { return !!this.row(boardId)?.member_edit; }
-  setMemberEdit(boardId: string, on: boolean) { this.db.prepare('UPDATE wb_boards SET member_edit = ? WHERE id = ?').run(on ? 1 : 0, boardId); }
+  setMemberEdit(boardId: string, on: boolean) { const b = this.row(boardId); if (b) this.hostWrite(b); this.db.prepare('UPDATE wb_boards SET member_edit = ? WHERE id = ?').run(on ? 1 : 0, boardId); }
   /** Temporary CLAN ended: its boards go with it (retention rule for Temporary CLANs). */
   /** Persistent hosting: the CLAN's boards with their full op log and snapshots (never personal/course boards). */
   checkpointProvider(): CheckpointProvider {

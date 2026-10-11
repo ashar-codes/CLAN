@@ -13,6 +13,8 @@ import { ApiError, appendBody, hashFile, sizeOf, type Limits, type Storage } fro
 type Row = { id: string; member_id: string; idempotency_key: string; file_name: string; size: number; sha256: string; target: string; state: ShareUploadStatus['state']; error: string | null; resource_id: string | null; approval: ShareUploadStatus['approval'] | null };
 
 export class Shares {
+  /** Persistent hosting: throws unless this device still holds the CLAN's epoch (server.ts sets it; re-checked at commit). */
+  guard: () => void = () => {};
   private writing = new Map<string, string>();
   private db: Db; private classroom: Classroom; private storage: Storage; private limits: Limits; private resources: Resources;
   /** Resolves the audience for a target: 'clan' → null, a handle → [sender, recipient] (throws if not allowed). */
@@ -104,6 +106,7 @@ export class Shares {
       this.approved(memberId);
       this.audience(memberId, u.target);
       if (this.classroom.info().fileSharingPolicy === 'approval') {
+        this.guard();
         this.db.prepare("UPDATE share_uploads SET state = 'complete', approval = 'pending', updated_at = ? WHERE id = ?").run(Date.now(), id);
         this.classroom.log('share.requested', memberId, { uploadId: id });
       } else await this.publish(u, false);

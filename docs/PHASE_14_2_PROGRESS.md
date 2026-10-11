@@ -371,3 +371,14 @@ derived classroom links. Pre-existing bug fixed: the host's startup sweep delete
 review on every restart (regression test fails without the fix). PASS: coverage, real hosted Classroom hand-over
 (assignments, submission bytes + receipt, pending review bytes surviving the destination's own restart, logs, chat,
 old host refuses to host again), preflight block/acknowledge test; clan suite + fence tests green (Linux).
+
+### P1-7 checkpoint H: every write path fenced, including local edits and commit points (cloud)
+
+Local module writes to CLAN-owned data (chat post/edit/remove/react, CLAN board ops and member-edit setting, files
+added/shared into a CLAN) consult `HostAuthority.localWriteBlocked`: refused once this device paused, handed over,
+conflicts or lost its delegation; personal data and member caches (standby devices, `ingest`) are never gated. Async
+host-server writes re-check the fence synchronously at their commit point (submission insert and before moving its
+bytes, resource `ready`, share quarantine, the host's own in-process file add), closing the time-of-check/time-of-use
+gap: freeze is synchronous, so no write can commit between the check and the database statement. PASS: TOCTOU test
+(submission streaming when hosting pauses is not committed — fails without the guard), local-gate test; clan + server
+suites 335 PASS / 13 environment skips (Linux).

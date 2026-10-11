@@ -155,6 +155,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     name: (p) => (p.role === 'teacher' ? opts.hostName ?? 'Host' : classroom.member(p.memberId)?.fullName ?? 'Someone') }) : null;
   resources.nameOf = (h) => chat?.nameOfHandle(h) ?? 'Someone';
   const shares = new Shares(db, classroom, storage, limits, resources);
+  resources.guard = assignments.guard = shares.guard = fence; // async writes re-check at their commit point
   if (chat) {
     shares.audience = (memberId, to) => chat.audience({ role: 'student', memberId }, to);
     shares.senderHandle = (memberId) => chat.handleOf({ role: 'student', memberId });

@@ -350,4 +350,31 @@ describe('persistent hosting authority', () => {
       } finally { fresh.db.close(); }
     } finally { w.close(); }
   });
+
+  it('direct local edits to CLAN data follow the fence: paused, handed-over and revoked hosts refuse; personal data and member caches do not', async () => {
+    const w = world();
+    try {
+      const s = await seed(w);
+      const p = user(w.phone.app.me), scope = { kind: 'clan' as const, clanId: w.clan.id };
+      const post = (d: Dev) => d.app.chat.post({ id: randomUUID(), threadId: s.thread.id, author: 'h1', authorName: 'Host', body: 'x' });
+      const draw = (d: Dev, board = s.board.id) => d.app.whiteboard.append(board, 'h1', [{ t: 'put', id: randomUUID(), obj: randomUUID(), clock: 9, data: { kind: 'rect', page: 0, x: 0, y: 0, w: 1, h: 1, color: '#000000', width: 1, z: 0 } }]);
+      w.phone.h.freeze(w.clan.id, w.ownerKey.publicKey);
+      expect(() => post(w.phone)).toThrow(/paused/);
+      expect(() => draw(w.phone)).toThrow(/paused/);
+      await expect(w.phone.app.files.add(p, file(w.phone.storageDir, 'late.txt', 'late'), 'late.txt', scope)).rejects.toThrow(/paused/);
+      const mine = w.phone.app.notes.create(p, { title: 'Personal', body: 'still mine' }); // personal data is never gated
+      expect(mine.title).toBe('Personal');
+      w.phone.h.unfreeze(w.clan.id, w.ownerKey.publicKey);
+      expect(post(w.phone).created).toBe(true);
+      const h = await handoff(w);
+      expect(() => post(w.phone)).toThrow(/handed hosting over/);
+      await w.desk.h.accept(h.chain, w.deskKey.publicKey);
+      expect(post(w.desk).created).toBe(true);
+      w.desk.h.addRevocation(w.phone.h.revoke(w.clan.id, w.ownerKey, h.delegation.id));
+      expect(() => draw(w.desk)).toThrow(/revoked/);
+      // a member device's cache (standby) is not a host write
+      await w.third.h.accept(h.chain, w.thirdKey.publicKey);
+      expect(w.third.h.localWriteBlocked(w.clan.id)).toBeNull();
+    } finally { w.close(); }
+  });
 });

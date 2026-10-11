@@ -104,7 +104,9 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   /** Reminders due → events; due-soon checks → notices. Call about once a minute. */
   const tick = (t = now()) => { reminders.fire(t); notifications.tick(t); };
   syncClassrooms();
-  hosting.onActivated(() => { syncClassrooms(); }); // member links and adopted classroom files of the imported CLAN
+  hosting.onActivated(() => { syncClassrooms(); });
+  // Direct local edits to CLAN-owned data follow the same fence as the host server.
+  for (const m of [chat, whiteboard, files]) m.guardHostWrites((clanId) => hosting.localWriteBlocked(clanId)); // member links and adopted classroom files of the imported CLAN
 
   /** Internal lifecycle step. Requires durable authorized intent; filesystem/server cleanup still must succeed
    * before completeCleanup. It deliberately never deletes private study rows, signing identities or other CLANs. */
