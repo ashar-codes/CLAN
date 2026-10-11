@@ -37,6 +37,10 @@ export const schema: ModuleSchema = {
     -- Classroom history stays in the classroom tables; these rows only link it (ids preserved).
     CREATE TABLE clans_classroom_sessions (session_id TEXT PRIMARY KEY, clan_id TEXT NOT NULL REFERENCES clans_clans(id));
     CREATE TABLE clans_classroom_members (member_id TEXT PRIMARY KEY, clan_id TEXT NOT NULL REFERENCES clans_clans(id), user_id TEXT NOT NULL);
+  `, `
+    -- Device-local presentation preference; never changes CLAN membership or host authorization.
+    CREATE TABLE clans_local_preferences (clan_id TEXT NOT NULL REFERENCES clans_clans(id), user_id TEXT NOT NULL,
+      archived_at INTEGER NOT NULL, PRIMARY KEY (clan_id, user_id));
   `],
 };
 
@@ -67,9 +71,11 @@ export class Clans implements MembershipQuery {
   has(clanId: string, cap: Capability) { const c = this.get(clanId); return !!c && CAPABILITIES[c.type].includes(cap); }
 
   /** CLANs the user is an active member of (expired TEMPORARY CLANs drop out). */
-  list(userId: string): Clan[] {
+  list(userId: string, options: { archived?: boolean; includeArchived?: boolean } = {}): Clan[] {
     return (this.db.prepare(`SELECT c.* FROM clans_clans c JOIN clans_memberships m ON m.clan_id = c.id
-      WHERE m.user_id = ? AND m.status = 'active' AND c.archived_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > ?) ORDER BY c.created_at DESC`)
+      WHERE m.user_id = ? AND m.status = 'active' AND c.archived_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > ?)
+      ${options.includeArchived ? '' : `AND ${options.archived ? '' : 'NOT'} EXISTS (SELECT 1 FROM clans_local_preferences p WHERE p.clan_id = c.id AND p.user_id = m.user_id)`}
+      ORDER BY c.created_at DESC`)
       .all(userId, this.now()) as Raw[]).map(toClan);
   }
   members(clanId: string) {
@@ -90,7 +96,24 @@ export class Clans implements MembershipQuery {
     return !!this.db.prepare(`SELECT 1 FROM clans_memberships m JOIN clans_clans c ON c.id = m.clan_id WHERE m.clan_id = ? AND m.user_id = ? AND m.status = 'active'
       AND c.archived_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > ?)`).get(clanId, userId, this.now());
   }
-  clansOf(userId: string) { return this.list(userId).map((c) => c.id); }
+  clansOf(userId: string) { return this.list(userId, { includeArchived: true }).map((c) => c.id); }
+
+  /** Local list preference only. Archived CLANs remain readable and can be restored. */
+  setLocalArchive(clanId: string, userId: string, on: boolean) {
+    if (!this.isActiveMember(clanId, userId)) throw new Error('Not allowed.');
+    if (on) this.db.prepare('INSERT OR IGNORE INTO clans_local_preferences (clan_id, user_id, archived_at) VALUES (?, ?, ?)').run(clanId, userId, this.now());
+    else this.db.prepare('DELETE FROM clans_local_preferences WHERE clan_id = ? AND user_id = ?').run(clanId, userId);
+  }
+
+  /** The local member leaves; owners must retain authority until an explicit authorized handoff or deletion. */
+  leave(clanId: string, userId: string) {
+    if (!this.isActiveMember(clanId, userId)) throw new Error('Not allowed.');
+    if (this.members(clanId).some((m) => m.userId === userId && m.role === 'owner')) throw new Error('The owner cannot leave without transferring hosting authority or deleting the CLAN.');
+    tx(this.db, () => {
+      this.setStatus(clanId, userId, 'left');
+      this.db.prepare('DELETE FROM clans_local_preferences WHERE clan_id = ? AND user_id = ?').run(clanId, userId);
+    });
+  }
 
   /** A member device records a CLAN it joined (same id as on the host). The host's device key identifies the host user. */
   recordJoined(o: { id: string; type: ClanType; name: string; hostDeviceId: string; hostName: string; expiresAt?: number | null; me: string }) {

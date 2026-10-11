@@ -1,7 +1,7 @@
 // The phone shell: Home · Study · Inbox · Diary · Me, a bottom bar with large targets, and the CLAN room look
 // (wall, wood, the student's CLANmate). Joining a live CLAN opens the existing pinned-TLS join flow.
 import { useState, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 import { dataNotice, phoneClan, me } from './core/clan';
 import { syncNow } from './sync/phone';
 import { StudyScreen, type MobileStudyTab } from './screens/Study';
@@ -66,6 +66,7 @@ function Home({ onJoin, go, onStudy }: { onJoin(): void; go(t: Tab): void; onStu
           <Text accessible={false} style={{ color, fontSize: 30 }}>{glyph}</Text><Text style={{ color: c.text, fontWeight: '800', fontSize: 16 }}>{title}</Text><Text style={{ color: c.text2, fontSize: 12 }}>{hint}</Text>
         </Pressable>)}
       </View>
+      <LocalClans />
       <Card title="Today" tone="study">
         {today.length === 0 && <Muted>Nothing due today.</Muted>}
         {today.map((i) => (
@@ -78,6 +79,21 @@ function Home({ onJoin, go, onStudy }: { onJoin(): void; go(t: Tab): void; onStu
       <Muted small>{linked ? `Synced with ${linked} of your device${linked === 1 ? '' : 's'} when on the same Wi-Fi.` : 'This phone isn’t linked to your computer yet (Me › My Devices).'}</Muted>
     </Screen>
   );
+}
+
+function LocalClans() {
+  const [err, setErr] = useState<string | null>(null);
+  const active = useData(() => phoneClan().clans.list(phoneClan().me)) ?? [];
+  const archived = useData(() => phoneClan().clans.list(phoneClan().me, { archived: true })) ?? [];
+  if (!active.length && !archived.length) return null;
+  const change = (id: string, on: boolean) => setErr(act(() => phoneClan().clans.setLocalArchive(id, phoneClan().me, on)));
+  return <Card title="My CLANs">
+    <Muted small>Membership and stored files remain available when archived on this phone. Live rooms require an online authorized host.</Muted>
+    {active.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn label={`Archive ${clan.name}`} onPress={() => Alert.alert('Archive on this phone?', 'Hide this CLAN from My CLANs. Files and membership remain available; restore it below.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Archive', onPress: () => change(clan.id, true) }])} /></View>)}
+    {archived.length > 0 && <Muted>Archived on this phone</Muted>}
+    {archived.map((clan) => <View key={clan.id}><Muted>{clan.name}</Muted><Btn label={`Restore ${clan.name}`} onPress={() => change(clan.id, false)} /></View>)}
+    {err && <Muted>{err}</Muted>}
+  </Card>;
 }
 
 function MeScreen({ onDevices, onEditProfile }: { onDevices(): void; onEditProfile(): void }) {

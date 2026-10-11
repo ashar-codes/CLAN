@@ -125,7 +125,7 @@ export class Courses {
   linkClassrooms(p: Principal): number {
     const u = this.owner(p);
     let n = 0;
-    for (const c of this.m.clans.list(u).filter((x) => x.type === 'CLASSROOM')) {
+    for (const c of this.m.clans.list(u, { includeArchived: true }).filter((x) => x.type === 'CLASSROOM')) {
       if (this.db.prepare('SELECT 1 FROM courses_courses WHERE owner_id = ? AND clan_id = ?').get(u, c.id)) continue;
       this.create(p, { name: c.name, clanId: c.id }); n++;
     }

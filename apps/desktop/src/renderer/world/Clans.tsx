@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { ClanPlace, mateFor, RoomStage } from '@clan/design';
 import type { ClanDetail, ClanPlaceView, ClanType } from '../../shared.ts';
 import { api } from '../App.tsx';
-import { useLoad } from './useLoad.ts';
+import { errText, useLoad } from './useLoad.ts';
 import type { Experience } from './experience.ts';
 import { NearbyMini } from './NearbyMini.tsx';
 import type { NearbyClan } from './Commons.tsx';
@@ -13,9 +13,12 @@ const KIND = (m: string) => (/pdf/.test(m) ? 'pdf' : /image/.test(m) ? 'img' : /
 type Rehost = { clanId: string; name: string; type: ClanType };
 
 export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { experience: Experience; nearby: NearbyClan[]; onCreate(t?: ClanType): void; onJoin(): void; onRehost(r: Rehost): void }) {
-  const [places] = useLoad<ClanPlaceView[]>(api.clan.places);
+  const [places, reload] = useLoad<ClanPlaceView[]>(api.clan.places);
+  const [archived, reloadArchived] = useLoad(api.clan.archived);
+  const [err, setErr] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  if (open) return <ClanRoomView id={open} experience={experience} onBack={() => setOpen(null)} onRehost={onRehost} />;
+  const refresh = () => { reload(); reloadArchived(); };
+  if (open) return <ClanRoomView id={open} experience={experience} onBack={() => { setOpen(null); refresh(); }} onRehost={onRehost} />;
   return (
     <div className="stack">
       <header className="page-head">
@@ -35,6 +38,8 @@ export function Clans({ experience, nearby, onCreate, onJoin, onRehost }: { expe
           {places?.length === 0 && <div className="empty-place"><b>No CLANs yet.</b><span className="muted">Start a study group, or join one with its six-digit code.</span></div>}
         </div>
       </section>
+      {!!archived?.length && <section className="card" aria-label="Archived CLANs"><span className="eyebrow">Archived on this device</span><p className="muted">Your files and membership are retained.</p>{archived.map((clan) => <div key={clan.id} className="row between"><button onClick={() => setOpen(clan.id)}>{clan.name}</button><button onClick={() => { setErr(''); void api.clan.archiveLocal(clan.id, false).then(refresh, (e) => setErr(errText(e))); }}>Restore</button></div>)}</section>}
+      {err && <p role="alert">{err}</p>}
       <section className="card"><span className="eyebrow">Nearby CLANs</span><NearbyMini list={nearby} onJoin={onJoin} /></section>
     </div>
   );
@@ -46,6 +51,7 @@ const FUTURE = new Set(['Tasks']);
 function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experience: Experience; onBack(): void; onRehost(r: Rehost): void }) {
   const [d] = useLoad<ClanDetail>(useCallback(() => api.clan.detail(id), [id]));
   const [tab, setTab] = useState<(typeof TABS)[number]>('Overview');
+  const [archiveConfirm, setArchiveConfirm] = useState(false), [archiveError, setArchiveError] = useState('');
   if (!d) return null;
   const host = d.members.find((m) => m.role === 'owner');
   return (
@@ -69,6 +75,7 @@ function ClanRoomView({ id, experience, onBack, onRehost }: { id: string; experi
         {tab === 'Chat' && <OfflineChat clanId={d.clan.id} />}
         {tab === 'Saved' && (d.saved.length ? d.saved.map((s) => <a key={s.id} className="line" href={s.url} target="_blank" rel="noreferrer noopener">{s.title}<span className="muted">{s.source}</span></a>) : <p className="muted">Share a link from Saved.</p>)}
       </section>
+      <section className="card"><button onClick={() => setArchiveConfirm(true)}>Archive on this device</button>{archiveConfirm && <div role="group" aria-label="Confirm archive"><p>Hide this CLAN from My CLANs on this device? Files and membership remain available in Archived CLANs.</p><div className="row"><button onClick={() => { void api.clan.archiveLocal(id, true).then(onBack, (e) => setArchiveError(errText(e))); }}>Confirm archive</button><button onClick={() => setArchiveConfirm(false)}>Cancel</button></div></div>}{archiveError && <p role="alert">{archiveError}</p>}</section>
     </div>
   );
 }

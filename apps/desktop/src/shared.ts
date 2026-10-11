@@ -139,6 +139,8 @@ export type ClanApi = {
   home(): Promise<HomeView>;
   joined(a: { sessionId: string; clanId: string | null; type: ClanType; name: string; hostKey: string; expiresAt: number | null; hostName?: string | null }): Promise<void>;
   list(): Promise<Clan[]>;
+  archived(): Promise<Clan[]>;
+  archiveLocal(id: string, on: boolean): Promise<void>;
   places(): Promise<ClanPlaceView[]>;
   personalFiles(): Promise<FileView[]>;
   addPersonalFile(): Promise<number>;

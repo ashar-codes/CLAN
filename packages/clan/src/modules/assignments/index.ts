@@ -43,7 +43,7 @@ export class Assignments {
   /** Assignments of the Classroom CLANs this person belongs to (or one of them). */
   list(p: Principal, o: { clanId?: string; dueBefore?: number } = {}): AssignmentItem[] {
     const u = userOf(p);
-    const clans = this.clans.list(u).filter((c) => c.type === 'CLASSROOM' && (!o.clanId || c.id === o.clanId));
+    const clans = this.clans.list(u, { includeArchived: true }).filter((c) => c.type === 'CLASSROOM' && (!o.clanId || c.id === o.clanId));
     const out: AssignmentItem[] = [];
     for (const c of clans) {
       const host = this.clans.members(c.id).some((m) => m.userId === u && m.role === 'owner');

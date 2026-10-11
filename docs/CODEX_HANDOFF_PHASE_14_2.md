@@ -20,7 +20,7 @@ early). Progress table: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md).
 | `bb4fb16` | Bounded desktop/mobile chat, paged catch-up and retained reading position | chat controllers/views, shared history helper, unit/desktop/native harness checks |
 | `bd8f545` | Classroom teacher/everyone/approval sharing policy and private review queue | server authorization/quarantine, client result, desktop/mobile controls, regression tests |
 | `249ae0c` | Native chat observation and simulated host persistence projection fixes | Android harness and simulated host mapping |
-| next file-action commit | Passive preview, native viewer choice and verified Save Copy / Android SAF | shared file-view policy, desktop IPC/views, Android native module and mobile controls |
+| `7d16b04` | Passive preview, native viewer choice and verified Save Copy / Android SAF | shared file-view policy, desktop IPC/views, Android native module and mobile controls |
 
 Root causes and reasoning: [PHASE_14_2_PROGRESS.md](PHASE_14_2_PROGRESS.md) › P0-1.
 
@@ -75,7 +75,7 @@ ordering plus all addresses). `Candidate.alt` is optional. RC1 profiles unaffect
 Run long suites on macOS with normal QoS (e.g. `launchctl submit`); background shells time out.
 
 ## 8. Pushing
-Pushed through `bd8f545` after review; `249ae0c` and file-action work will be pushed next. Native Windows feedback is pending. Exact retest: [WINDOWS_RETEST_PHASE_14_2.md](WINDOWS_RETEST_PHASE_14_2.md). For subsequent commits, review the diff (no keys, no binaries), then
+Pushed through `7d16b04` after review; native Windows feedback is pending. Exact retest: [WINDOWS_RETEST_PHASE_14_2.md](WINDOWS_RETEST_PHASE_14_2.md). For subsequent commits, review the diff (no keys, no binaries), then
 `git push https://github.com/ashar-codes/CLAN.git refs/heads/phase-14.2:refs/heads/phase-14.2` with the ashar-codes
 credential. Never force-push; never move `clan-beta-v0.1.0-rc1`.
 
@@ -116,7 +116,7 @@ tearing down; rerun after exit passed. No timeout changes.
 
 P0-5 is being implemented separately: archive/restore is a local presentation preference, and permission/assignment/
 course/host-identity lookups retain archived membership. Core leave rejects sole owners. Desktop/mobile archive
-controls and new targeted tests are in the working tree; not yet committed. Destructive cleanup and live leave
+controls and new targeted tests passed typecheck, 26 targeted units and the desktop restart/restore E2E and are being committed separately. `clans` migration 2 appends local archive preferences. Native archive UI verification is next. Destructive cleanup and live leave
 coordination remain unfinished. See `docs/CLAN_LIFECYCLE_PHASE_14_2.md` before extending this work.
 Xcode rechecked: Command Line Tools only, no Xcode.app. User agreed to install Xcode and complete first launch;
 recheck later before marking iOS unavailable. Preserve signing and original profiles as before.

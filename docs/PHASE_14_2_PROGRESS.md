@@ -8,8 +8,8 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | P0-1 | Windows-hosted CLAN: Mac/Android discover but can't connect | **Fixed in source, NOT TESTED on Windows** | `fd8249c`, `a833dd1` | `packages/server/test/multi-address.test.ts` (3 PASS); join/discovery/security/mobile/integration suites 138 PASS; typecheck PASS |
 | P0-2 | Chat scrolling/pagination/jump-to-latest (desktop + mobile) | IMPLEMENTED; desktop + Android emulator PASS | see git log | 4 desktop E2Es + 17 targeted unit tests + full emulator cross-device run PASS; physical Android NOT TESTED |
 | P0-3 | Classroom student file-sharing policies (everyone / approval / teacher only) | IMPLEMENTED; host + desktop PASS, native UI pending | see git log | 70 targeted units + 5 desktop chat/sharing E2Es PASS |
-| P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | pending commit | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
-| P0-5 | CLAN archive / remove from device / leave / delete | IN PROGRESS; local archive/restore source added | pending commit | Tests pending; removal/delete and leave coordination remain |
+| P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | `7d16b04` | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
+| P0-5 | CLAN archive / remove from device / leave / delete | IN PROGRESS; archive/restore desktop PASS, native archive UI pending | see git log | Typecheck + 26 targeted units + archive restart E2E PASS; removal/delete and live leave coordination remain |
 | P1-6…10 | Notifications + Raise Hand, persistent mobile CLANs (standby hosts, epochs), Android hosting, iOS parity, installers | NOT STARTED | — | — |
 
 ## P0-1 root cause and fix
@@ -130,3 +130,18 @@ chooser offered installed viewers and Back returned safely to CLAN. This was emu
 not physical testing. The temporary driver `/tmp/clan-142-native-export.py` uses the production API and native UI;
 it does not stub the picker or native bridge. iOS prerequisite recheck confirms Command Line Tools only, no Xcode.app;
 the user has agreed to install Xcode and complete first launch. Windows chooser execution remains NOT TESTED.
+
+## P0-5 local archive/restore increment
+
+`clans` migration 2 appends a local-user archive preference, leaving canonical archive/expiry unchanged. Desktop
+Archive requires confirmation; Archived CLANs remain readable and Restore returns them to My CLANs. Mobile Home has
+matching archive confirmation/restore controls (native verification pending). Membership and all permission, linked
+course, assignment and host-identity lookups retain archived CLANs. Core local leave rejects owners and preserves
+personal data; it is not exposed as a complete live leave until remote token/peer revocation is coordinated.
+Remove-copy, owner deletion and their cleanup/tombstone controls remain unfinished, not substitutes for archive.
+
+PASS: typecheck `/tmp/clan-142-lifecycle-typecheck1.log`; **26/26 targeted units** including four new lifecycle cases
+(`/tmp/clan-142-lifecycle-unit2.log`, 2.87 s); desktop archive/cancel/restart/read/restore E2E **1/1 PASS**
+(`/tmp/clan-142-lifecycle-e2e2.log`, 7.40 s). First unit run caught a missing SQL conjunction in the new archive query
+(two failures); fixed before rerun. First E2E used unsupported Playwright matchers with Vitest (automation failure);
+replaced with this repository's existing polling assertions, without changing timeouts. See lifecycle boundary doc.

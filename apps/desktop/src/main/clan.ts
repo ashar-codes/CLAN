@@ -38,6 +38,8 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   });
 
   handle('clan:list', () => c.clans.list(c.me));
+  handle('clan:archived', () => c.clans.list(c.me, { archived: true }));
+  handle('clan:archiveLocal', (id, on) => c.clans.setLocalArchive(Id.parse(id), c.me, z.boolean().parse(on)));
   /** CLANs as places: real counts only. */
   handle('clan:places', () => c.clans.list(c.me).map((x) => {
     const members = c.clans.members(x.id).filter((m) => m.status === 'active');
@@ -86,6 +88,6 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   const courseKey = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
   return Object.assign(c, {
     /** The CLASSROOM CLAN for a course title, if one exists (keeps every meeting of a course in one CLAN). */
-    classroomClanFor: (title: string) => c.clans.list(c.me).find((x) => x.type === 'CLASSROOM' && courseKey(x.name) === courseKey(title))?.id ?? null,
+    classroomClanFor: (title: string) => c.clans.list(c.me, { includeArchived: true }).find((x) => x.type === 'CLASSROOM' && courseKey(x.name) === courseKey(title))?.id ?? null,
   });
 }

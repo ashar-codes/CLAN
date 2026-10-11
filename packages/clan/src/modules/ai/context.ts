@@ -116,7 +116,7 @@ export function select(m: Deps, a: Principal & { kind: 'agent' }, scope: AIScope
       for (const s of m.saved.items(a).slice(0, 300)) saved(s.id);
       for (const c of m.courses.list(me)) { studyData(c.id); courseRefs(c.id); classroom(c.clanId); }
       tapes();
-      for (const c of m.clans.list(u)) { classroom(c.type === 'CLASSROOM' ? c.id : null); if (on('chat')) chat(c.id); }
+      for (const c of m.clans.list(u, { includeArchived: true })) { classroom(c.type === 'CLASSROOM' ? c.id : null); if (on('chat')) chat(c.id); }
       break;
     case 'course': {
       let c; try { c = m.courses.mine(me, scope.courseId); } catch { break; }
