@@ -14,6 +14,8 @@ import { verify } from '../FileActions';
 import { nearby, parseWifiQr, wifiQr } from '../people/nearby';
 import { QrImage, QrScanner } from '../ui/qr';
 import { OpticalScreen } from './Optical';
+import { usePhoneCall } from '../people/Call';
+import { VoiceNotePlayer, VoiceRecorder } from '../people/Voice';
 import { act, bump, Btn, Card, Err, Field, H1, Mate, Muted, Row, Screen, useC, useData, when } from '../ui/kit';
 
 type Seg = 'nearby' | 'chats' | 'friends';
@@ -148,6 +150,7 @@ function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): 
 const STATE: Record<string, string> = { connecting: 'Connecting…', connected: 'Connected', reconnecting: 'Reconnecting…', offline: 'Offline', failed: 'Failed' };
 
 function PersonCard({ c, onChat }: { c: Contact; onChat(id: string): void }) {
+  const calls = usePhoneCall();
   const [err, setErr] = useState<string | null>(null), [invite, setInvite] = useState(false), [confirm, setConfirm] = useState<'remove' | 'block' | null>(null);
   const myKey = useData(() => people().myKey());
   const run = (f: () => unknown) => { setErr(act(f)); void phonePeople().then((r) => r.tick()); };
@@ -164,6 +167,7 @@ function PersonCard({ c, onChat }: { c: Contact; onChat(id: string): void }) {
         {c.relation === 'incoming' && <><Btn small primary label="Accept" onPress={() => run(() => people().acceptFriend(c.key))} /><Btn small label="Decline" onPress={() => run(() => people().rejectFriend(c.key))} /></>}
         {c.relation === 'outgoing' && <Btn small label="Cancel request" onPress={() => run(() => people().cancelFriendRequest(c.key))} />}
         {!c.blocked && c.relation !== 'incoming' && <Btn small label="Chat" onPress={chat} />}
+        {c.relation === 'friend' && !c.blocked && <Btn small label="Call" disabled={calls.active} onPress={() => calls.call(c.key, c.name)} />}
         {!c.verified && !c.blocked && <Btn small label="Numbers match" a11y="The safety numbers match" onPress={() => run(() => people().markVerified(c.key))} />}
         {c.relation === 'friend' && <Btn small label="Remove" onPress={() => setConfirm('remove')} />}
         {c.blocked ? <Btn small label="Unblock" onPress={() => run(() => people().unblock(c.key))} /> : <Btn small danger label="Block" onPress={() => setConfirm('block')} />}
@@ -228,6 +232,7 @@ function roomFor(bytes: number) {
 const PAGE = 40;
 function ChatView({ id, onBack }: { id: string; onBack(): void }) {
   const c = useC();
+  const calls = usePhoneCall();
   const [limit, setLimit] = useState(PAGE), [text, setText] = useState(''), [err, setErr] = useState<string | null>(null);
   const conv = useData(() => people().conversation(id));
   const msgs = useData(() => people().page(id, { limit })) ?? [];
@@ -251,6 +256,7 @@ function ChatView({ id, onBack }: { id: string; onBack(): void }) {
     <Screen>
       <Row><Btn small label="← Chats" onPress={onBack} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '800', fontSize: 18, color: c.text }}>{conv.peerName}</Text><Muted small>{ttlText(conv.ttlMs)}</Muted></View></Row>
       <Row gap={6}>
+        {(conv.friend || conv.state === 'active') && <Btn small label="Call" disabled={calls.active} onPress={() => calls.call(conv.peerKey, conv.peerName)} />}
         {conv.state === 'active' && <Btn small label="End chat" onPress={() => confirm('end')} />}
         <Btn small label="Clear history" onPress={() => confirm('clear')} />
         <Btn small danger label="Remove" onPress={() => confirm('remove')} />
@@ -263,7 +269,7 @@ function ChatView({ id, onBack }: { id: string; onBack(): void }) {
       <Err msg={err} />
       {conv.state === 'active' ? <>
         <Field label="Message" value={text} onChange={setText} multiline maxLength={8000} />
-        <Row><Btn primary label="Send" disabled={!text.trim()} onPress={send} /><Btn label="📎 File" a11y="Send a file" onPress={() => void sendFile()} /></Row>
+        <Row><Btn primary label="Send" disabled={!text.trim()} onPress={send} /><Btn label="📎 File" a11y="Send a file" onPress={() => void sendFile()} /><VoiceRecorder convId={id} onError={setErr} onSent={tick} /></Row>
       </> : conv.state !== 'invited_in' && conv.state !== 'invited_out' ? <Muted>This chat is closed.</Muted> : null}
     </Screen>
   );
@@ -286,7 +292,7 @@ function Bubble({ m, onError, onAct }: { m: PeopleMessage; onError(e: string): v
       {t ? <>
         <Text style={{ fontWeight: '700', color: c.text }}>{m.kind === 'voice' ? `Voice message · ${Math.round((t.voiceMs ?? 0) / 1000)} s` : t.name}</Text>
         <Muted small>{mb(t.size)} · {t.retention} · {t.state === 'complete' ? 'Verified' : t.state === 'transferring' ? `${Math.round((t.received / Math.max(1, t.size)) * 100)}%` : t.state}{t.error ? ` — ${t.error}` : ''}</Muted>
-        {m.kind === 'voice' && <Muted small>Voice playback on phones comes in a later build; Share opens it in another app.</Muted>}
+        {m.kind === 'voice' && <VoiceNotePlayer t={t} mine={m.mine} onError={onError} />}
         <Row gap={6}>
           {!m.mine && t.state === 'offered' && <><Btn small primary label={`Accept ${mb(t.size)}`} onPress={() => onAct(() => { roomFor(t.size - t.received); people().acceptFile(t.id); })} /><Btn small label="Decline" onPress={() => onAct(() => people().declineFile(t.id))} /></>}
           {['offered', 'accepted', 'transferring'].includes(t.state) && (m.mine || t.state !== 'offered') && <Btn small label="Cancel" onPress={() => void people().cancelFile(t.id).catch((e) => onError((e as Error).message))} />}
