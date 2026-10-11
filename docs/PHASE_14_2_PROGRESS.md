@@ -425,3 +425,12 @@ The phone states plainly that it does not host and a CLAN is available only whil
 sections stay mandatory. Desktop resolves conflicts (the phone shows the alert and points there). PASS: typecheck
 (desktop + mobile), push test now from a phone-shaped device without host-server storage. Native Android/iOS execution
 NOT TESTED (no emulator in this container).
+
+### Cloud gate after checkpoints G–K (+ rollback fence)
+
+typecheck PASS (desktop + mobile + packages); full serial unit **377 PASS / 14 skipped / 0 FAIL** (45 files + 3
+skipped, 299 s; skips = no LAN mDNS / no SFU binary). Desktop Electron E2E on Linux (Xvfb, unprivileged user,
+dev-insecure keystore, disposable profiles): **25 PASS / 6 FAIL / 2 skipped**; the same 6 fail identically on the
+untouched baseline `4b12b2f` in this container (screen sharing ×3: no SFU binary; Astra world/canvas: Linux software
+GPU; board-tape: duplicate "Leave" locator on Linux), so they are environment-specific, not regressions — they passed on
+macOS before. New `e2e/hosting.test.ts` PASS. Android emulator, iOS, Windows and physical devices NOT RUN.
