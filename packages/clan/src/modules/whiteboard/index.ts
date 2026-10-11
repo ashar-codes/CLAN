@@ -4,7 +4,7 @@
 // relay (@classroom/server whiteboard.ts) uses this store through a structural interface.
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { applyOp, emptyBoard, replay, strip, WbOp, type WbLogged, type WbState } from '@classroom/protocol';
+import { applyOp, emptyBoard, replay, strip, tableSection, WbOp, type CheckpointProvider, type WbLogged, type WbState } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { defineEvent, type EventBus } from '../../core/events.ts';
 import { userOf, type Permissions, type Principal } from '../../core/permissions.ts';
@@ -121,6 +121,17 @@ export class Whiteboard {
   memberEdit(boardId: string) { return !!this.row(boardId)?.member_edit; }
   setMemberEdit(boardId: string, on: boolean) { this.db.prepare('UPDATE wb_boards SET member_edit = ? WHERE id = ?').run(on ? 1 : 0, boardId); }
   /** Temporary CLAN ended: its boards go with it (retention rule for Temporary CLANs). */
+  /** Persistent hosting: the CLAN's boards with their full op log and snapshots (never personal/course boards). */
+  checkpointProvider(): CheckpointProvider {
+    const BOARDS = "board_id IN (SELECT id FROM wb_boards WHERE owner_kind = 'clan' AND owner_id = ?)";
+    const rows = tableSection(this.db, [
+      { table: 'wb_boards', where: "owner_kind = 'clan' AND owner_id = ?", scope: { owner_id: 'clan', owner_kind: (v) => v === 'clan' } },
+      { table: 'wb_ops', where: BOARDS, scope: { board_id: { table: 'wb_boards', column: 'id' } } },
+      { table: 'wb_snapshots', where: BOARDS, scope: { board_id: { table: 'wb_boards', column: 'id' } } },
+    ]);
+    return { section: 'whiteboard', export: (clanId) => ({ rows: rows.export(clanId), files: [] }), validate: (clanId, raw) => { rows.validate(clanId, raw); return []; }, import: (clanId, raw) => rows.import(clanId, raw) };
+  }
+
   purgeOwner(kind: BoardOwner['kind'], id: string) {
     tx(this.db, () => {
       for (const b of this.db.prepare('SELECT id FROM wb_boards WHERE owner_kind = ? AND owner_id = ?').all(kind, id) as { id: string }[]) {

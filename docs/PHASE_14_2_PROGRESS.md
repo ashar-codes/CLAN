@@ -288,3 +288,19 @@ to host write paths, pairing or UI; nothing advertises durable handoff.
 Final cloud gate on this branch: typecheck PASS; full serial unit **358 PASS / 14 skipped / 0 FAIL**, 42 files passed +
 3 skipped, 277.82 s. Skips are environment gates (no usable LAN interface for mDNS discovery, no local SFU binary for
 screen sharing), not passes. Desktop Electron E2E (`pnpm test:e2e`) and all Android/iOS/Windows suites NOT RUN here.
+
+### P1-7 checkpoint B: CLAN checkpoints and self-verifying staging (cloud)
+
+Frozen hosts build one durable, content-addressed checkpoint per epoch (`prepareCheckpoint`): each registered
+section is canonical JSON stored as a SHA-256 blob, every file is re-hashed at the source, and the header (sections +
+file list) hash is what the destination acknowledges; `relinquish` now refuses an acknowledgment of any other
+checkpoint, and `unfreeze` discards it. Sections: `clans` (canonical record + session links), `chat` (threads,
+messages, reactions, read positions, names; never this device's handle/Outbox), `whiteboard` (CLAN boards, op log,
+snapshots), `files` (CLAN file refs + bytes) and `server` (ended sessions without join codes/host keys, members with
+status but never tokens, trusted devices of the CLAN scope, resource metadata + bytes without old signed manifests).
+Not carried: presence/events/transfers, assignments/submissions, pending share reviews (stay on the previous host).
+Destinations must be the owner's own devices (owner or linked-device anchor). `completeStaging` verifies everything
+itself: blob sizes/hashes (corrupt blobs deleted for re-download), canonical section bytes and row counts, exactly
+the registered sections, strict per-table column/scope validation, and file list equality. Activation re-verifies,
+materializes bytes, then imports all sections inside the transaction that records the new epoch (a failed import
+leaves the device standby). PASS: typecheck; `packages/clan/test` 134/134 incl. 9 hosting cases (Linux).

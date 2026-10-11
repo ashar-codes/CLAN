@@ -6,7 +6,7 @@
 // retried send is recognised instead of duplicated.
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { EDIT_WINDOW_MS, REACTIONS, type ChatAttachment, type ChatCursors, type ChatMessageView, type ChatThreadView } from '@classroom/protocol';
+import { EDIT_WINDOW_MS, REACTIONS, tableSection, type CheckpointProvider, type ChatAttachment, type ChatCursors, type ChatMessageView, type ChatThreadView } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { defineEvent, type EventBus } from '../../core/events.ts';
 import type { Permissions, Principal, Scope } from '../../core/permissions.ts';
@@ -59,6 +59,20 @@ export class Chat {
   constructor(db: Db, bus: EventBus, perms: Permissions, now = () => Date.now(), localUser: () => string = () => '', clanAvailable: (clanId: string) => boolean = () => true) {
     this.db = db; this.bus = bus; this.perms = perms; this.now = now; this.localUser = localUser;
     this.clanAvailable = clanAvailable;
+  }
+
+  /** Persistent hosting: the authoritative conversation of one CLAN (threads, messages, reactions, read positions,
+   *  names). Device-local rows (this device's handle, its Outbox) are never carried; attachments are Files/server bytes. */
+  checkpointProvider(): CheckpointProvider {
+    const IN_THREADS = 'thread_id IN (SELECT id FROM chat_threads WHERE clan_id = ?)';
+    const rows = tableSection(this.db, [
+      { table: 'chat_threads', where: 'clan_id = ?', scope: { clan_id: 'clan' } },
+      { table: 'chat_messages', where: IN_THREADS, scope: { thread_id: { table: 'chat_threads', column: 'id' } } },
+      { table: 'chat_reactions', where: `message_id IN (SELECT id FROM chat_messages WHERE ${IN_THREADS})`, scope: { message_id: { table: 'chat_messages', column: 'id' } } },
+      { table: 'chat_cursors', where: IN_THREADS, scope: { thread_id: { table: 'chat_threads', column: 'id' } } },
+      { table: 'chat_names', where: 'clan_id = ?', scope: { clan_id: 'clan' } },
+    ]);
+    return { section: 'chat', export: (clanId) => ({ rows: rows.export(clanId), files: [] }), validate: (clanId, raw) => { rows.validate(clanId, raw); return []; }, import: (clanId, raw) => rows.import(clanId, raw) };
   }
 
   // ---- threads ----

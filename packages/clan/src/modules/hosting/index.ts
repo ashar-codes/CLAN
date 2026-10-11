@@ -3,11 +3,14 @@
 // acknowledged and enforces the local state machine: active → frozen → relinquished (never back to writing at that
 // epoch), and staging → verified → acknowledged → active on the destination. It never stores private keys: callers
 // pass a signer backed by the OS keystore. It grants no session, membership or file rights by itself.
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
-  authorityHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, signHostStatement, verifyAuthorityChain,
-  type AuthorityRecord, type HostSigner,
+  authorityHash, CheckpointHeader, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
+  signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointProvider, type HostSigner,
 } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
+import { sha256File } from '../../core/resources.ts';
 import type { Clans } from '../clans/index.ts';
 
 export const schema: ModuleSchema = {
@@ -27,6 +30,11 @@ export const schema: ModuleSchema = {
     -- with the CLAN's host, or a linked (personal sync) device. A chain naming another owner is never learned.
     CREATE TABLE hosting_anchors (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), owner_key TEXT NOT NULL,
       source TEXT NOT NULL CHECK (source IN ('owner','pairing','linked-device')), created_at INTEGER NOT NULL);
+  `, `
+    -- Source: the durable checkpoint of the frozen epoch (blob paths it may serve). Destination: the staged header.
+    CREATE TABLE hosting_checkpoints (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), epoch INTEGER NOT NULL, hash TEXT NOT NULL,
+      header TEXT NOT NULL, paths TEXT NOT NULL, created_at INTEGER NOT NULL);
+    ALTER TABLE hosting_staging ADD COLUMN header TEXT;
   `],
 };
 
@@ -35,12 +43,32 @@ export type HostStatus = { clanId: string; epoch: number; hostKey: string; owner
 export class HostingError extends Error { readonly code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
 
 type Row = { clan_id: string; owner_key: string; epoch: number; head_hash: string; chain: string; state: HostState; conflict: string | null };
+type Staged = { epoch: number; prev_hash: string; checkpoint_hash: string; delegation: string; state: 'staging' | 'verified'; header: string | null };
 const DAY = 86_400_000;
+const SHA = /^[0-9a-f]{64}$/;
+const hashFile = sha256File;
 
 export class HostAuthority {
   private db: Db; private clans: Clans; private now: () => number; private linkedDeviceKey: (publicKey: string) => boolean;
-  /** `linkedDeviceKey`: true only for a verified, unrevoked personal-sync device key of this account. */
-  constructor(db: Db, clans: Clans, now = () => Date.now(), linkedDeviceKey: (publicKey: string) => boolean = () => false) { this.db = db; this.clans = clans; this.now = now; this.linkedDeviceKey = linkedDeviceKey; }
+  private dir: string; private me: () => string;
+  private providers = new Map<string, CheckpointProvider>();
+  private busy = new Set<string>();
+  /** `linkedDeviceKey`: true only for a verified, unrevoked personal-sync device key of this account. `dir`: hosting
+   *  blobs (outgoing checkpoints, incoming staging). `me`: the local user, owner of an activated CLAN copy. */
+  constructor(db: Db, clans: Clans, o: { now?: () => number; linkedDeviceKey?: (publicKey: string) => boolean; dir: string; me?: () => string }) {
+    this.db = db; this.clans = clans; this.now = o.now ?? (() => Date.now()); this.linkedDeviceKey = o.linkedDeviceKey ?? (() => false);
+    this.dir = o.dir; this.me = o.me ?? (() => '');
+  }
+  /** Each owning module (and the host server) contributes one section; both ends must register the same set. */
+  register(p: CheckpointProvider) {
+    if (this.providers.has(p.section)) throw new Error(`Duplicate checkpoint section ${p.section}.`);
+    this.providers.set(p.section, p);
+  }
+  private async exclusive<T>(clanId: string, f: () => Promise<T>): Promise<T> {
+    if (this.busy.has(clanId)) throw new HostingError('busy', 'A hosting step for this CLAN is already running.');
+    this.busy.add(clanId);
+    try { return await f(); } finally { this.busy.delete(clanId); }
+  }
 
   private row(clanId: string) { return this.db.prepare('SELECT * FROM hosting_authority WHERE clan_id = ?').get(clanId) as Row | undefined; }
   private chain(r: Row) { return JSON.parse(r.chain) as AuthorityRecord[]; }
@@ -144,7 +172,66 @@ export class HostAuthority {
   unfreeze(clanId: string, localKey: string) {
     const r = this.must(clanId);
     if (r.state !== 'frozen' || this.head(r).hostKey !== localKey || this.pendingTransition(clanId)) throw new HostingError('bad_state', 'Only the paused host that has not handed over can resume.');
-    this.setState(clanId, 'active');
+    if (this.busy.has(clanId)) throw new HostingError('busy', 'A checkpoint is being prepared; try again when it finishes.');
+    // Writes resume, so the checkpoint is stale: an acknowledgment of it can never be used for a hand-over.
+    tx(this.db, () => { this.db.prepare('DELETE FROM hosting_checkpoints WHERE clan_id = ?').run(clanId); this.setState(clanId, 'active'); });
+  }
+
+  // ---- checkpoint (source) ----
+  private outDir(clanId: string) { return join(this.dir, 'out', clanId); }
+  private inDir(clanId: string) { return join(this.dir, 'in', clanId); }
+  /**
+   * Builds (once per frozen epoch) a consistent, content-addressed checkpoint: section rows are exported synchronously
+   * from the frozen database, every file is re-hashed, and the header is stored durably before it is offered.
+   */
+  async prepareCheckpoint(clanId: string, localKey: string): Promise<{ header: CheckpointHeader; hash: string }> {
+    return this.exclusive(clanId, async () => {
+      const r = this.must(clanId);
+      if (r.state !== 'frozen' || this.head(r).hostKey !== localKey) throw new HostingError('bad_state', 'Pause hosting on the current host before preparing a hand-over.');
+      const have = this.checkpointOf(clanId);
+      if (have && have.header.epoch === r.epoch) return have;
+      if (!this.providers.size) throw new HostingError('unavailable', 'No checkpoint sections are registered.');
+      const exported = [...this.providers.values()].map((p) => ({ name: p.section, ...p.export(clanId) }));
+      const out = this.outDir(clanId);
+      await rm(out, { recursive: true, force: true }); // section blobs of a discarded earlier checkpoint
+      await mkdir(out, { recursive: true });
+      const paths: Record<string, string> = {};
+      const sections: CheckpointHeader['sections'] = {};
+      for (const e of exported) {
+        const bytes = sectionBytes(e.rows), sha = sha256Hex(bytes), path = join(out, sha);
+        await rm(`${path}.tmp`, { force: true });
+        const fh = await open(`${path}.tmp`, 'a');
+        try { await fh.write(bytes); } finally { await fh.close(); }
+        await rename(`${path}.tmp`, path);
+        sections[e.name] = { sha256: sha, size: bytes.length, rows: e.rows.length };
+        paths[sha] = path;
+      }
+      const files = new Map<string, number>();
+      for (const f of exported.flatMap((e) => e.files)) {
+        if (!SHA.test(f.sha256)) throw new HostingError('invalid', 'A CLAN file has no valid hash.');
+        if (paths[f.sha256]) continue;
+        const check = await hashFile(f.path).catch(() => null);
+        if (!check || check.sha256 !== f.sha256 || check.size !== f.size) throw new HostingError('corrupt', 'A CLAN file on this device is missing or changed; it cannot be handed over.');
+        paths[f.sha256] = f.path; files.set(f.sha256, f.size);
+      }
+      const header = CheckpointHeader.parse({ type: 'clan-host-checkpoint', v: 1, clanId, epoch: r.epoch, prevHash: r.head_hash, createdAt: this.now(), sections,
+        files: [...files].sort(([a], [b]) => (a < b ? -1 : 1)).map(([sha256, size]) => ({ sha256, size })) });
+      const hash = checkpointHash(header);
+      this.db.prepare('INSERT INTO hosting_checkpoints (clan_id, epoch, hash, header, paths, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (clan_id) DO UPDATE SET epoch = excluded.epoch, hash = excluded.hash, header = excluded.header, paths = excluded.paths, created_at = excluded.created_at')
+        .run(clanId, r.epoch, hash, JSON.stringify(header), JSON.stringify(paths), this.now());
+      return { header, hash };
+    });
+  }
+  checkpointOf(clanId: string) {
+    const c = this.db.prepare('SELECT hash, header FROM hosting_checkpoints WHERE clan_id = ?').get(clanId) as { hash: string; header: string } | undefined;
+    return c ? { header: CheckpointHeader.parse(JSON.parse(c.header)), hash: c.hash } : null;
+  }
+  /** Only blobs of the current frozen checkpoint are ever served. */
+  checkpointBlob(clanId: string, sha256: string): string | null {
+    const r = this.row(clanId);
+    const c = this.db.prepare('SELECT epoch, paths FROM hosting_checkpoints WHERE clan_id = ?').get(clanId) as { epoch: number; paths: string } | undefined;
+    if (!r || !c || c.epoch !== r.epoch || (r.state !== 'frozen' && r.state !== 'relinquished') || !SHA.test(sha256)) return null;
+    return (JSON.parse(c.paths) as Record<string, string>)[sha256] ?? null;
   }
 
   /**
@@ -167,6 +254,8 @@ export class HostAuthority {
     if (problem) throw new HostingError('invalid_delegation', problem);
     const a = HostAck.safeParse(ack);
     if (!a.success || a.data.clanId !== clanId || a.data.epoch !== r.epoch || a.data.prevHash !== r.head_hash || a.data.delegationId !== delegation.id || a.data.destKey !== delegation.destKey) throw new HostingError('invalid_ack', 'Destination acknowledgment does not match this epoch.');
+    const mine = this.checkpointOf(clanId);
+    if (!mine || mine.header.epoch !== r.epoch || mine.hash !== a.data.checkpointHash) throw new HostingError('invalid_ack', 'The destination acknowledged a different checkpoint than this host prepared.');
     const t = signHostStatement(host, { type: 'clan-host-authority' as const, v: 1 as const, clanId, ownerKey: r.owner_key, epoch: r.epoch + 1, hostKey: delegation.destKey, prevHash: r.head_hash, checkpointHash: a.data.checkpointHash, delegation, ack: a.data, issuedAt: at });
     const chk = verifyAuthorityChain([...this.chain(r), t], { clanId, ownerKey: r.owner_key });
     if (!chk.ok) throw new HostingError('invalid', chk.reason);
@@ -183,28 +272,101 @@ export class HostAuthority {
   }
 
   // ---- destination ----
-  /** Records the start of replication. Interrupted staging never activates; re-calling is idempotent. */
-  beginStaging(chain: unknown, delegation: HostDelegation, checkpointHash: string, localKey: string) {
+  /**
+   * Records the start of replication of `header` (untrusted until completeStaging verifies every blob). Only the
+   * owner's own devices may become host. Resumable: the same header continues; a newer checkpoint of the same epoch
+   * (the source resumed and paused again) replaces an unacknowledged one.
+   */
+  beginStaging(chain: unknown, delegation: HostDelegation, rawHeader: unknown, localKey: string) {
     const head = this.learn(chain, localKey);
     const r = this.must(head.clanId);
     if (r.state === 'conflict') throw new HostingError('conflict', r.conflict ?? 'Conflicting hosting records.');
+    const source = this.anchorOf(r.clan_id)?.source;
+    if (source !== 'owner' && source !== 'linked-device') throw new HostingError('forbidden', 'Hosting can only move between the owner\'s own devices.');
     const problem = delegationProblem(delegation, { clanId: r.clan_id, ownerKey: r.owner_key, destKey: localKey, at: this.now(), revoked: this.revoked(r) });
     if (problem) throw new HostingError('invalid_delegation', problem);
-    if (!/^[A-Za-z0-9_-]{43}$/.test(checkpointHash)) throw new HostingError('invalid', 'Bad checkpoint hash.');
-    const ex = this.db.prepare('SELECT checkpoint_hash h, delegation d FROM hosting_staging WHERE clan_id = ? AND epoch = ?').get(r.clan_id, r.epoch) as { h: string; d: string } | undefined;
-    if (ex && (ex.h !== checkpointHash || (JSON.parse(ex.d) as HostDelegation).id !== delegation.id)) throw new HostingError('busy', 'Another handoff for this epoch is already staging.');
-    if (!ex) this.db.prepare('INSERT INTO hosting_staging (clan_id, epoch, prev_hash, checkpoint_hash, delegation, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(r.clan_id, r.epoch, r.head_hash, checkpointHash, JSON.stringify(delegation), 'staging', this.now());
-    return { clanId: r.clan_id, epoch: r.epoch };
+    const p = CheckpointHeader.safeParse(rawHeader);
+    if (!p.success || p.data.clanId !== r.clan_id || p.data.epoch !== r.epoch || p.data.prevHash !== r.head_hash) throw new HostingError('invalid', 'The checkpoint does not belong to the current epoch.');
+    const hash = checkpointHash(p.data);
+    const ex = this.staged(r.clan_id, r.epoch);
+    if (ex && ex.checkpoint_hash === hash && (JSON.parse(ex.delegation) as HostDelegation).id === delegation.id) return { clanId: r.clan_id, epoch: r.epoch, hash };
+    if (this.busy.has(r.clan_id)) throw new HostingError('busy', 'Staging for this CLAN is being verified.');
+    this.db.prepare(`INSERT INTO hosting_staging (clan_id, epoch, prev_hash, checkpoint_hash, delegation, state, updated_at, header) VALUES (?, ?, ?, ?, ?, 'staging', ?, ?)
+      ON CONFLICT (clan_id, epoch) DO UPDATE SET checkpoint_hash = excluded.checkpoint_hash, delegation = excluded.delegation, state = 'staging', updated_at = excluded.updated_at, header = excluded.header`)
+      .run(r.clan_id, r.epoch, r.head_hash, hash, JSON.stringify(delegation), this.now(), JSON.stringify(p.data));
+    return { clanId: r.clan_id, epoch: r.epoch, hash };
   }
-  /** Caller has verified every byte/record of the checkpoint and committed it durably. */
-  completeStaging(clanId: string, epoch: number, checkpointHash: string) {
-    const n = this.db.prepare("UPDATE hosting_staging SET state = 'verified', updated_at = ? WHERE clan_id = ? AND epoch = ? AND checkpoint_hash = ?").run(this.now(), clanId, epoch, checkpointHash).changes;
-    if (!n) throw new HostingError('not_staged', 'No matching staged checkpoint.');
+  private staged(clanId: string, epoch: number) { return this.db.prepare('SELECT * FROM hosting_staging WHERE clan_id = ? AND epoch = ?').get(clanId, epoch) as Staged | undefined; }
+  private stagedHeader(clanId: string) {
+    const r = this.must(clanId), s = this.staged(clanId, r.epoch);
+    if (!s?.header) throw new HostingError('not_staged', 'Nothing is staged for this CLAN.');
+    return { row: s, header: CheckpointHeader.parse(JSON.parse(s.header)) };
+  }
+  /** Where the transport stores blob `sha256` (resume from `${path}.part`). Only blobs of the staged header. */
+  stagingPath(clanId: string, sha256: string) {
+    const { header } = this.stagedHeader(clanId);
+    if (!SHA.test(sha256) || !checkpointBlobs(header).some((b) => b.sha256 === sha256)) throw new HostingError('invalid', 'That blob is not part of the staged checkpoint.');
+    return join(this.inDir(clanId), sha256);
+  }
+  /** Every blob of the staged checkpoint with its staging path. */
+  async stagingPathList(clanId: string) {
+    const { header } = this.stagedHeader(clanId);
+    await mkdir(this.inDir(clanId), { recursive: true });
+    return checkpointBlobs(header).map((b) => ({ ...b, path: join(this.inDir(clanId), b.sha256) }));
+  }
+  /** Blobs not yet completely received (by size; hashes are checked by completeStaging). */
+  async missingBlobs(clanId: string) {
+    const { header } = this.stagedHeader(clanId);
+    await mkdir(this.inDir(clanId), { recursive: true });
+    const out: { sha256: string; size: number }[] = [];
+    for (const b of checkpointBlobs(header)) if (!(await stat(join(this.inDir(clanId), b.sha256)).then((x) => x.size === b.size, () => false))) out.push(b);
+    return out;
+  }
+
+  /**
+   * Verifies the complete staged checkpoint itself (never on the caller's word): every blob's size and SHA-256, every
+   * section re-encoded to the same canonical bytes and row count, exactly the registered sections, every section valid
+   * for this CLAN, and the referenced files equal to the header's file list. Corrupt blobs are deleted for re-download.
+   */
+  async completeStaging(clanId: string) {
+    return this.exclusive(clanId, async () => {
+      const { row, header } = this.stagedHeader(clanId);
+      await this.verifyStaged(clanId, header);
+      const n = this.db.prepare("UPDATE hosting_staging SET state = 'verified', updated_at = ? WHERE clan_id = ? AND epoch = ? AND checkpoint_hash = ?").run(this.now(), clanId, row.epoch, row.checkpoint_hash).changes;
+      if (!n) throw new HostingError('not_staged', 'The staged checkpoint changed during verification.');
+    });
+  }
+  private async verifyStaged(clanId: string, header: CheckpointHeader) {
+    const names = Object.keys(header.sections).sort(), mine = [...this.providers.keys()].sort();
+    if (names.join() !== mine.join()) throw new HostingError('incomplete', `Checkpoint sections differ (received ${names.join(', ') || 'none'}).`);
+    for (const b of checkpointBlobs(header)) {
+      const path = join(this.inDir(clanId), b.sha256);
+      const got = await hashFile(path).catch(() => null);
+      if (!got) throw new HostingError('incomplete', 'Part of the checkpoint has not been received.');
+      if (got.sha256 !== b.sha256 || got.size !== b.size) { await rm(path, { force: true }); throw new HostingError('corrupt', 'A received checkpoint blob is corrupt; it will be downloaded again.'); }
+    }
+    const sections = new Map<string, unknown[]>();
+    const need = new Map<string, number>();
+    for (const [name, meta] of Object.entries(header.sections)) {
+      const bytes = await readFile(join(this.inDir(clanId), meta.sha256));
+      let rows: unknown;
+      try { rows = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { throw new HostingError('corrupt', `Checkpoint section ${name} is not valid JSON.`); }
+      if (!Array.isArray(rows) || rows.length !== meta.rows || sha256Hex(sectionBytes(rows)) !== meta.sha256) throw new HostingError('corrupt', `Checkpoint section ${name} is not canonical.`);
+      let files;
+      try { files = this.providers.get(name)!.validate(clanId, rows); } catch (e) { throw new HostingError('invalid', `Checkpoint section ${name} was refused: ${(e as Error).message}`); }
+      for (const f of files) {
+        if (need.has(f.sha256) && need.get(f.sha256) !== f.size) throw new HostingError('invalid', 'A file is listed with two sizes.');
+        need.set(f.sha256, f.size);
+      }
+      sections.set(name, rows);
+    }
+    const listed = new Map(header.files.map((f) => [f.sha256, f.size]));
+    if (listed.size !== header.files.length || listed.size !== need.size || [...need].some(([sha, size]) => listed.get(sha) !== size)) throw new HostingError('incomplete', 'The checkpoint file list does not match its records.');
+    return sections;
   }
   acknowledge(clanId: string, dest: HostSigner): HostAck {
     const r = this.must(clanId);
-    const s = this.db.prepare('SELECT * FROM hosting_staging WHERE clan_id = ? AND epoch = ?').get(clanId, r.epoch) as { prev_hash: string; checkpoint_hash: string; delegation: string; state: string } | undefined;
+    const s = this.staged(clanId, r.epoch);
     if (!s || s.state !== 'verified' || s.prev_hash !== r.head_hash) throw new HostingError('not_staged', 'The checkpoint is not fully verified.');
     const d = HostDelegation.parse(JSON.parse(s.delegation));
     if (d.destKey !== dest.publicKey) throw new HostingError('forbidden', 'This device is not the delegated destination.');
@@ -213,14 +375,34 @@ export class HostAuthority {
 
   /**
    * Accepts a (longer) verified chain. The highest accepted epoch is persisted before returning. A different record at
-   * an epoch we already know marks the CLAN conflicted (no last-write-wins). Becoming host requires our verified staging.
+   * an epoch we already know marks the CLAN conflicted (no last-write-wins). Becoming host requires our verified staging,
+   * which is re-verified, materialized and imported in the same transaction that records the new epoch.
    */
-  accept(chain: unknown, localKey: string): HostStatus {
-    const head = this.learn(chain, localKey);
-    return this.status(head.clanId, localKey)!;
+  async accept(chain: unknown, localKey: string): Promise<HostStatus> {
+    const peek = this.peek(chain, localKey);
+    if (!peek) return this.status(this.learn(chain, localKey).clanId, localKey)!;
+    return this.exclusive(peek.clanId, async () => {
+      const { header } = this.stagedHeader(peek.clanId);
+      if (checkpointHash(header) !== peek.checkpointHash) throw new HostingError('not_staged', 'This device has not verified the checkpoint for that transition.');
+      const sections = await this.verifyStaged(peek.clanId, header);
+      const blob = (sha: string) => { if (!SHA.test(sha)) throw new Error('bad blob'); return join(this.inDir(peek.clanId), sha); };
+      for (const [name, rows] of sections) await this.providers.get(name)!.materialize?.(peek.clanId, rows, blob);
+      const head = this.learn(chain, localKey, sections);
+      void rm(this.inDir(peek.clanId), { recursive: true, force: true });
+      return this.status(head.clanId, localKey)!;
+    });
+  }
+  /** Would this chain make the local device host of a newer epoch? (No writes.) */
+  private peek(chain: unknown, localKey: string) {
+    const first = (Array.isArray(chain) ? chain[0] : null) as { clanId?: unknown } | null;
+    const clanId = typeof first?.clanId === 'string' ? first.clanId : '';
+    const r = this.row(clanId);
+    const chk = verifyAuthorityChain(chain, { clanId, ownerKey: r?.owner_key ?? this.anchorOf(clanId)?.ownerKey ?? '' });
+    if (!chk.ok || chk.head.hostKey !== localKey || chk.head.epoch === 0 || (r && chk.head.epoch <= r.epoch)) return null;
+    return { clanId, checkpointHash: chk.head.checkpointHash! };
   }
 
-  private learn(chain: unknown, localKey: string): AuthorityRecord {
+  private learn(chain: unknown, localKey: string, sections?: Map<string, unknown[]>): AuthorityRecord {
     const first = (Array.isArray(chain) ? chain[0] : null) as { clanId?: unknown } | null;
     const clanId = typeof first?.clanId === 'string' ? first.clanId : '';
     if (!this.clans.get(clanId)) throw new HostingError('unknown_clan', 'Unknown CLAN.');
@@ -233,16 +415,21 @@ export class HostAuthority {
     const rs = chain as AuthorityRecord[], h = chk.head;
     let conflict: string | null = null;
     const fail = (msg: string) => { conflict = msg; throw new HostingError('conflict', msg); };
-    try { return this.apply(clanId, r, rs, h, chk.hashes, localKey, fail); } finally {
+    try { return this.apply(clanId, r, rs, h, chk.hashes, localKey, fail, sections); } finally {
       // Recorded outside the rolled-back transaction: the CLAN stays unavailable for writes until resolved.
       if (conflict) this.setState(clanId, 'conflict', conflict);
     }
   }
-  private apply(clanId: string, r: Row | undefined, rs: AuthorityRecord[], h: AuthorityRecord, hashes: string[], localKey: string, fail: (m: string) => never): AuthorityRecord {
+  private apply(clanId: string, r: Row | undefined, rs: AuthorityRecord[], h: AuthorityRecord, hashes: string[], localKey: string, fail: (m: string) => never, sections?: Map<string, unknown[]>): AuthorityRecord {
     const chk = { hashes };
+    const activate = () => {
+      this.requireVerified(clanId, h);
+      if (!sections) throw new HostingError('not_staged', 'The verified checkpoint must be imported when this device becomes host.');
+      for (const [name, rows] of sections) this.providers.get(name)!.import(clanId, rows, { me: this.me() });
+    };
     return tx(this.db, () => {
       if (!r) {
-        if (h.hostKey === localKey) this.requireVerified(clanId, h);
+        if (h.hostKey === localKey) activate();
         this.db.prepare('INSERT INTO hosting_authority (clan_id, owner_key, epoch, head_hash, chain, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(clanId, h.ownerKey, h.epoch, chk.hashes[h.epoch]!, JSON.stringify(rs), h.hostKey === localKey ? 'active' : 'standby', this.now());
         if (h.hostKey === localKey) this.db.prepare('DELETE FROM hosting_staging WHERE clan_id = ?').run(clanId);
@@ -261,11 +448,11 @@ export class HostAuthority {
         fail('A newer hosting record exists although this device never handed over.');
       }
       if (r.state === 'conflict') throw new HostingError('conflict', r.conflict ?? 'Conflicting hosting records.');
-      if (h.hostKey === localKey) this.requireVerified(clanId, h);
+      if (h.hostKey === localKey) activate();
       this.db.prepare('UPDATE hosting_authority SET epoch = ?, head_hash = ?, chain = ?, state = ?, conflict = NULL, updated_at = ? WHERE clan_id = ?')
         .run(h.epoch, chk.hashes[h.epoch]!, JSON.stringify(rs), h.hostKey === localKey ? 'active' : 'standby', this.now(), clanId);
       // Hosting again later: the earlier hand-over is history in the chain, and a new one may be signed.
-      if (h.hostKey === localKey) { this.db.prepare('DELETE FROM hosting_staging WHERE clan_id = ?').run(clanId); this.db.prepare('DELETE FROM hosting_transitions WHERE clan_id = ?').run(clanId); }
+      if (h.hostKey === localKey) for (const q of ['DELETE FROM hosting_staging WHERE clan_id = ?', 'DELETE FROM hosting_transitions WHERE clan_id = ?', 'DELETE FROM hosting_checkpoints WHERE clan_id = ?']) this.db.prepare(q).run(clanId);
       return h;
     });
   }

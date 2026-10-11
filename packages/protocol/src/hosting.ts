@@ -107,3 +107,28 @@ export function hostAuthorized(head: AuthorityRecord, at: number, revoked: Reado
   if (head.hostKey === head.ownerKey) return !revoked.has(head.delegation.id);
   return !revoked.has(head.delegation.id) && head.delegation.expiresAt > at;
 }
+
+// ---- CLAN checkpoint (frozen epoch → destination) ----
+// Everything is content-addressed: each section is canonical JSON stored as a blob, files are their own SHA-256 (hex).
+// The header lists every blob; its hash is what the destination acknowledges and the transition records.
+const Sha = z.string().regex(/^[0-9a-f]{64}$/);
+export const CHECKPOINT_SECTION = /^[a-z][a-z.-]{1,40}$/;
+export const MAX_CHECKPOINT_FILES = 100_000;
+export const CheckpointBlob = z.object({ sha256: Sha, size: z.number().int().nonnegative().max(64 * 1024 ** 3) }).strict();
+export const CheckpointHeader = z.object({
+  type: z.literal('clan-host-checkpoint'), v: z.literal(1), clanId: Id, epoch: z.number().int().nonnegative(), prevHash: Hash,
+  createdAt: z.number().int().nonnegative(),
+  sections: z.record(z.string().regex(CHECKPOINT_SECTION), CheckpointBlob.extend({ rows: z.number().int().nonnegative() }).strict()),
+  files: z.array(CheckpointBlob).max(MAX_CHECKPOINT_FILES),
+}).strict();
+export type CheckpointHeader = z.infer<typeof CheckpointHeader>;
+export const checkpointHash = (h: CheckpointHeader) => b64u.encode(sha256(canonicalBytes(h)));
+/** Canonical bytes of a section's rows; its SHA-256 (hex) is the section blob id. */
+export const sectionBytes = (rows: unknown[]) => canonicalBytes(rows);
+export const sha256Hex = (bytes: Uint8Array) => Array.from(sha256(bytes), (x) => x.toString(16).padStart(2, '0')).join('');
+/** Every blob of a checkpoint (sections then files, de-duplicated). */
+export const checkpointBlobs = (h: CheckpointHeader) => {
+  const m = new Map<string, number>();
+  for (const b of [...Object.values(h.sections), ...h.files]) m.set(b.sha256, b.size);
+  return [...m].map(([sha256, size]) => ({ sha256, size }));
+};

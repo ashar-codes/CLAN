@@ -1,203 +1,316 @@
-// Hosting authority gates from docs/PHASE_14_2_HOSTING_DESIGN.md (authority/fencing layer only; replication is separate).
+// Persistent hosting gates from docs/PHASE_14_2_HOSTING_DESIGN.md: authority/fencing, CLAN checkpoints, staging
+// verification and activation import. Transport is simulated by copying served blobs (the real one: server tests).
 import { describe, expect, it } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { newEd25519, nodeSigner } from '@classroom/client/node';
-import { authorityHash, b64u, signHostStatement, verifyAuthorityChain, type AuthorityRecord, type HostDelegation } from '@classroom/protocol';
+import { serverCheckpointSection } from '@classroom/server';
+import { authorityHash, checkpointHash, sectionBytes, sha256Hex, signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointHeader, type CheckpointProvider, type HostDelegation } from '@classroom/protocol';
 import { HostAuthority } from '../src/index.ts';
-import { setup } from './helpers.ts';
+import { file, setup, user } from './helpers.ts';
 
+const T0 = 1_000_000;
 const key = () => nodeSigner(newEd25519().privatePkcs8);
-const cp = (s: string) => b64u.encode(new Uint8Array(32).fill(s.charCodeAt(0)));
+type Signer = ReturnType<typeof key>;
+const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
 
-/** Phone owner (hosts epoch 0) and a linked desktop that knows the CLAN as a member. */
-function world(t0 = 1_000_000) {
-  let t = t0; const now = () => t;
-  const phone = setup({ now }), desk = setup({ now }), third = setup({ now });
+/** One device: CLAN core + a HostAuthority with every production section (CLAN modules + host server). */
+function device(o: { now: () => number; owner?: () => string | null; extra?: CheckpointProvider[]; base?: ReturnType<typeof setup> }) {
+  const d = o.base ?? setup({ now: o.now });
+  const h = new HostAuthority(d.db, d.app.clans, { now: o.now, dir: join(d.storageDir, 'hosting'), me: () => d.app.me, linkedDeviceKey: (k) => k === o.owner?.() });
+  for (const p of [d.app.clans.checkpointProvider(), d.app.chat.checkpointProvider(), d.app.whiteboard.checkpointProvider(), d.app.files.checkpointProvider(), serverCheckpointSection(d.db, d.storageDir), ...(o.extra ?? [])]) h.register(p);
+  return { ...d, h };
+}
+const restart = (d: { db: ReturnType<typeof setup>['db']; storageDir: string }, owner?: () => string | null) => device({ now: () => T0, owner, base: setup({ db: d.db, storageDir: d.storageDir, now: () => T0 }) }).h;
+
+/** Phone owner (hosts epoch 0), the owner's linked desktop, and a member device of someone else. */
+function world(o: { extra?: () => CheckpointProvider[] } = {}) {
+  let t = T0; const now = () => t;
   const ownerKey = key(), deskKey = key(), thirdKey = key();
+  const phone = device({ now, owner: () => ownerKey.publicKey, extra: o.extra?.() });
+  const desk = device({ now, owner: () => ownerKey.publicKey, extra: o.extra?.() });
+  const third = device({ now, owner: () => null, extra: o.extra?.() });
   const clan = phone.app.clans.create({ type: 'STUDY_GROUP', name: 'Mobile group', createdBy: phone.app.me });
-  for (const d of [desk, third]) d.app.clans.recordJoined({ id: clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: d.app.me });
-  phone.app.hosting.establish(clan.id, phone.app.me, ownerKey);
-  const genesis = phone.app.hosting.chainOf(clan.id)![0]!;
-  for (const d of [desk, third]) d.app.hosting.anchorFromPairing(clan.id, genesis); // as received in the authenticated session
+  phone.h.establish(clan.id, phone.app.me, ownerKey);
+  third.app.clans.recordJoined({ id: clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: third.app.me });
+  third.h.anchorFromPairing(clan.id, phone.h.chainOf(clan.id)![0]);
+  // the linked desktop has never seen the CLAN: bare record + owner anchored through the personal device link
+  desk.app.clans.ensureKnown({ id: clan.id, type: 'STUDY_GROUP', name: 'Mobile group', expiresAt: null, createdBy: desk.app.me });
+  desk.h.anchorLinkedOwner(clan.id, ownerKey.publicKey);
   const close = () => { for (const d of [phone, desk, third]) d.db.close(); };
   return { phone, desk, third, ownerKey, deskKey, thirdKey, clan, close, tick: (ms: number) => { t += ms; } };
 }
+type World = ReturnType<typeof world>;
+type Dev = World['phone'];
 
-/** Destination stages + verifies + acknowledges; source freezes and relinquishes. */
-function handoff(w: ReturnType<typeof world>, to = w.desk, toKey = w.deskKey, d?: HostDelegation, checkpoint = cp('A')) {
-  const delegation = d ?? w.phone.app.hosting.delegate(w.clan.id, w.ownerKey, toKey.publicKey, { id: randomUUID() });
-  const chain = w.phone.app.hosting.chainOf(w.clan.id)!;
-  const s = to.app.hosting.beginStaging(chain, delegation, checkpoint, toKey.publicKey);
-  to.app.hosting.completeStaging(s.clanId, s.epoch, checkpoint);
-  const ack = to.app.hosting.acknowledge(w.clan.id, toKey);
-  w.phone.app.hosting.freeze(w.clan.id, w.ownerKey.publicKey);
-  const record = w.phone.app.hosting.relinquish(w.clan.id, w.ownerKey, delegation, ack);
-  return { delegation, ack, record, chain: [...chain, record] };
+/** CLAN data on the current host: chat, board, a CLAN file, and host-server sessions/members/trust/resources. */
+async function seed(w: World, d: Dev = w.phone) {
+  const clanId = w.clan.id, p = user(d.app.me);
+  const thread = d.app.chat.groupThread(clanId);
+  d.app.chat.post({ id: randomUUID(), threadId: thread.id, author: 'h1', authorName: 'Host', body: 'Welcome to the group' });
+  d.app.chat.post({ id: randomUUID(), threadId: thread.id, author: 'm1', authorName: 'Member', body: 'Thanks!' });
+  const board = d.app.whiteboard.boardFor(clanId);
+  d.app.whiteboard.append(board.id, 'h1', [{ t: 'put', id: randomUUID(), obj: randomUUID(), clock: 1, data: { kind: 'rect', page: 0, x: 1, y: 2, w: 10, h: 10, color: '#112233', width: 2, z: 0 } }]);
+  const shared = await d.app.files.add(p, file(d.storageDir, 'notes.txt', 'shared CLAN notes'), 'notes.txt', { kind: 'clan', clanId });
+  const sessionId = randomUUID(), resourceId = randomUUID(), bytes = 'lecture slides bytes';
+  d.db.prepare("INSERT INTO sessions (id, title, join_code, network_mode, started_at, ended_at, clan_type, clan_id, teacher_key) VALUES (?, 'Mobile group', 'SECRET', 'lan', ?, ?, 'STUDY_GROUP', ?, 'old-teacher-key')").run(sessionId, T0, T0 + 10, clanId);
+  for (const [id, status] of [[randomUUID(), 'approved'], [randomUUID(), 'blocked']] as const) d.db.prepare(`INSERT INTO members (id, session_id, device_id, full_name, roll_no, device_name, status, token_hash, token_expires, joined_at, last_seen, device_key)
+    VALUES (?, ?, ?, 'Member', '', 'Laptop', ?, ?, 9999999999999, ?, ?, 'device-key')`).run(id, sessionId, `dev-${id}`, status, `secret-token-${id}`, T0, T0);
+  d.db.prepare('INSERT INTO trusted_devices (course, fingerprint, public_key, full_name, roll_no, first_approved_at, last_approved_at) VALUES (?, \'fp1\', \'pk1\', \'Member\', \'\', ?, ?)').run(`clan:${clanId}`, T0, T0);
+  mkdirSync(join(d.storageDir, 'resources'), { recursive: true });
+  writeFileSync(join(d.storageDir, 'resources', resourceId), bytes);
+  d.db.prepare("INSERT INTO resources (id, session_id, original_name, safe_name, mime, size, sha256, added_at, status, manifest) VALUES (?, ?, 'slides.pdf', 'slides.pdf', 'application/pdf', ?, ?, ?, 'ready', '{\"signed\":\"by old host\"}')")
+    .run(resourceId, sessionId, Buffer.byteLength(bytes), sha(bytes), T0);
+  return { thread, board, shared, sessionId, resourceId, bytes };
+}
+
+/** Destination downloads every blob the source serves (what the replication transport does). */
+async function transfer(from: Dev, to: Dev, clanId: string, only?: (sha: string) => boolean) {
+  for (const b of await to.h.stagingPathList(clanId)) if (!only || only(b.sha256)) { const src = from.h.checkpointBlob(clanId, b.sha256); if (src) copyFileSync(src, b.path); }
+}
+
+/** Full hand-over from `src` (holding `srcKey`) to `dst`. */
+async function handoff(w: World, o: { src?: Dev; srcKey?: Signer; dst?: Dev; dstKey?: Signer; d?: HostDelegation } = {}) {
+  const src = o.src ?? w.phone, srcKey = o.srcKey ?? w.ownerKey, dst = o.dst ?? w.desk, dstKey = o.dstKey ?? w.deskKey;
+  const delegation = o.d ?? w.phone.h.delegate(w.clan.id, w.ownerKey, dstKey.publicKey, { id: randomUUID() });
+  src.h.freeze(w.clan.id, srcKey.publicKey);
+  const { header, hash } = await src.h.prepareCheckpoint(w.clan.id, srcKey.publicKey);
+  const chain = src.h.chainOf(w.clan.id)!;
+  dst.h.beginStaging(chain, delegation, header, dstKey.publicKey);
+  await transfer(src, dst, w.clan.id);
+  await dst.h.completeStaging(w.clan.id);
+  const ack = dst.h.acknowledge(w.clan.id, dstKey);
+  const record = src.h.relinquish(w.clan.id, srcKey, delegation, ack);
+  return { delegation, ack, record, header, hash, chain: [...chain, record] };
 }
 
 describe('persistent hosting authority', () => {
   it('only the owner establishes authority; genesis is writable by the owner device only', () => {
     const w = world();
     try {
-      expect(w.phone.app.hosting.status(w.clan.id, w.ownerKey.publicKey)).toMatchObject({ epoch: 0, state: 'active', writable: true });
-      expect(w.phone.app.hosting.status(w.clan.id, w.deskKey.publicKey)?.writable).toBe(false);
-      expect(() => w.desk.app.hosting.establish(w.clan.id, w.desk.app.me, w.deskKey)).toThrow('owner');
-      expect(() => w.phone.app.hosting.establish(w.clan.id, w.phone.app.me, w.ownerKey)).toThrow('already');
-      expect(() => w.phone.app.hosting.delegate(w.clan.id, w.deskKey, w.deskKey.publicKey, { id: randomUUID() })).toThrow('owner key');
+      expect(w.phone.h.status(w.clan.id, w.ownerKey.publicKey)).toMatchObject({ epoch: 0, state: 'active', writable: true });
+      expect(w.phone.h.status(w.clan.id, w.deskKey.publicKey)?.writable).toBe(false);
+      expect(() => w.third.h.establish(w.clan.id, w.third.app.me, w.thirdKey)).toThrow('owner');
+      expect(() => w.phone.h.establish(w.clan.id, w.phone.app.me, w.ownerKey)).toThrow('already');
+      expect(() => w.phone.h.delegate(w.clan.id, w.deskKey, w.deskKey.publicKey, { id: randomUUID() })).toThrow('owner key');
     } finally { w.close(); }
   });
 
-  it('safe handoff: one writable host, old host fenced across restart and can only replay', () => {
+  it('hands over the complete CLAN: one writable host, data intact, secrets not carried, old host fenced across restart', async () => {
     const w = world();
     try {
-      const h = handoff(w);
-      expect(w.phone.app.hosting.status(w.clan.id, w.ownerKey.publicKey)).toMatchObject({ state: 'relinquished', writable: false });
-      expect(() => w.phone.app.hosting.unfreeze(w.clan.id, w.ownerKey.publicKey)).toThrow();
-      // restart of the old host: same database, still fenced, replay returns the same signed record
-      const again = setup({ db: w.phone.db, storageDir: w.phone.storageDir, now: () => 1_000_000 }).app.hosting;
+      const s = await seed(w);
+      const h = await handoff(w);
+      expect(Object.keys(h.header.sections).sort()).toEqual(['chat', 'clans', 'files', 'server', 'whiteboard']);
+      expect(w.phone.h.status(w.clan.id, w.ownerKey.publicKey)).toMatchObject({ state: 'relinquished', writable: false });
+      expect(() => w.phone.h.unfreeze(w.clan.id, w.ownerKey.publicKey)).toThrow();
+      const again = restart(w.phone);
       expect(() => again.assertWritable(w.clan.id, w.ownerKey.publicKey)).toThrow();
       expect(again.relinquish(w.clan.id, w.ownerKey, h.delegation, h.ack)).toEqual(h.record);
-      expect(w.desk.app.hosting.accept(h.chain, w.deskKey.publicKey)).toMatchObject({ epoch: 1, state: 'active', writable: true });
-      expect(w.desk.app.hosting.assertWritable(w.clan.id, w.deskKey.publicKey)).toBe(1);
-      expect(w.phone.app.hosting.accept(h.chain, w.ownerKey.publicKey)).toMatchObject({ epoch: 1, state: 'standby', writable: false });
-      expect(w.desk.app.hosting.accept(h.chain, w.deskKey.publicKey).state).toBe('active'); // idempotent
+      expect(await w.desk.h.accept(h.chain, w.deskKey.publicKey)).toMatchObject({ epoch: 1, state: 'active', writable: true });
+      // the new host has the CLAN as its owner, with chat, board, files and host-server records
+      const d = w.desk.app;
+      expect(d.clans.isActiveMember(w.clan.id, d.me)).toBe(true);
+      expect(d.chat.page(s.thread.id).map((m) => m.body)).toEqual(['Welcome to the group', 'Thanks!']);
+      expect(d.whiteboard.since(s.board.id, 0).head).toBe(1);
+      expect(d.files.list(user(d.me), { kind: 'clan', clanId: w.clan.id }).find((x) => x.name === 'notes.txt')?.sha256).toBe(s.shared.sha256);
+      expect(readFileSync(join(w.desk.storageDir, 'resources', s.resourceId), 'utf8')).toBe(s.bytes);
+      const members = w.desk.db.prepare('SELECT status, token_hash t, token_expires e FROM members WHERE session_id = ? ORDER BY status').all(s.sessionId) as { status: string; t: string; e: number }[];
+      expect(members.map((m) => m.status)).toEqual(['approved', 'blocked']); // removed/blocked members stay so
+      expect(members.every((m) => m.t.startsWith('replicated:') && m.e === 0)).toBe(true); // tokens never travel
+      expect(w.desk.db.prepare('SELECT join_code c, teacher_key k FROM sessions WHERE id = ?').get(s.sessionId)).toEqual({ c: '', k: null });
+      expect(w.desk.db.prepare('SELECT manifest FROM resources WHERE id = ?').get(s.resourceId)).toEqual({ manifest: null });
+      expect(w.desk.db.prepare('SELECT count(*) n FROM trusted_devices WHERE course = ?').get(`clan:${w.clan.id}`)).toEqual({ n: 1 });
+      expect(await w.phone.h.accept(h.chain, w.ownerKey.publicKey)).toMatchObject({ epoch: 1, state: 'standby', writable: false });
+      expect((await w.desk.h.accept(h.chain, w.deskKey.publicKey)).state).toBe('active'); // idempotent
     } finally { w.close(); }
   });
 
-  it('rejects unauthorized, copied-key, wrong-CLAN, expired and revoked delegations', () => {
+  it('rejects unauthorized, copied-key, wrong-CLAN, expired and revoked delegations, and member destinations', async () => {
     const w = world();
     try {
-      const chain = w.phone.app.hosting.chainOf(w.clan.id)!;
-      const base = { type: 'clan-host-delegation' as const, v: 1 as const, id: randomUUID(), clanId: w.clan.id, ownerKey: w.ownerKey.publicKey, destKey: w.deskKey.publicKey, actions: ['host' as const], issuedAt: 1_000_000, expiresAt: 2_000_000 };
-      const forged = signHostStatement(w.deskKey, base); // claims the owner's public key, signed by another key
-      expect(() => w.desk.app.hosting.beginStaging(chain, forged, cp('A'), w.deskKey.publicKey)).toThrow('not signed by the CLAN owner');
+      w.phone.h.freeze(w.clan.id, w.ownerKey.publicKey);
+      const { header } = await w.phone.h.prepareCheckpoint(w.clan.id, w.ownerKey.publicKey);
+      const chain = w.phone.h.chainOf(w.clan.id)!;
+      const base = { type: 'clan-host-delegation' as const, v: 1 as const, id: randomUUID(), clanId: w.clan.id, ownerKey: w.ownerKey.publicKey, destKey: w.deskKey.publicKey, actions: ['host' as const], issuedAt: T0, expiresAt: 2 * T0 };
+      const stage = (d: HostDelegation) => w.desk.h.beginStaging(chain, d, header, w.deskKey.publicKey);
+      expect(() => stage(signHostStatement(w.deskKey, base))).toThrow('not signed by the CLAN owner');
       const other = w.phone.app.clans.create({ type: 'FRIENDS', name: 'Other', createdBy: w.phone.app.me });
-      const wrong = signHostStatement(w.ownerKey, { ...base, clanId: other.id });
-      expect(() => w.desk.app.hosting.beginStaging(chain, wrong, cp('A'), w.deskKey.publicKey)).toThrow('another CLAN');
-      const elsewhere = w.phone.app.hosting.delegate(w.clan.id, w.ownerKey, w.thirdKey.publicKey, { id: randomUUID() });
-      expect(() => w.desk.app.hosting.beginStaging(chain, elsewhere, cp('A'), w.deskKey.publicKey)).toThrow('another device');
-      const short = w.phone.app.hosting.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID(), ttlMs: 1000 });
+      expect(() => stage(signHostStatement(w.ownerKey, { ...base, clanId: other.id }))).toThrow('another CLAN');
+      expect(() => stage(w.phone.h.delegate(w.clan.id, w.ownerKey, w.thirdKey.publicKey, { id: randomUUID() }))).toThrow('another device');
+      const short = w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID(), ttlMs: 1000 });
       w.tick(5000);
-      expect(() => w.desk.app.hosting.beginStaging(chain, short, cp('A'), w.deskKey.publicKey)).toThrow('expired');
-      const revoked = w.phone.app.hosting.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
-      w.desk.app.hosting.accept(chain, w.deskKey.publicKey);
-      w.desk.app.hosting.addRevocation(w.phone.app.hosting.revoke(w.clan.id, w.ownerKey, revoked.id));
-      expect(() => w.desk.app.hosting.beginStaging(chain, revoked, cp('A'), w.deskKey.publicKey)).toThrow('revoked');
-      expect(() => w.desk.app.hosting.addRevocation(signHostStatement(w.deskKey, { type: 'clan-host-revocation' as const, v: 1 as const, clanId: w.clan.id, ownerKey: w.ownerKey.publicKey, delegationId: randomUUID(), revokedAt: 1 }))).toThrow('owner');
+      expect(() => stage(short)).toThrow('expired');
+      const revoked = w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
+      w.desk.h.accept(chain, w.deskKey.publicKey);
+      w.desk.h.addRevocation(w.phone.h.revoke(w.clan.id, w.ownerKey, revoked.id));
+      expect(() => stage(revoked)).toThrow('revoked');
+      expect(() => w.desk.h.addRevocation(signHostStatement(w.deskKey, { type: 'clan-host-revocation' as const, v: 1 as const, clanId: w.clan.id, ownerKey: w.ownerKey.publicKey, delegationId: randomUUID(), revokedAt: 1 }))).toThrow('owner');
+      // a device that only joined the CLAN (pairing anchor) is never a hosting destination, even with an owner delegation
+      const toThird = w.phone.h.delegate(w.clan.id, w.ownerKey, w.thirdKey.publicKey, { id: randomUUID() });
+      expect(() => w.third.h.beginStaging(chain, toThird, header, w.thirdKey.publicKey)).toThrow('owner\'s own devices');
+      expect(() => w.desk.h.beginStaging(chain, w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() }), { ...header, epoch: 3 }, w.deskKey.publicKey)).toThrow('current epoch');
     } finally { w.close(); }
   });
 
-  it('destination cannot activate without verified staging, including after a restart mid-staging', () => {
+  it('staging verifies every byte itself: corrupt, missing, extra, out-of-scope and non-canonical checkpoints are refused; resume after restart', async () => {
     const w = world();
     try {
-      const d = w.phone.app.hosting.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
-      const chain = w.phone.app.hosting.chainOf(w.clan.id)!;
-      w.desk.app.hosting.beginStaging(chain, d, cp('A'), w.deskKey.publicKey);
-      expect(() => w.desk.app.hosting.acknowledge(w.clan.id, w.deskKey)).toThrow('not fully verified');
-      const restarted = setup({ db: w.desk.db, storageDir: w.desk.storageDir, now: () => 1_000_000 }).app.hosting;
-      expect(restarted.beginStaging(chain, d, cp('A'), w.deskKey.publicKey)).toEqual({ clanId: w.clan.id, epoch: 0 }); // resumable
-      expect(() => restarted.beginStaging(chain, d, cp('B'), w.deskKey.publicKey)).toThrow('already staging');
-      expect(() => restarted.completeStaging(w.clan.id, 0, cp('B'))).toThrow('No matching');
-      // a transition naming this device for an unverified checkpoint is refused
-      const ack = signHostStatement(w.deskKey, { type: 'clan-host-ack' as const, v: 1 as const, clanId: w.clan.id, epoch: 0, prevHash: authorityHash(chain[0]!), checkpointHash: cp('A'), delegationId: d.id, destKey: w.deskKey.publicKey });
-      w.phone.app.hosting.freeze(w.clan.id, w.ownerKey.publicKey);
-      const rec = w.phone.app.hosting.relinquish(w.clan.id, w.ownerKey, d, ack);
-      expect(() => restarted.accept([...chain, rec], w.deskKey.publicKey)).toThrow('not verified');
-      expect(restarted.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ epoch: 0, writable: false });
-      restarted.completeStaging(w.clan.id, 0, cp('A'));
-      expect(restarted.accept([...chain, rec], w.deskKey.publicKey)).toMatchObject({ epoch: 1, writable: true });
+      await seed(w);
+      const d = w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
+      w.phone.h.freeze(w.clan.id, w.ownerKey.publicKey);
+      const { header } = await w.phone.h.prepareCheckpoint(w.clan.id, w.ownerKey.publicKey);
+      const chain = w.phone.h.chainOf(w.clan.id)!;
+      w.desk.h.beginStaging(chain, d, header, w.deskKey.publicKey);
+      expect(() => w.desk.h.acknowledge(w.clan.id, w.deskKey)).toThrow('not fully verified');
+      const fileSha = header.files[0]!.sha256;
+      await transfer(w.phone, w.desk, w.clan.id, (x) => x !== fileSha); // interrupted transfer
+      await expect(w.desk.h.completeStaging(w.clan.id)).rejects.toThrow('not been received');
+      // restart mid-staging: the same header resumes and reports exactly what is missing
+      const again = restart(w.desk, () => w.ownerKey.publicKey);
+      expect(again.beginStaging(chain, d, header, w.deskKey.publicKey).hash).toBe(checkpointHash(header));
+      expect((await again.missingBlobs(w.clan.id)).map((b) => b.sha256)).toEqual([fileSha]);
+      // corrupt bytes of the right size: detected and deleted for re-download
+      const p = again.stagingPath(w.clan.id, fileSha);
+      writeFileSync(p, 'x'.repeat(header.files[0]!.size));
+      await expect(again.completeStaging(w.clan.id)).rejects.toThrow('corrupt');
+      expect(existsSync(p)).toBe(false);
+      await transfer(w.phone, w.desk, w.clan.id, (x) => x === fileSha);
+      await again.completeStaging(w.clan.id);
+      expect(again.acknowledge(w.clan.id, w.deskKey).checkpointHash).toBe(checkpointHash(header));
+      expect(() => again.stagingPath(w.clan.id, sha('not in checkpoint'))).toThrow('not part');
+
+      // forged checkpoints: the destination never verifies them
+      const inDir = join(w.desk.storageDir, 'hosting', 'in', w.clan.id);
+      const put = (rows: unknown[]) => { const b = sectionBytes(rows), s = sha256Hex(b); writeFileSync(join(inDir, s), b); return { sha256: s, size: b.length, rows: rows.length }; };
+      const forge = async (mutate: (h: CheckpointHeader) => CheckpointHeader) => {
+        again.beginStaging(chain, d, mutate(structuredClone(header)), w.deskKey.publicKey);
+        return again.completeStaging(w.clan.id);
+      };
+      await expect(forge((h) => ({ ...h, sections: { ...h.sections, chat: put([{ t: 'chat_threads', r: { id: randomUUID(), clan_id: randomUUID(), kind: 'group', pair: '', created_at: 1 } }]) } }))).rejects.toThrow('outside this CLAN');
+      await expect(forge((h) => ({ ...h, sections: { ...h.sections, chat: put([{ t: 'chat_me', r: { clan_id: w.clan.id, handle: 'x' } }]) } }))).rejects.toThrow('unexpected table');
+      await expect(forge((h) => ({ ...h, sections: { ...h.sections, chat: put([{ t: 'chat_names', r: { clan_id: w.clan.id, handle: 'x', name: 'y', extra: 1 } }]) } }))).rejects.toThrow('Unexpected column');
+      await expect(forge((h) => ({ ...h, files: [] }))).rejects.toThrow('file list');
+      await expect(forge((h) => ({ ...h, files: [...h.files, { sha256: put([1]).sha256, size: sectionBytes([1]).length }] }))).rejects.toThrow('file list');
+      await expect(forge((h) => { const { whiteboard: _w, ...rest } = h.sections; return { ...h, sections: rest }; })).rejects.toThrow('sections differ');
+      await expect(forge((h) => ({ ...h, sections: { ...h.sections, files: { ...put([]), rows: 3 } } }))).rejects.toThrow('not canonical');
+      const spaced = new TextEncoder().encode('[ ]'), spacedSha = sha256Hex(spaced);
+      writeFileSync(join(inDir, spacedSha), spaced);
+      await expect(forge((h) => ({ ...h, sections: { ...h.sections, files: { sha256: spacedSha, size: spaced.length, rows: 0 } } }))).rejects.toThrow('not canonical');
+      await expect(forge((h) => { const x = put([]); appendFileSync(join(inDir, x.sha256), ' '); return { ...h, sections: { ...h.sections, files: { ...x, size: x.size + 1 } } }; })).rejects.toThrow('corrupt');
     } finally { w.close(); }
   });
 
-  it('refuses tampered records, stale chains, simultaneous handoffs and equal-epoch conflicts', () => {
+  it('binds the hand-over to the checkpoint the source prepared; a resumed source invalidates older acknowledgments', async () => {
     const w = world();
     try {
-      const d2 = w.phone.app.hosting.delegate(w.clan.id, w.ownerKey, w.thirdKey.publicKey, { id: randomUUID() });
-      const genesis = w.phone.app.hosting.chainOf(w.clan.id)!;
-      const s3 = w.third.app.hosting.beginStaging(genesis, d2, cp('C'), w.thirdKey.publicKey);
-      w.third.app.hosting.completeStaging(s3.clanId, s3.epoch, cp('C'));
-      const ack3 = w.third.app.hosting.acknowledge(w.clan.id, w.thirdKey);
-      const h = handoff(w);
-      // second destination after relinquishment: refused
-      expect(() => w.phone.app.hosting.relinquish(w.clan.id, w.ownerKey, d2, ack3)).toThrow('already handed');
-      // tampered checkpoint / host fields break signatures
-      const bad = [...genesis, { ...h.record, checkpointHash: cp('Z') }];
-      expect(() => w.desk.app.hosting.accept(bad, w.deskKey.publicKey)).toThrow();
-      expect(() => w.desk.app.hosting.accept([...genesis, { ...h.record, hostKey: w.thirdKey.publicKey }], w.deskKey.publicKey)).toThrow();
+      await seed(w);
+      const d = w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
+      w.phone.h.freeze(w.clan.id, w.ownerKey.publicKey);
+      const first = await w.phone.h.prepareCheckpoint(w.clan.id, w.ownerKey.publicKey);
+      const chain = w.phone.h.chainOf(w.clan.id)!;
+      w.desk.h.beginStaging(chain, d, first.header, w.deskKey.publicKey);
+      await transfer(w.phone, w.desk, w.clan.id);
+      await w.desk.h.completeStaging(w.clan.id);
+      const staleAck = w.desk.h.acknowledge(w.clan.id, w.deskKey);
+      expect(() => w.phone.h.unfreeze(w.clan.id, w.deskKey.publicKey)).toThrow('paused host');
+      w.phone.h.unfreeze(w.clan.id, w.ownerKey.publicKey); // the owner keeps hosting; new chat arrives
+      expect(w.phone.h.checkpointBlob(w.clan.id, first.header.files[0]!.sha256)).toBeNull();
+      w.phone.app.chat.post({ id: randomUUID(), threadId: w.phone.app.chat.groupThread(w.clan.id).id, author: 'h1', authorName: 'Host', body: 'later' });
+      w.phone.h.freeze(w.clan.id, w.ownerKey.publicKey);
+      expect(() => w.phone.h.relinquish(w.clan.id, w.ownerKey, d, staleAck)).toThrow('different checkpoint');
+      w.tick(1);
+      const second = await w.phone.h.prepareCheckpoint(w.clan.id, w.ownerKey.publicKey);
+      expect(second.hash).not.toBe(first.hash);
+      w.desk.h.beginStaging(chain, d, second.header, w.deskKey.publicKey); // replaces the unacknowledged staging
+      await transfer(w.phone, w.desk, w.clan.id);
+      await w.desk.h.completeStaging(w.clan.id);
+      const rec = w.phone.h.relinquish(w.clan.id, w.ownerKey, d, w.desk.h.acknowledge(w.clan.id, w.deskKey));
+      await w.desk.h.accept([...chain, rec], w.deskKey.publicKey);
+      expect(w.desk.app.chat.page(w.desk.app.chat.groupThread(w.clan.id).id).at(-1)?.body).toBe('later');
+    } finally { w.close(); }
+  });
+
+  it('a failed import (crash before activation) leaves the device a standby; the retry activates', async () => {
+    let fail = true;
+    const flaky = (): CheckpointProvider => ({ section: 'zz-test', export: () => ({ rows: [], files: [] }), validate: () => [], import: () => { if (fail) throw new Error('crash during import'); } });
+    const w = world({ extra: () => [flaky()] });
+    try {
+      const s = await seed(w);
+      const h = await handoff(w);
+      await expect(w.desk.h.accept(h.chain, w.deskKey.publicKey)).rejects.toThrow('crash during import');
+      expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ epoch: 0, writable: false });
+      expect(w.desk.app.chat.page(s.thread.id)).toEqual([]); // imported rows rolled back with the authority update
+      fail = false;
+      expect(await w.desk.h.accept(h.chain, w.deskKey.publicKey)).toMatchObject({ epoch: 1, writable: true });
+      expect(w.desk.app.chat.page(s.thread.id)).toHaveLength(2);
+    } finally { w.close(); }
+  });
+
+  it('refuses tampered records, stale chains, simultaneous handoffs and equal-epoch conflicts', async () => {
+    const w = world();
+    try {
+      const genesis = w.phone.h.chainOf(w.clan.id)!;
+      const h = await handoff(w);
+      // a second destination after relinquishment: refused
+      const d2 = w.phone.h.delegate(w.clan.id, w.ownerKey, w.thirdKey.publicKey, { id: randomUUID() });
+      const ack3 = signHostStatement(w.thirdKey, { type: 'clan-host-ack' as const, v: 1 as const, clanId: w.clan.id, epoch: 0, prevHash: authorityHash(genesis[0]!), checkpointHash: h.hash, delegationId: d2.id, destKey: w.thirdKey.publicKey });
+      expect(() => w.phone.h.relinquish(w.clan.id, w.ownerKey, d2, ack3)).toThrow('already handed');
+      await expect(w.desk.h.accept([...genesis, { ...h.record, checkpointHash: h.hash.replace(/^./, (c) => (c === 'A' ? 'B' : 'A')) }], w.deskKey.publicKey)).rejects.toThrow();
+      await expect(w.desk.h.accept([...genesis, { ...h.record, hostKey: w.thirdKey.publicKey }], w.deskKey.publicKey)).rejects.toThrow();
       // an equal-epoch fork signed by the same (compromised/copied) host key
       const { sig: _s, ...body } = h.record;
-      const forkRec: AuthorityRecord = signHostStatement(w.ownerKey, { ...body, hostKey: w.thirdKey.publicKey, checkpointHash: cp('C'), delegation: d2, ack: ack3 });
+      const forkRec: AuthorityRecord = signHostStatement(w.ownerKey, { ...body, hostKey: w.thirdKey.publicKey, delegation: d2, ack: ack3 });
       expect(verifyAuthorityChain([...genesis, forkRec], { clanId: w.clan.id }).ok).toBe(true);
-      w.desk.app.hosting.accept(h.chain, w.deskKey.publicKey);
-      expect(() => w.desk.app.hosting.accept([...genesis, forkRec], w.deskKey.publicKey)).toThrow('Conflicting');
-      expect(w.desk.app.hosting.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ state: 'conflict', writable: false });
-      // the owner device signed only one transition: the fork is a conflict there too
-      expect(() => w.phone.app.hosting.accept([...genesis, forkRec], w.ownerKey.publicKey)).toThrow('did not sign');
-      // stale: a device at epoch 1 offered epoch 0
-      const fresh = world();
-      try {
-        const hf = handoff(fresh);
-        fresh.third.app.hosting.accept(hf.chain, fresh.thirdKey.publicKey);
-        expect(() => fresh.third.app.hosting.accept(hf.chain.slice(0, 1), fresh.thirdKey.publicKey)).toThrow('older');
-      } finally { fresh.close(); }
+      await w.desk.h.accept(h.chain, w.deskKey.publicKey);
+      await expect(w.desk.h.accept([...genesis, forkRec], w.deskKey.publicKey)).rejects.toThrow('Conflicting');
+      expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ state: 'conflict', writable: false });
+      await expect(w.phone.h.accept([...genesis, forkRec], w.ownerKey.publicKey)).rejects.toThrow('did not sign');
+      await expect(w.third.h.accept(h.chain, w.thirdKey.publicKey)).resolves.toMatchObject({ epoch: 1, state: 'standby' });
+      await expect(w.third.h.accept(genesis, w.thirdKey.publicKey)).rejects.toThrow('older'); // stale
     } finally { w.close(); }
   });
 
-  it('a host that never relinquished treats a newer record as a conflict; revocation stops writes but allows return to owner', () => {
+  it('revocation stops the delegated host; it can still hand the CLAN back to the owner device; a never-relinquished host conflicts', async () => {
     const w = world();
     try {
-      const h = handoff(w);
-      w.desk.app.hosting.accept(h.chain, w.deskKey.publicKey);
-      // the active desktop learns a revocation of its own delegation: writes stop, already-accepted history stays valid
-      w.desk.app.hosting.addRevocation(w.phone.app.hosting.revoke(w.clan.id, w.ownerKey, h.delegation.id));
-      expect(w.desk.app.hosting.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ epoch: 1, state: 'active', writable: false });
-      expect(w.desk.app.hosting.accept(h.chain, w.deskKey.publicKey).epoch).toBe(1);
-      // hand authority back to the owner device under a fresh owner delegation
-      w.phone.app.hosting.addRevocation(w.phone.app.hosting.revoke(w.clan.id, w.ownerKey, h.delegation.id));
-      w.phone.app.hosting.accept(h.chain, w.ownerKey.publicKey);
-      const back = w.phone.app.hosting.delegate(w.clan.id, w.ownerKey, w.ownerKey.publicKey, { id: randomUUID() });
-      const s = w.phone.app.hosting.beginStaging(h.chain, back, cp('R'), w.ownerKey.publicKey);
-      w.phone.app.hosting.completeStaging(s.clanId, s.epoch, cp('R'));
-      const ack = w.phone.app.hosting.acknowledge(w.clan.id, w.ownerKey);
-      w.desk.app.hosting.freeze(w.clan.id, w.deskKey.publicKey);
-      const rec = w.desk.app.hosting.relinquish(w.clan.id, w.deskKey, back, ack);
-      expect(w.phone.app.hosting.accept([...h.chain, rec], w.ownerKey.publicKey)).toMatchObject({ epoch: 2, state: 'active', writable: true });
-      // the third device was never told about epoch 1 by its host; it may learn the full chain later
-      expect(w.third.app.hosting.accept([...h.chain, rec], w.thirdKey.publicKey)).toMatchObject({ epoch: 2, state: 'standby' });
+      const s = await seed(w);
+      const h = await handoff(w);
+      await w.desk.h.accept(h.chain, w.deskKey.publicKey);
+      w.desk.app.chat.post({ id: randomUUID(), threadId: s.thread.id, author: 'h1', authorName: 'Host', body: 'written on the desktop' });
+      w.desk.h.addRevocation(w.phone.h.revoke(w.clan.id, w.ownerKey, h.delegation.id));
+      expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)).toMatchObject({ epoch: 1, state: 'active', writable: false });
+      expect((await w.desk.h.accept(h.chain, w.deskKey.publicKey)).epoch).toBe(1); // accepted history stays valid
+      await w.phone.h.accept(h.chain, w.ownerKey.publicKey);
+      const back = w.phone.h.delegate(w.clan.id, w.ownerKey, w.ownerKey.publicKey, { id: randomUUID() });
+      const r = await handoff(w, { src: w.desk, srcKey: w.deskKey, dst: w.phone, dstKey: w.ownerKey, d: back });
+      expect(await w.phone.h.accept([...h.chain, r.record], w.ownerKey.publicKey)).toMatchObject({ epoch: 2, state: 'active', writable: true });
+      expect(w.phone.app.chat.page(s.thread.id).at(-1)?.body).toBe('written on the desktop');
+      expect(await w.third.h.accept([...h.chain, r.record], w.thirdKey.publicKey)).toMatchObject({ epoch: 2, state: 'standby' });
       // an active host offered a successor it never signed → conflict, not takeover
       const v = world();
       try {
         const forged = signHostStatement(v.ownerKey, { type: 'clan-host-authority' as const, v: 1 as const, clanId: v.clan.id, ownerKey: v.ownerKey.publicKey, epoch: 0, hostKey: v.ownerKey.publicKey, prevHash: null, checkpointHash: null, delegation: null, ack: null, issuedAt: 5 });
-        expect(() => v.desk.app.hosting.accept([forged], v.deskKey.publicKey)).not.toThrow(); // a different genesis is just unknown to desk
-        expect(() => v.phone.app.hosting.accept([forged], v.ownerKey.publicKey)).toThrow('Conflicting');
-        expect(v.phone.app.hosting.status(v.clan.id, v.ownerKey.publicKey)?.writable).toBe(false);
+        await expect(v.phone.h.accept([forged], v.ownerKey.publicKey)).rejects.toThrow('Conflicting');
+        expect(v.phone.h.status(v.clan.id, v.ownerKey.publicKey)?.writable).toBe(false);
       } finally { v.close(); }
     } finally { w.close(); }
   });
 
-  it('trusts no first chain: owner keys are anchored by owner, authenticated pairing or a linked device', () => {
+  it('trusts no first chain: owner keys are anchored by owner, authenticated pairing or a linked device', async () => {
     const w = world();
     try {
       const attacker = key();
       const fake = signHostStatement(attacker, { type: 'clan-host-authority' as const, v: 1 as const, clanId: w.clan.id, ownerKey: attacker.publicKey, epoch: 0, hostKey: attacker.publicKey, prevHash: null, checkpointHash: null, delegation: null, ack: null, issuedAt: 1 });
-      // anchored to the real owner via pairing: a self-made chain for the same CLAN id is refused, the anchor cannot move
-      expect(() => w.third.app.hosting.accept([fake], w.thirdKey.publicKey)).toThrow('another owner');
-      expect(() => w.third.app.hosting.anchorFromPairing(w.clan.id, fake)).toThrow('different owner');
-      // a device with no anchor learns nothing
-      const lone = setup({ now: () => 1_000_000 });
+      await expect(w.third.h.accept([fake], w.thirdKey.publicKey)).rejects.toThrow('another owner');
+      expect(() => w.third.h.anchorFromPairing(w.clan.id, fake)).toThrow('different owner');
+      expect(() => w.third.h.anchorLinkedOwner(w.clan.id, w.ownerKey.publicKey)).toThrow('not a linked device');
+      const lone = device({ now: () => T0, owner: () => null });
       try {
         lone.app.clans.recordJoined({ id: w.clan.id, type: 'STUDY_GROUP', name: 'Mobile group', hostDeviceId: 'phone', hostName: 'Phone', me: lone.app.me });
-        expect(() => lone.app.hosting.accept(w.phone.app.hosting.chainOf(w.clan.id), w.thirdKey.publicKey)).toThrow('not yet trusted');
-        expect(() => lone.app.hosting.anchorLinkedOwner(w.clan.id, w.ownerKey.publicKey)).toThrow('not a linked device');
-        const linked = new HostAuthority(lone.db, lone.app.clans, () => 1_000_000, (k) => k === w.ownerKey.publicKey);
-        linked.anchorLinkedOwner(w.clan.id, w.ownerKey.publicKey);
-        expect(linked.accept(w.phone.app.hosting.chainOf(w.clan.id), w.thirdKey.publicKey)).toMatchObject({ epoch: 0, state: 'standby' });
+        await expect(lone.h.accept(w.phone.h.chainOf(w.clan.id), w.thirdKey.publicKey)).rejects.toThrow('not yet trusted');
       } finally { lone.db.close(); }
-      // only the paused host itself may resume
-      w.phone.app.hosting.freeze(w.clan.id, w.ownerKey.publicKey);
-      expect(() => w.phone.app.hosting.unfreeze(w.clan.id, w.deskKey.publicKey)).toThrow('paused host');
-      w.phone.app.hosting.unfreeze(w.clan.id, w.ownerKey.publicKey);
-      expect(w.phone.app.hosting.status(w.clan.id, w.ownerKey.publicKey)?.writable).toBe(true);
     } finally { w.close(); }
   });
 });

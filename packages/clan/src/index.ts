@@ -49,7 +49,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const clans = new Clans(db, bus, identity, now);
   // Persistent hosting authority (signed epochs). Not yet used by any host path; see docs/PHASE_14_2_HOSTING_DESIGN.md.
   // Linked-device owner anchors: only verified, unrevoked devices of this personal account (never the current device).
-  const hosting = new HostAuthority(db, clans, now, (key) => sync.devices().some((d) => d.publicKey === key && !d.revoked && !d.current));
+  const hosting = new HostAuthority(db, clans, { now, dir: join(opts.storageDir, 'hosting'), me: () => me, linkedDeviceKey: (key) => sync.devices().some((d) => d.publicKey === key && !d.revoked && !d.current) });
   const permissions = new Permissions(db, clans, now);
   const store = new ResourceStore(db, bus, opts.storageDir, now);
   const files = new Files(db, bus, store, permissions, clans);
@@ -94,6 +94,8 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const SEARCH: Record<string, string> = { note: 'notes', 'saved-item': 'saved', course: 'courses', task: 'tasks', exam: 'exams', deck: 'flashcards', tape: 'recordings' };
   sync.onApplied((kind, id) => { if (SEARCH[kind]) search.reindex(SEARCH[kind], id); });
 
+  // Persistent hosting checkpoint sections owned by CLAN modules (the host server adds its own section).
+  for (const p of [clans.checkpointProvider(), chat.checkpointProvider(), whiteboard.checkpointProvider(), files.checkpointProvider()]) hosting.register(p);
   me = identity.localUser(opts.localName);
   bus.deliverPending();
   /** Classroom history → CLASSROOM CLANs (+ their files). Idempotent; call at startup and when a class ends. */
