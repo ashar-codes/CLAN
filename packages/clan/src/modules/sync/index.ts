@@ -117,6 +117,11 @@ export class PersonalSync {
     const { sig, ...rest } = e;
     return verifyEd25519(signer.publicKey, deviceStatement(rest), sig);
   }
+  /** Public key of a linked, unrevoked other device of this account (authorization for device-to-device features). */
+  deviceKey(fp: string): string | null {
+    const d = this.devices().find((x) => x.fp === fp && !x.revoked && !x.current);
+    return d?.publicKey ?? null;
+  }
   devices(): DeviceView[] {
     const me = this.selfFp();
     return (this.db.prepare('SELECT * FROM sync_devices ORDER BY rowid').all() as { fp: string; entry: string; revoked: number; endpoints: string; last_seen: number | null; last_sync: number | null; error: string | null }[]).map((r) => {

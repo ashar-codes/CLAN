@@ -9,6 +9,7 @@ import { StudyScreen, type MobileStudyTab } from './screens/Study';
 import { InboxScreen } from './screens/Inbox';
 import { DiaryScreen } from './screens/Diary';
 import { DevicesScreen } from './screens/Devices';
+import { HostingScreen } from './screens/Hosting';
 import { act, bump, Btn, Card, Field, Mate, Muted, RoomBand, Row, Screen, useC, useData, when } from './ui/kit';
 
 type Tab = 'home' | 'study' | 'inbox' | 'diary' | 'me';
@@ -16,14 +17,15 @@ const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study
 
 export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEditProfile(): void; intake?: ReactNode }) {
   const c = useC();
-  const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false);
+  const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false), [hosting, setHosting] = useState(false);
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
   const inboxCount = useData(() => phoneClan().capture.inbox(me()).length) ?? 0;
   const body = intake ?? (joining ? <Screen><Btn label="← Back" onPress={() => setJoining(false)} />{join}</Screen>
     : tab === 'home' ? <Home onJoin={() => setJoining(true)} go={setTab} onStudy={(t) => { setStudyInitial(t); setTab('study'); }} />
     : tab === 'study' ? <StudyScreen initial={studyInitial} /> : tab === 'inbox' ? <InboxScreen /> : tab === 'diary' ? <DiaryScreen />
     : devices ? <View style={{ flex: 1 }}><DevicesScreen /><View style={{ position: 'absolute', top: 12, right: 16 }}><Btn small label="Done" onPress={() => setDevices(false)} /></View></View>
-    : <MeScreen onDevices={() => setDevices(true)} onEditProfile={onEditProfile} />);
+    : hosting ? <View style={{ flex: 1 }}><HostingScreen /><View style={{ position: 'absolute', top: 12, right: 16 }}><Btn small label="Done" onPress={() => setHosting(false)} /></View></View>
+    : <MeScreen onDevices={() => setDevices(true)} onHosting={() => setHosting(true)} onEditProfile={onEditProfile} />);
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1 }}>{body}</View>
@@ -31,7 +33,7 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
         <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface }}>
           {TABS.map(([t, l, ic]) => (
             <Pressable key={t} accessibilityRole="tab" accessibilityLabel={t === 'inbox' && inboxCount ? `${l}, ${inboxCount} items` : l} accessibilityState={{ selected: tab === t }}
-              onPress={() => { setTab(t); setJoining(false); setDevices(false); }} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' }}>
+              onPress={() => { setTab(t); setJoining(false); setDevices(false); setHosting(false); }} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 18, color: tab === t ? c.text : c.muted }}>{ic}</Text>
               <Text style={{ fontSize: 12, fontWeight: tab === t ? '800' : '500', color: tab === t ? c.text : c.muted }}>{l}{t === 'inbox' && inboxCount ? ` · ${inboxCount}` : ''}</Text>
             </Pressable>
@@ -116,7 +118,7 @@ function LocalClans() {
   </Card>;
 }
 
-function MeScreen({ onDevices, onEditProfile }: { onDevices(): void; onEditProfile(): void }) {
+function MeScreen({ onDevices, onHosting, onEditProfile }: { onDevices(): void; onHosting(): void; onEditProfile(): void }) {
   const name = useData(() => phoneClan().identity.displayName(phoneClan().me)) ?? '';
   const [n, setN] = useState(name), [err, setErr] = useState<string | null>(null);
   return (
@@ -128,6 +130,7 @@ function MeScreen({ onDevices, onEditProfile }: { onDevices(): void; onEditProfi
         {err && <Muted>{err}</Muted>}
       </Card>
       <Card title="My Devices"><Muted>Link this phone to your computer and keep your study data in step, offline-first.</Muted><Btn primary label="Open My Devices" onPress={onDevices} /></Card>
+      <Card title="Hosting"><Muted>Own CLANs from this phone and let your computer host them.</Muted><Btn label="Open Hosting" onPress={onHosting} /></Card>
       <Card title="Privacy"><Muted small>Everything is stored encrypted on this phone. Notes and links are private until you file them into a CLAN. Diary is never shared or searchable; AI reads it only if you allow it. Your AI key stays in this phone's secure storage.</Muted></Card>
     </Screen>
   );

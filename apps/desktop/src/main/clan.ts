@@ -3,6 +3,7 @@ import { ipcMain } from 'electron';
 import { z } from 'zod';
 import { openClan, AI_GRANTEE, type ClanApp } from '@clan/core';
 import { ClanType, keyFingerprint } from '@classroom/protocol';
+import { serverCheckpointSection } from '@classroom/server';
 import type { HomeView } from '../shared.ts';
 
 const Id = z.uuid();
@@ -13,6 +14,7 @@ export type DesktopClan = ClanApp & { classroomClanFor(title: string): string | 
 
 export function registerClan(db: Parameters<typeof openClan>[0], storageDir: string, localName: () => string | undefined, aiProvider?: Parameters<typeof openClan>[1]['aiProvider']): DesktopClan {
   const c = openClan(db, { storageDir, localName: localName(), aiProvider });
+  c.hosting.register(serverCheckpointSection(db, storageDir)); // host-server rows + bytes of a persistent CLAN hand-over
   const me = { kind: 'user' as const, userId: c.me };
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
 
@@ -50,9 +52,12 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   }));
   handle('files:personal', () => c.files.list(me, { kind: 'personal', ownerId: c.me }));
   /** Called by the member UI once the host approved it. Values come from the authenticated session (hello) + the paired host key. */
-  handle('clan:joined', (raw) => {
-    const a = z.object({ sessionId: Id, clanId: Id.nullable(), type: ClanType, name: z.string().trim().min(1).max(80), hostKey: z.string().max(64), expiresAt: z.number().int().nullable(), hostName: z.string().trim().min(1).max(80).nullable().optional() }).parse(raw);
+  handle('clan:joined', async (raw) => {
+    const a = z.object({ sessionId: Id, clanId: Id.nullable(), type: ClanType, name: z.string().trim().min(1).max(80), hostKey: z.string().max(64), expiresAt: z.number().int().nullable(), hostName: z.string().trim().min(1).max(80).nullable().optional(), authority: z.unknown().optional() }).parse(raw);
     c.clans.recordJoined({ id: a.clanId ?? a.sessionId, type: a.type, name: a.name, hostDeviceId: keyFingerprint(a.hostKey), hostName: a.hostName ?? `${a.name} host`, expiresAt: a.expiresAt, me: c.me, sessionId: a.sessionId });
+    // Persistent-hosting CLAN: anchor the owner from this authenticated session (first binding wins, never replaced) and
+    // check that this session is run by the CLAN's current authorized host.
+    if (a.authority !== undefined && a.clanId) await c.hosting.verifySession({ clanId: a.clanId, sessionId: a.sessionId, teacherPublicKey: a.hostKey, authority: a.authority });
     if (a.type === 'CLASSROOM') c.courses.linkClassrooms(me); // a joined Classroom gets its linked Course right away
   });
   handle('clan:detail', (id) => {

@@ -7,6 +7,7 @@ import type { Db } from '../../core/db.ts';
 import type { Clans } from '../clans/index.ts';
 import { adoptClassroomResources, classroomName, classroomNames } from './classroom-adopt.ts';
 import type { SyncProvider } from '../../core/syncrows.ts';
+import type { CheckpointProvider } from '@classroom/protocol';
 
 export const ResourceShared = defineEvent('ResourceShared', 1, z.object({
   refId: z.string(), objectId: z.string(), scope: z.discriminatedUnion('kind', [z.object({ kind: z.literal('personal'), ownerId: z.string() }), z.object({ kind: z.literal('clan'), clanId: z.string() })]), by: z.string(),
@@ -18,6 +19,51 @@ const NAME = z.string().trim().min(1).max(255).refine((n) => !/[\\/\0]/.test(n),
 export class Files {
   private db: Db; private bus: EventBus; private store: ResourceStore; private perms: Permissions; private clans: Clans;
   constructor(db: Db, bus: EventBus, store: ResourceStore, perms: Permissions, clans: Clans) { this.db = db; this.bus = bus; this.store = store; this.perms = perms; this.clans = clans; }
+
+  /** Persistent hosting: files shared into the CLAN (refs + verified bytes). Adopted classroom files travel with the
+   *  host server's resources instead and are adopted again on the destination. */
+  checkpointProvider(): CheckpointProvider {
+    const Row = z.object({ id: z.string().uuid(), sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().nonnegative(), mime: z.string().max(120),
+      name: NAME.nullable(), createdBy: z.string().min(1).max(80), createdAt: z.number().int() }).strict();
+    type Row = z.infer<typeof Row>;
+    const SQL = `SELECT r.id, o.sha256, o.size, o.mime, o.location, r.name, r.created_by, r.created_at FROM resources_refs r JOIN resources_objects o ON o.id = r.object_id
+      WHERE r.module = 'files' AND r.entity = 'file' AND r.scope_kind = 'clan' AND r.scope_id = ? ORDER BY r.created_at, r.id`;
+    const parse = (raw: unknown[]) => z.array(Row).max(100_000).parse(raw);
+    return {
+      section: 'files',
+      // Any other CLAN-scoped reference would have no section to carry it: stop rather than lose it.
+      preflight: (clanId) => {
+        const n = (this.db.prepare("SELECT count(*) n FROM resources_refs WHERE scope_kind = 'clan' AND scope_id = ? AND NOT (module = 'files' AND entity IN ('file','classroom-resource'))").get(clanId) as { n: number }).n;
+        return n ? [{ code: 'unsupported_data', count: n, blocking: true, message: 'This CLAN holds items a hand-over cannot carry yet.' }] : [];
+      },
+      export: (clanId) => {
+        const rs = this.db.prepare(SQL).all(clanId) as { id: string; sha256: string; size: number; mime: string; location: string; name: string | null; created_by: string; created_at: number }[];
+        return { rows: rs.map((r) => ({ id: r.id, sha256: r.sha256, size: r.size, mime: r.mime, name: r.name, createdBy: r.created_by, createdAt: r.created_at })), files: rs.map((r) => ({ sha256: r.sha256, size: r.size, path: r.location })) };
+      },
+      validate: (_clanId, raw) => parse(raw).map((r) => ({ sha256: r.sha256, size: r.size })),
+      materialize: async (_clanId, raw, blob) => {
+        for (const r of parse(raw)) {
+          if (this.store.bySha(r.sha256)) continue;
+          const put = await this.store.put(blob(r.sha256), r.mime); // copies and re-verifies the bytes
+          put.release();
+          if (put.object.sha256 !== r.sha256 || put.object.size !== r.size) throw new Error('Replicated file does not match its checkpoint entry.');
+        }
+      },
+      import: (clanId, raw) => {
+        const rows = parse(raw) as Row[];
+        const keep = new Set(rows.map((r) => r.id));
+        for (const old of this.store.refsIn({ kind: 'clan', clanId }, 'files')) if (old.entity === 'file' && !keep.has(old.id)) this.store.unref(old.id);
+        for (const r of rows) {
+          const o = this.store.bySha(r.sha256);
+          if (!o) throw new Error('Replicated file bytes are missing.');
+          const entityId = `${o.id}:${r.createdBy}`;
+          this.db.prepare("DELETE FROM resources_refs WHERE module = 'files' AND entity = 'file' AND entity_id = ? AND scope_kind = 'clan' AND scope_id = ? AND id <> ?").run(entityId, clanId, r.id);
+          this.db.prepare(`INSERT INTO resources_refs (id, object_id, module, entity, entity_id, scope_kind, scope_id, name, created_by, created_at) VALUES (?, ?, 'files', 'file', ?, 'clan', ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET object_id = excluded.object_id, entity_id = excluded.entity_id, name = excluded.name WHERE scope_kind = 'clan' AND scope_id = excluded.scope_id`).run(r.id, o.id, entityId, clanId, r.name, r.createdBy, r.createdAt);
+        }
+      },
+    };
+  }
 
   /** Personal sync: the student's own files travel by content hash (deduplicated, verified on arrival). A ref keeps the
    *  same id on every device so courses, tasks and tapes that point at it still resolve. CLAN files never sync. */
@@ -114,8 +160,14 @@ export class Files {
     this.bus.publish(ResourceShared, 'files', { refId: ref.id, objectId, scope, by: userOf(p) });
     return this.view(ref, new Map());
   }
+  private hostGate: (clanId: string) => string | null = () => null;
+  /** Persistent hosting: a reason this device may not make authoritative writes to a CLAN (paused, handed over, conflicted
+   *  or revoked host), or null. Member-side caching is never gated. */
+  guardHostWrites(f: (clanId: string) => string | null) { this.hostGate = f; }
   private assertWrite(p: Principal, scope: Scope) {
     if (p.kind !== 'user' || !this.perms.canRead(p, scope)) throw new Error('Not allowed.');
+    const why = scope.kind === 'clan' ? this.hostGate(scope.clanId) : null;
+    if (why) throw new Error(why);
     if (scope.kind === 'clan' && !this.clans.has(scope.clanId, 'files')) throw new Error('This CLAN does not share files.');
   }
   private nameOf(r: RefRow) { return r.name ?? classroomName(this.db, r.entityId) ?? 'file'; }

@@ -10,7 +10,7 @@ import { generateKeyPairSync, sign as edSign, createPublicKey, randomUUID, type 
 import * as opaque from '@serenity-kit/opaque';
 import {
   b64u, BleRequest, ClientMessage, DIRECT_PACKAGE_TTL_MS, MESSAGE_CAPABILITY, type BleResponse, type DirectPackage, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
-  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, type ServerMessage, type ResourceView,
+  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, hostSessionStatement, type AuthorityRecord, type HostResolution, type ServerMessage, type ResourceView,
 } from '@classroom/protocol';
 import { ChatRelay, type ChatStore } from './chat.ts';
 import { WhiteboardRelay, type WhiteboardStore } from './whiteboard.ts';
@@ -61,7 +61,16 @@ export type ServerOptions = {
   /** Managed file storage root (teacher app: <userData>/storage). Defaults to a fresh temp dir. */
   storageDir?: string;
   limits?: Partial<Limits>;
+  /**
+   * Persistent hosting (docs/PHASE_14_2_HOSTING_DESIGN.md): `assertWritable` throws unless this device still holds the
+   * CLAN's current hosting epoch; it guards the session start and every authoritative write. Members receive the chain
+   * and `sign` (the host device key) over this session's identity inside the authenticated session, to anchor the owner
+   * and verify the session's host. Omitted → a legacy single-host CLAN, unchanged.
+   */
+  authority?: { assertWritable(): void; chain(): AuthorityRecord[]; sign(bytes: Uint8Array): string; resolutions?(): HostResolution[] };
 };
+/** Client messages that change nothing durable (ephemeral relays and reads); everything else is fenced. */
+const UNFENCED = new Set<ClientMessage['t']>(['wb.sync', 'wb.cursor', 'chat.typing']);
 
 export type TeacherIdentity = { signingKey: KeyObject; opaqueServerSetup: string };
 
@@ -108,10 +117,20 @@ const sizedChunks = <T>(items: T[], max: number) => { const out: T[][] = []; let
 
 export async function startClassroomServer(opts: ServerOptions): Promise<RunningServer> {
   const db = opts.db ?? openDb(opts.dbPath ?? ':memory:');
+  const fence = () => {
+    if (!opts.authority) return;
+    try { opts.authority.assertWritable(); } catch (e) { throw new ApiError(503, 'host_unavailable', (e as Error).message || 'This device is not the CLAN\'s current host.'); }
+  };
+  fence(); // never open a session for a CLAN this device does not currently host
   const classroom = new Classroom(db, opts.title, opts.networkMode ?? 'lan', { code: opts.code, clan: opts.clan, hostName: opts.hostName });
   const identity = opts.identity ?? (await ephemeralIdentity());
   const teacherPublicKey = b64u.encode(new Uint8Array(createPublicKey(identity.signingKey).export({ type: 'spki', format: 'der' }).subarray(-32)));
   const signer = { publicKey: teacherPublicKey, sign: (bytes: Uint8Array) => b64u.encode(new Uint8Array(edSign(null, bytes, identity.signingKey))) };
+  const sessionAuthority = opts.authority && (() => {
+    const chain = opts.authority!.chain(), head = chain[chain.length - 1]!;
+    const resolutions = opts.authority!.resolutions?.() ?? [];
+    return { chain, proof: opts.authority!.sign(hostSessionStatement({ clanId: head.clanId, epoch: head.epoch, sessionId: classroom.id, teacherPublicKey })), ...(resolutions.length ? { resolutions } : {}) };
+  });
   const tls = await createClassroomTls(classroom.id);
   db.prepare('UPDATE sessions SET teacher_key = ?, tls_spki = ?, connectivity = ? WHERE id = ?').run(teacherPublicKey, tls.spkiSha256, opts.direct ? 'direct' : 'lan', classroom.id);
   let httpsPort = 0;
@@ -137,6 +156,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     name: (p) => (p.role === 'teacher' ? opts.hostName ?? 'Host' : classroom.member(p.memberId)?.fullName ?? 'Someone') }) : null;
   resources.nameOf = (h) => chat?.nameOfHandle(h) ?? 'Someone';
   const shares = new Shares(db, classroom, storage, limits, resources);
+  resources.guard = assignments.guard = shares.guard = fence; // async writes re-check at their commit point
   if (chat) {
     shares.audience = (memberId, to) => chat.audience({ role: 'student', memberId }, to);
     shares.senderHandle = (memberId) => chat.handleOf({ role: 'student', memberId });
@@ -164,9 +184,10 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
 
   for (const a of [app, boot] as unknown as FastifyInstance[]) {
     a.removeContentTypeParser('text/plain'); // JSON (and raw upload bytes on HTTPS) only
-    a.addHook('onRequest', async (_req, reply) => {
+    a.addHook('onRequest', async (req, reply) => {
       reply.header('cache-control', 'no-store');
       reply.header('x-content-type-options', 'nosniff');
+      if (req.method !== 'GET' && req.method !== 'HEAD') fence(); // joins, uploads, shares, reviews, leave: authoritative writes
     });
     a.setErrorHandler((err: Error, _req, reply) => {
       if (err instanceof ApiError || err instanceof JoinError || err.name === 'ChatError') {
@@ -554,7 +575,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
           if (!principal || classroom.info().ended) return ws.close(WS_CLOSE.authFailed, 'invalid or expired session');
           sockets.set(ws, principal);
           const memberId = principal.role === 'student' ? principal.memberId : null;
-          send(ws, { t: 'hello', role: principal.role, memberId, status: memberId ? classroom.status(memberId) : null, classroom: classroom.info(), serverTime: Date.now(), capabilities: [...classroom.capabilities(principal)] });
+          send(ws, { t: 'hello', role: principal.role, memberId, status: memberId ? classroom.status(memberId) : null, classroom: { ...classroom.info(), ...(sessionAuthority ? { authority: sessionAuthority() } : {}) }, serverTime: Date.now(), capabilities: [...classroom.capabilities(principal)] });
           if (principal.role === 'student' && classroom.status(principal.memberId) === 'approved' && classroom.can(principal, 'VIEW_MEMBERS')) send(ws, memberRoster(principal));
           if (principal.role === 'teacher') {
             send(ws, hostRoster());
@@ -577,6 +598,9 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
         const needs = MESSAGE_CAPABILITY[msg.t];
         if ((TEACHER_ONLY.has(msg.t) && principal.role !== 'teacher') || (needs && !classroom.can(principal, needs))) return send(ws, { t: 'error', code: 'forbidden', message: 'Not allowed in this CLAN' });
         if (STUDENT_ONLY.has(msg.t) && (principal.role !== 'student' || classroom.status(principal.memberId) !== 'approved')) return send(ws, { t: 'error', code: 'forbidden', message: 'Students only' });
+        if (!UNFENCED.has(msg.t)) {
+          try { fence(); } catch (e) { return send(ws, { t: 'error', code: (e as ApiError).code, message: (e as Error).message }); }
+        }
         const fail = (e: unknown) => {
           if (e instanceof JoinError || e instanceof ApiError || (e as Error).name === 'ChatError') return send(ws, { t: 'error', code: (e as ApiError).code, message: (e as Error).message });
           if (e instanceof Error && e.name === 'ZodError') return send(ws, { t: 'error', code: 'invalid', message: 'Invalid request' });

@@ -63,6 +63,11 @@ const api: DesktopApi = {
     now: inv('sync:now'), unlink: inv('sync:unlink'), conflicts: inv('sync:conflicts'), resolve: inv('sync:resolve'), setSettings: inv('sync:setSettings'),
     onChanged: (cb) => listen('sync:changed', () => cb()), onData: (cb) => listen('sync:data', () => cb()),
   } as DesktopApi['sync'],
+  hosting: {
+    status: inv('hosting:status'), enable: inv('hosting:enable'), request: inv('hosting:request'), decline: inv('hosting:decline'), revoke: inv('hosting:revoke'), handover: inv('hosting:handover'),
+    cancel: inv('hosting:cancel'), resolve: inv('hosting:resolve'), exportCopy: inv('hosting:exportCopy'), acknowledgeSuperseded: inv('hosting:acknowledgeSuperseded'),
+    onProgress: (cb) => listen('hosting:progress', cb), onChanged: (cb) => listen('hosting:changed', cb),
+  } as DesktopApi['hosting'],
   board: {
     list: inv('board:list'), create: inv('board:create'), read: inv('board:read'), edit: inv('board:edit'), rename: inv('board:rename'), remove: inv('board:remove'), export: inv('board:export'),
   } as DesktopApi['board'],

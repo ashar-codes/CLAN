@@ -6,7 +6,7 @@
 // retried send is recognised instead of duplicated.
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { EDIT_WINDOW_MS, REACTIONS, type ChatAttachment, type ChatCursors, type ChatMessageView, type ChatThreadView } from '@classroom/protocol';
+import { EDIT_WINDOW_MS, REACTIONS, tableSection, type CheckpointProvider, type ChatAttachment, type ChatCursors, type ChatMessageView, type ChatThreadView } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { defineEvent, type EventBus } from '../../core/events.ts';
 import type { Permissions, Principal, Scope } from '../../core/permissions.ts';
@@ -56,9 +56,28 @@ const toThread = (r: TRow): Thread => ({ id: r.id, clanId: r.clan_id, kind: r.ki
 export class Chat {
   private db: Db; private bus: EventBus; private perms: Permissions; private now: () => number; private localUser: () => string;
   private clanAvailable: (clanId: string) => boolean;
+  private hostGate: (clanId: string) => string | null = () => null;
+  /** Persistent hosting: a reason this device may not make authoritative writes to a CLAN (paused, handed over, conflicted
+   *  or revoked host), or null. Member-side caching is never gated. */
+  guardHostWrites(f: (clanId: string) => string | null) { this.hostGate = f; }
+  private hostWrite(clanId: string) { const why = this.hostGate(clanId); if (why) throw new ChatError(503, 'host_unavailable', why); }
   constructor(db: Db, bus: EventBus, perms: Permissions, now = () => Date.now(), localUser: () => string = () => '', clanAvailable: (clanId: string) => boolean = () => true) {
     this.db = db; this.bus = bus; this.perms = perms; this.now = now; this.localUser = localUser;
     this.clanAvailable = clanAvailable;
+  }
+
+  /** Persistent hosting: the authoritative conversation of one CLAN (threads, messages, reactions, read positions,
+   *  names). Device-local rows (this device's handle, its Outbox) are never carried; attachments are Files/server bytes. */
+  checkpointProvider(): CheckpointProvider {
+    const IN_THREADS = 'thread_id IN (SELECT id FROM chat_threads WHERE clan_id = ?)';
+    const rows = tableSection(this.db, [
+      { table: 'chat_threads', where: 'clan_id = ?', scope: { clan_id: 'clan' } },
+      { table: 'chat_messages', where: IN_THREADS, scope: { thread_id: { table: 'chat_threads', column: 'id' } } },
+      { table: 'chat_reactions', where: `message_id IN (SELECT id FROM chat_messages WHERE ${IN_THREADS})`, scope: { message_id: { table: 'chat_messages', column: 'id' } } },
+      { table: 'chat_cursors', where: IN_THREADS, scope: { thread_id: { table: 'chat_threads', column: 'id' } } },
+      { table: 'chat_names', where: 'clan_id = ?', scope: { clan_id: 'clan' } },
+    ]);
+    return { section: 'chat', export: (clanId) => ({ rows: rows.export(clanId), files: [] }), validate: (clanId, raw) => { rows.validate(clanId, raw); return []; }, import: (clanId, raw) => rows.import(clanId, raw) };
   }
 
   // ---- threads ----
@@ -122,6 +141,7 @@ export class Chat {
     return tx(this.db, () => {
       const t = this.thread(o.threadId);
       if (!t) throw new ChatError(404, 'not_found', 'No such conversation.');
+      this.hostWrite(t.clanId);
       const prev = this.row(o.id);
       if (prev) {
         if (prev.author !== o.author || prev.thread_id !== o.threadId) throw new ChatError(409, 'conflict', 'That message id is already used.');
@@ -152,6 +172,7 @@ export class Chat {
   edit(id: string, author: string, body: string): ChatMessageView {
     const r = this.row(id);
     if (!r || r.author !== author) throw new ChatError(403, 'forbidden', 'You can only edit your own messages.');
+    this.hostWrite(this.thread(r.thread_id)!.clanId);
     if (r.removed_at) throw new ChatError(409, 'removed', 'That message was removed.');
     if (this.now() - r.created_at > EDIT_WINDOW_MS) throw new ChatError(409, 'too_late', 'Messages can only be edited for 15 minutes.');
     this.db.prepare('UPDATE chat_messages SET body = ?, edited_at = ? WHERE id = ?').run(body, this.now(), id);
@@ -164,6 +185,7 @@ export class Chat {
     const r = this.row(id);
     const t = r && this.thread(r.thread_id);
     if (!r || !t) throw new ChatError(404, 'not_found', 'No such message.');
+    this.hostWrite(t.clanId);
     const role = r.author === by.handle ? 'author' : by.moderator && t.kind === 'group' ? 'host' : null;
     if (!role) throw new ChatError(403, 'forbidden', 'You can only remove your own messages.');
     if (!r.removed_at) tx(this.db, () => {
@@ -178,6 +200,7 @@ export class Chat {
   react(id: string, handle: string, reaction: string, on: boolean): { message: ChatMessageView; changed: boolean } {
     const r = this.row(id);
     if (!r || r.removed_at) throw new ChatError(404, 'not_found', 'No such message.');
+    this.hostWrite(this.thread(r.thread_id)!.clanId);
     if (!(REACTIONS as readonly string[]).includes(reaction)) throw new ChatError(400, 'invalid', 'Unknown reaction.');
     const res = on
       ? this.db.prepare('INSERT OR IGNORE INTO chat_reactions (message_id, author, reaction, created_at) VALUES (?, ?, ?, ?)').run(id, handle, reaction, this.now())

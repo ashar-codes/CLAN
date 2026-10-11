@@ -5,6 +5,7 @@ import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { defineEvent, type EventBus } from '../../core/events.ts';
 import type { MembershipQuery } from '../../core/permissions.ts';
 import type { Identity } from '../../core/identity.ts';
+import type { CheckpointProvider } from '@classroom/protocol';
 import { importClassrooms, classroomSessions } from './classroom-import.ts';
 
 export const CLAN_TYPES = ['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'] as const;
@@ -104,6 +105,52 @@ export class Clans implements MembershipQuery {
       ON CONFLICT DO UPDATE SET status = 'active' WHERE status <> 'active'`).run(clanId, userId, role, joinedAt);
     if (r.changes) this.bus.publish(MemberJoined, 'clans', { clanId, userId, role });
   }
+  /** Destination of a hosting hand-over that has never seen the CLAN: a bare record without membership (invisible in
+   *  lists) so authority/staging rows can reference it. The verified checkpoint import fills in the canonical record. */
+  ensureKnown(o: { id: string; type: ClanType; name: string; expiresAt: number | null; createdBy: string }) {
+    if (this.get(o.id)) return;
+    const type = z.enum(CLAN_TYPES).parse(o.type), name = z.string().trim().min(1).max(80).parse(o.name);
+    this.db.prepare('INSERT INTO clans_clans (id, type, name, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)').run(z.string().uuid().parse(o.id), type, name, o.createdBy, this.now(), type === 'TEMPORARY' ? z.number().int().positive().parse(o.expiresAt) : null);
+  }
+
+  /** Persistent hosting: the canonical CLAN record and its hosted-session links. The destination is the owner's own
+   *  linked device (enforced by the hosting module), so its local user becomes the active owner. */
+  checkpointProvider(): CheckpointProvider {
+    const Row = z.discriminatedUnion('t', [
+      z.object({ t: z.literal('clan'), id: z.string().uuid(), type: z.enum(CLAN_TYPES), name: z.string().trim().min(1).max(80), createdAt: z.number().int(), expiresAt: z.number().int().nullable(), archivedAt: z.number().int().nullable() }).strict(),
+      z.object({ t: z.literal('session'), sessionId: z.string().uuid() }).strict(),
+    ]);
+    const parse = (clanId: string, raw: unknown[]) => {
+      const rows = z.array(Row).max(100_000).parse(raw);
+      const c = rows.filter((r) => r.t === 'clan');
+      if (c.length !== 1 || c[0]!.id !== clanId) throw new Error('Checkpoint must carry exactly this CLAN.');
+      return { clan: c[0] as Extract<z.infer<typeof Row>, { t: 'clan' }>, sessions: rows.filter((r) => r.t === 'session').map((r) => (r as { sessionId: string }).sessionId) };
+    };
+    return {
+      section: 'clans',
+      export: (clanId) => {
+        const c = this.get(clanId);
+        if (!c) throw new Error('Unknown CLAN.');
+        return { rows: [{ t: 'clan', id: c.id, type: c.type, name: c.name, createdAt: c.createdAt, expiresAt: c.expiresAt, archivedAt: c.archivedAt }, ...this.sessionsOf(clanId).map((sessionId) => ({ t: 'session', sessionId }))], files: [] };
+      },
+      validate: (clanId, raw) => { parse(clanId, raw); return []; },
+      import: (clanId, raw, ctx) => {
+        const { clan, sessions } = parse(clanId, raw);
+        const have = this.get(clanId);
+        if (have && have.type !== clan.type) throw new Error('CLAN type differs from the checkpoint.');
+        if (!have) this.db.prepare('INSERT INTO clans_clans (id, type, name, created_by, created_at, expires_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(clan.id, clan.type, clan.name, ctx.me, clan.createdAt, clan.expiresAt, clan.archivedAt);
+        else this.db.prepare('UPDATE clans_clans SET name = ?, expires_at = ?, archived_at = ? WHERE id = ?').run(clan.name, clan.expiresAt, clan.archivedAt, clanId);
+        this.db.prepare(`INSERT INTO clans_memberships (clan_id, user_id, role, status, joined_at) VALUES (?, ?, 'owner', 'active', ?)
+          ON CONFLICT DO UPDATE SET role = 'owner', status = 'active'`).run(clanId, ctx.me, this.now());
+        for (const s of sessions) {
+          const at = this.clanOfSession(s);
+          if (at && at !== clanId) throw new Error('A checkpoint session belongs to another CLAN here.');
+          if (!at) this.db.prepare('INSERT INTO clans_classroom_sessions (session_id, clan_id) VALUES (?, ?)').run(s, clanId);
+        }
+      },
+    };
+  }
+
   setStatus(clanId: string, userId: string, status: 'left' | 'removed') {
     this.db.prepare('UPDATE clans_memberships SET status = ? WHERE clan_id = ? AND user_id = ?').run(status, clanId, userId);
   }
@@ -157,7 +204,12 @@ export class Clans implements MembershipQuery {
   archive(id: string) { this.db.prepare('UPDATE clans_clans SET archived_at = ? WHERE id = ? AND archived_at IS NULL').run(this.now(), id); }
 
   /** Internal lifecycle controller: commit intent before any filesystem or network work. Not an erasure receipt. */
+  private cleanupGuard: (clanId: string) => string | null = () => null;
+  /** Persistent hosting: a reason this device's copy must not be removed (e.g. it is the live host of another device's CLAN). */
+  setCleanupGuard(f: (clanId: string) => string | null) { this.cleanupGuard = f; }
   requestCleanup(clanId: string, userId: string, kind: 'remove' | 'delete') {
+    const guarded = this.cleanupGuard(clanId);
+    if (guarded) throw new Error(guarded);
     const member = this.members(clanId).find((m) => m.userId === userId);
     if (!member || !this.get(clanId)) throw new Error('Not allowed.');
     if (kind !== 'remove' && kind !== 'delete') throw new Error('Invalid cleanup action.');

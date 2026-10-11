@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ClanType, JoinPolicy, keyFingerprint, LEGACY_STORAGE_NAME, PRODUCT_NAME, StudentProfile, type Receipt } from '@classroom/protocol';
 import { leaveClanSession, pairAndJoin, reconnect, type Candidate } from '@classroom/client';
-import { pinnedTransport } from '@classroom/client/node';
+import { newEd25519, nodeSigner, pinnedTransport } from '@classroom/client/node';
 import { backupDb, logError, openDbSafely, purgeStoppedSessions } from '@classroom/server';
 import { Keystore } from './keystore.ts';
 import { Trust } from './trust.ts';
@@ -20,6 +20,7 @@ import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
 import { registerStudy } from './study.ts';
 import { registerSync } from './sync.ts';
+import { registerHosting } from './hosting.ts';
 import { registerData } from './data.ts';
 import { registerFeedback } from './feedback.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
@@ -199,6 +200,7 @@ function registerIpc() {
     if (server) await server.close();
     await direct.stop();
     // Every hosted session belongs to a canonical CLAN: re-host keeps it; classrooms reuse their course's CLAN; others are created.
+    await clan.hosting.ready(); // a database restored from an older backup never resumes hosting
     let title = a.title, type = a.type, clanId: string | null;
     if (a.clanId) {
       const c = clan.clans.get(a.clanId);
@@ -224,7 +226,7 @@ function registerIpc() {
     const hostName = loadProfile().fullName || (named && named !== 'Me' ? named : undefined);
     try {
       server = await startClassroomServer({ title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: a.connectivity === 'direct' ? 'direct' : 'lan', identity: await trust.teacherIdentity(),
-        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat, whiteboard: clan.whiteboard,
+        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, authority: clanId ? hostingAuthority(clanId) : undefined, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat, whiteboard: clan.whiteboard,
         direct: directNet ? { ssid: directNet.ssid, passphrase: directNet.passphrase, auth: 'WPA2', host: directNet.hostAddress, expiresAt: expiresAt ?? Date.now() + 12 * 3600_000 } : undefined });
       if (directNet) await direct.publish(server);
       chatHooks.hosted(server);
@@ -247,6 +249,12 @@ function registerIpc() {
     return { url: server.url, code: server.classroom.code, teacherToken: server.classroom.teacherToken, title, host, iface,
       direct: directNet ? { ssid: directNet.ssid, band: directNet.band, strategy: directNet.strategy, vpn: directNet.vpn } : null };
   });
+  /** Persistent-hosting CLANs fence every host write on this device's current epoch; legacy CLANs return undefined. */
+  const hostingAuthority = (clanId: string) => {
+    const signer = nodeSigner(keystore.get('sync-device-ed25519', () => newEd25519().privatePkcs8)); // same device key as personal sync
+    if (!clan.hosting.chainOf(clanId)) return undefined;
+    return { assertWritable: () => void clan.hosting.assertWritable(clanId, signer.publicKey), chain: () => clan.hosting.chainOf(clanId)!, sign: (b: Uint8Array) => signer.sign(b) };
+  };
   ipcMain.handle('teacher:stop', async () => {
     const ended = server?.classroom.clan;
     await server?.close(); server = null; clearTimeout(expiryTimer);
@@ -416,7 +424,9 @@ app.whenReady().then(() => {
   registerTapes(clan);
   registerData(clan, backupsDir(), () => backupDb(db(), backupsDir(), { keep: 3 }));
   registerFeedback(clan, keystore);
-  void registerSync(clan, keystore, () => loadProfile().deviceName).then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
+  const syncReady = registerSync(clan, keystore, () => loadProfile().deviceName);
+  syncReady.then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
+  registerHosting(clan, { sync: syncReady, liveClanId: () => (server && !server.classroom.info().ended ? server.classroom.clan.id ?? null : null) });
   // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).
   const backup = () => { try { backupDb(db(), backupsDir(), { keep: 3 }); } catch (e) { logError('backup', e); } };
   setTimeout(backup, 5_000).unref(); setInterval(backup, 24 * 3600_000).unref();

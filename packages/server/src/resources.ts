@@ -31,6 +31,8 @@ const view = (r: Row, names?: (handle: string) => string): ResourceView => ({
  * 'direct' (resourceId, audience handles, sender handle) for files sent to specific CLANmates.
  */
 export class Resources extends EventEmitter {
+  /** Persistent hosting: throws unless this device still holds the CLAN's epoch (server.ts sets it; re-checked at commit). */
+  guard: () => void = () => {};
   private db: Db; private classroom: Classroom; private storage: Storage; private limits: Limits;
   private active = new Map<string, number>(); // memberId|teacher -> open downloads
   private activeTotal = 0;
@@ -52,6 +54,7 @@ export class Resources extends EventEmitter {
    * `audience` limits it to those chat handles (sent to one CLANmate); identical bytes already stored are linked, not copied twice.
    */
   async importFile(src: string, displayName = basename(src), o: { audience?: string[] | null; sharedBy?: string | null; owner?: string; validate?: () => void; expectedSha256?: string } = {}): Promise<ResourceView> {
+    this.guard(); // also the host's own in-process adds (no HTTP fence on that path)
     const st = await stat(src);
     if (!st.isFile()) throw new ApiError(400, 'not_a_file', 'Only regular files can be added.');
     const count = (this.db.prepare("SELECT count(*) n FROM resources WHERE session_id = ? AND status != 'removed'").get(this.classroom.id) as { n: number }).n;
@@ -125,6 +128,7 @@ export class Resources extends EventEmitter {
       teacherKeyFingerprint: keyFingerprint(this.signer.publicKey),
     };
     const manifest: SignedManifest = { payload, alg: 'Ed25519', signature: this.signer.sign(canonicalBytes(payload)), teacherPublicKey: this.signer.publicKey };
+    this.guard(); // hosting may have paused while the file was being copied and hashed
     this.db.prepare("UPDATE resources SET status = 'ready', sha256 = ?, size = ?, chunk_size = ?, manifest = ? WHERE id = ?").run(sha256, done, chunkSize, JSON.stringify(manifest), id);
     this.emit('progress', id, done, done);
     this.classroom.log('resource.added', null, { resourceId: id, name: safe, size: done });

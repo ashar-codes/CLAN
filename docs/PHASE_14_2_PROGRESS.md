@@ -11,7 +11,8 @@ tag `clan-beta-v0.1.0-rc1` + one docs commit). Status values: PASS (executed), F
 | P0-4 | File preview / open / save-export (SAF, iOS Files) | IMPLEMENTED; desktop + Android emulator PASS; Windows/iOS native NOT TESTED | `7d16b04` | 6 desktop E2Es + 3 preview security units PASS; native Android passive preview, SAF export hash and viewer chooser PASS |
 | P0-5 | CLAN archive / remove from device / leave / delete | IMPLEMENTED; desktop PASS; native cleanup completion pending | see git log | Core/security units, desktop removal/delete E2Es PASS; native archive/leave PASS; cleanup confirmation defect fixed, rerun interrupted by low storage |
 | P1-6 | In-app join alerts + Raise Hand | IMPLEMENTED; server + desktop PASS; native execution pending | see git log | 3 security/transport tests + desktop E2E PASS; native script prepared, blocked by storage |
-| P1-7…10 | Persistent mobile CLANs, Android hosting, iOS parity, installers | DESIGN/PREFLIGHT; implementation incomplete | see git log | Hosting design/runtime investigation; iOS prebuild/Pods PASS, compile pending storage; no candidates |
+| P1-7 | Persistent mobile CLANs: signed hosting authority / fencing layer | IMPLEMENTED (domain only, not wired/exposed) | see git log | 6 deterministic authority tests + 131 clan units PASS (Linux cloud); replication/checkpoint, host gating, UI NOT STARTED |
+| P1-8…10 | Android hosting, iOS parity, installers | DESIGN/PREFLIGHT; implementation incomplete | see git log | Hosting design/runtime investigation; iOS prebuild/Pods PASS, compile pending storage; no candidates |
 
 ## P0-1 root cause and fix
 Two independent source defects, both consistent with "Windows host is discovered but nobody can connect" and
@@ -263,3 +264,173 @@ Latest source differs from installed test APK by final storage-error handling; r
 Node mobile published runtime is 18.20.4; open Node24/SQLite PRs are possible candidates but not audited/installed.
 See hosting design for primary source URLs and required safety/build evidence. Persistent delegation/native hosting remain
 unfinished; do not report durable availability, final software gates or Phase14.2 completion. No installer distribution.
+
+## Cloud continuation (Linux container, 2026-10-11)
+
+Resumed at checkpoint `4b12b2f` (tip of `phase-14.2`, no later commits) on cloud branch `claude/laughing-clarke-yql2cy`.
+Environment: Linux x64, Node 24.21.0 (official tarball, SHA-256 verified), pnpm 11.20.0, `pnpm install --frozen-lockfile`
+with `ELECTRON_SKIP_BINARY_DOWNLOAD=1`. No Android SDK/emulator, Windows, Xcode or physical devices: none of those
+gates can be run or claimed from this environment. No signing material accessed.
+
+WIP checkpoint `4b12b2f` (test temp-dir registration in `packages/clan/test/helpers.ts`; SIGINT/SIGTERM cleanup in
+`tools/sim/class-peer.ts` and `tools/sim/sync-peer.ts`): typecheck PASS and the clan suite uses the shared teardown
+registry. The sim-peer signal handlers are typechecked only; they are exercised by the Mac/Android harnesses, NOT RUN here.
+
+Baseline full serial unit run (`vitest run --no-file-parallelism`): **351 PASS, 14 skipped, 1 FAIL** (44 files). The
+failure was genuine and pre-existing since `bd8f545`: the architecture test forbids security code branching on the
+`CLASSROOM` type name. Fixed by `hasMemberFilePolicy()` beside the capability table (behaviour unchanged; 98 sharing/
+security/mobile units + `clan.test.ts` 16 PASS). Note: that baseline run overlapped with new hosting files being written;
+the final full run below is the authoritative result.
+
+P1-7 authority layer: see [hosting design › Authority layer implementation](PHASE_14_2_HOSTING_DESIGN.md). Not wired
+to host write paths, pairing or UI; nothing advertises durable handoff.
+
+Final cloud gate on this branch: typecheck PASS; full serial unit **358 PASS / 14 skipped / 0 FAIL**, 42 files passed +
+3 skipped, 277.82 s. Skips are environment gates (no usable LAN interface for mDNS discovery, no local SFU binary for
+screen sharing), not passes. Desktop Electron E2E (`pnpm test:e2e`) and all Android/iOS/Windows suites NOT RUN here.
+
+### P1-7 checkpoint B: CLAN checkpoints and self-verifying staging (cloud)
+
+Frozen hosts build one durable, content-addressed checkpoint per epoch (`prepareCheckpoint`): each registered
+section is canonical JSON stored as a SHA-256 blob, every file is re-hashed at the source, and the header (sections +
+file list) hash is what the destination acknowledges; `relinquish` now refuses an acknowledgment of any other
+checkpoint, and `unfreeze` discards it. Sections: `clans` (canonical record + session links), `chat` (threads,
+messages, reactions, read positions, names; never this device's handle/Outbox), `whiteboard` (CLAN boards, op log,
+snapshots), `files` (CLAN file refs + bytes) and `server` (ended sessions without join codes/host keys, members with
+status but never tokens, trusted devices of the CLAN scope, resource metadata + bytes without old signed manifests).
+Not carried: presence/events/transfers, assignments/submissions, pending share reviews (stay on the previous host).
+Destinations must be the owner's own devices (owner or linked-device anchor). `completeStaging` verifies everything
+itself: blob sizes/hashes (corrupt blobs deleted for re-download), canonical section bytes and row counts, exactly
+the registered sections, strict per-table column/scope validation, and file list equality. Activation re-verifies,
+materializes bytes, then imports all sections inside the transaction that records the new epoch (a failed import
+leaves the device standby). PASS: typecheck; `packages/clan/test` 134/134 incl. 9 hosting cases (Linux).
+
+### P1-7 checkpoint C: resumable hand-over transport (cloud)
+
+The personal-sync HTTPS server (pinned per-device certificate, every request signed by a linked unrevoked device key)
+gains `/host/offer`, `/host/blob/:clan/:sha` (byte ranges) and `/host/relinquish`, enabled only when a
+`ReplicationHost` is supplied. `HostAuthority.replicationSource` re-checks the owner's delegation to the caller's key
+on every call, serves blobs only of the prepared checkpoint and only to the device it was offered to, and re-delivers
+only a transition already signed for that caller. `replicateClan` (`@classroom/client/sync`) runs the destination:
+offer → anchor/record CLAN (caller) → stage → ranged resumable download (`.part`) → self-verification (one retry of a
+corrupt blob) → acknowledge → transition → activation; re-running after any interruption resumes. PASS: real-HTTPS
+hand-over test (unprepared refusal, wrong-device delegation, unoffered blob 404, crash during verification, mid-file
+resume, single writer, replay after success); `packages/clan/test` + `server/test/clan.test.ts` 151/151 (Linux).
+
+### P1-7 checkpoint D: host-epoch fencing and owner-key anchoring at pairing (cloud)
+
+`startClassroomServer({ authority })`: the session refuses to start unless this device holds the CLAN's current
+epoch; every non-GET HTTPS/bootstrap request (pairing, join, reconnect, uploads, shares, reviews, leave, peer reports)
+and every WebSocket message except ephemeral relays (`wb.sync`, `wb.cursor`, `chat.typing`) and liveness re-checks
+it and fails with `503 host_unavailable` / `error host_unavailable`. Reads continue. Legacy CLANs (no authority record)
+are unchanged. The owner-signed genesis is sent only in `hello` inside the authenticated session; desktop
+(`clan:joined`) and phone (`recordJoined`) anchor it (first binding wins; a different owner is refused). Desktop wiring:
+hosted sessions pass `authority` when a chain exists; the device-link server serves hand-overs with the sync device key
+as hosting key; the host-server checkpoint section is registered. No hand-over UI yet. PASS: typecheck;
+`server/test/hosting-fence.test.ts` 3/3; all server suites + hosting suites 202 PASS / 13 environment skips (Linux).
+
+### P1-7 checkpoint E: phone-initiated push and revocation delivery (cloud)
+
+Phones accept no connections, so the owner's phone pushes: the computer's device-link server exposes
+`/host/push/{begin,blob,complete,activate,revoke}` (`ReplicationSink`). Begin requires the caller to be the verified
+current host of an owner-anchored chain (owner key must be a linked device) and a delegation naming this computer;
+blob/complete only continue that pusher's staging; blob chunks (≤8 MB, base64url JSON for the phone's native pinned
+transport) append at the destination-reported offset; complete runs full self-verification and returns the signed ack;
+activate accepts a verified chain (becoming host still needs local verified staging); revoke stores owner-signed
+revocations. Portable `pushClan` (`@classroom/client`) resumes from reported offsets and, after a durable
+relinquish, only re-delivers the signed transition. Desktop registers the sink. Phone UI/native wiring NOT STARTED.
+PASS: real-HTTPS push test (non-host refused, suspended upload resumes at offset 1 MB → only remaining chunks resent,
+lost activation answer re-delivered, revocation stops writes, forged revocation refused).
+
+### P1-7 checkpoint F: members verify the session's host (cloud)
+
+`hello.classroom.authority` is now `{ chain, proof }`: the epoch host's device key signs
+`{clan, epoch, sessionId, session teacherPublicKey}` (the OPAQUE-bound session key). `HostAuthority.verifySession`
+(desktop `clan:joined`, phone `recordJoined`) anchors the owner on first authenticated contact, learns the chain
+(another owner, a fork or an epoch older than one already known are refused) and verifies the proof. A relinquished
+or forked host therefore cannot present itself as the CLAN's host to members who know better. Also: a linked device can
+no longer anchor itself as owner of a CLAN this device already takes part in without an anchor (legacy CLANs).
+Member-facing warning UI for a refused session is NOT STARTED (desktop rejects the IPC; phone ignores). PASS: typecheck;
+hosting units 11 + session verification 1, fence 3 (Linux).
+
+Cloud gate after checkpoints A–F: typecheck PASS; full serial unit **367 PASS / 14 skipped / 0 FAIL** (44 files + 3
+skipped, 292.85 s; skips = no LAN mDNS / no SFU binary). Desktop Electron E2E, Android emulator, iOS, Windows and
+physical devices NOT RUN. Android runtime re-check and remaining hosting work: see the hosting design doc.
+
+### P1-7 checkpoint G: complete CLAN data and explicit preflight (cloud)
+
+Audit of every table (CLAN core + host server). The `server` section now also carries presence and timeline logs,
+transfer states, assignments, upload attempts, submissions with their bytes and teacher-signed receipts, share uploads
+including quarantined bytes awaiting review (`tmp/<id>.part`) and presentation history. `SERVER_TABLES`/`CLAN_TABLES`
+classify every table (carried, derived, device-local, personal-sync, hosting control, or excluded with reason — only
+legacy UUID `known_devices`, by the existing migration-3 security decision); a coverage test fails on any new
+unclassified table. `preflight` reports what cannot be carried: blocking (`live_session`, `missing_files`,
+`unsupported_data` CLAN-scoped refs) or acknowledgeable (`interrupted_uploads`, `interrupted_imports`, carried as
+recorded); `prepareCheckpoint` refuses unless every non-blocking issue is explicitly acknowledged. Activation rebuilds
+derived classroom links. Pre-existing bug fixed: the host's startup sweep deleted quarantined share bytes awaiting
+review on every restart (regression test fails without the fix). PASS: coverage, real hosted Classroom hand-over
+(assignments, submission bytes + receipt, pending review bytes surviving the destination's own restart, logs, chat,
+old host refuses to host again), preflight block/acknowledge test; clan suite + fence tests green (Linux).
+
+### P1-7 checkpoint H: every write path fenced, including local edits and commit points (cloud)
+
+Local module writes to CLAN-owned data (chat post/edit/remove/react, CLAN board ops and member-edit setting, files
+added/shared into a CLAN) consult `HostAuthority.localWriteBlocked`: refused once this device paused, handed over,
+conflicts or lost its delegation; personal data and member caches (standby devices, `ingest`) are never gated. Async
+host-server writes re-check the fence synchronously at their commit point (submission insert and before moving its
+bytes, resource `ready`, share quarantine, the host's own in-process file add), closing the time-of-check/time-of-use
+gap: freeze is synchronous, so no write can commit between the check and the database statement. PASS: TOCTOU test
+(submission streaming when hosting pauses is not committed — fails without the guard), local-gate test; clan + server
+suites 335 PASS / 13 environment skips (Linux).
+
+### P1-7 checkpoint I: recovery primitives (cloud)
+
+Conflicts now record the fork epoch, the previous state and the competing chain. Only an owner-signed
+`clan-host-resolution` (hosting migration 4) resolves them — never time, chain length or arrival order: if it chooses
+this device's record the previous state returns and the other branch is refused from then on; if it chooses the other
+branch this device adopts it as a standby, its own copy stays untouched and is marked superseded, and no hand-over may
+replace it until the owner acknowledges (after exporting what they want). Resolutions reach linked devices over
+`/host/push/resolve` and members inside the host's authenticated `hello`. `ensureSpace` refuses a destination
+without room for remaining blobs + activation copies + 256 MB reserve before any byte moves (pull and push).
+`handoverStatus` reports role, checkpoint, staging progress, signed transition, conflict and superseded copy for the
+screens. PASS: conflict resolution (forged refused, both outcomes, data retained), storage refusal; clan + fence suites.
+
+### P1-7 checkpoint J: desktop hand-over screens (cloud, real Electron E2E)
+
+CLAN room › Hosting panel (`HostingPanel.tsx`, IPC `apps/desktop/src/main/hosting.ts`): owner opt-in "Allow moving
+hosting" (signs epoch 0 with this computer's device key), owner request "Move hosting to <linked computer>" (sent to
+the current host over the device link when that is another computer), host confirmation listing blocking issues and
+checkbox acknowledgments, an explicit pause confirmation, progress, Retry (resumes; never silently resumes hosting)
+and Cancel (only before the transition is signed), incoming-transfer progress on the destination, conflict alert with
+owner-only "Keep …" choices (delivered to reachable linked computers, unreached ones listed) and export of this device's
+copy, retained-copy notice with export/acknowledge, host-unavailable warnings for members (desktop member screen) and
+the phone hosting limitation text. Deleting a CLAN copy is refused while this computer hosts it for another owner device
+or while records conflict. Development-only `CLAN_TEST_LOOPBACK=1` (unpackaged) lets two local instances link.
+
+Linux E2E environment (first time in cloud): Electron 44.5.1 binary via its checksum-verifying installer, Xvfb,
+unprivileged user (Chromium refuses root without `--no-sandbox`; the sandbox was NOT disabled), proxy variables
+cleared for local LAN traffic, `CLASSROOM_DEV_INSECURE_KEYSTORE=1` (no OS keychain in the container; disposable
+profiles only). PASS: `e2e/hosting.test.ts` (two app instances: link, allow, ask, confirm pause, hand over, destination
+hosts, source refuses "Host again" with the fence reason) and the existing `e2e/lifecycle.test.ts`.
+
+### P1-7 checkpoint K: phone owner → linked computer (cloud; native NOT TESTED)
+
+Phone `Me › Hosting` (`apps/mobile/src/screens/Hosting.tsx`, `src/sync/hosting.ts`): create a CLAN this phone owns
+(epoch 0 signed by the phone's keystore-held sync key) and hand it to a chosen linked computer with a confirmation,
+progress and retry; finish an interrupted hand-over; ask the current host computer to move it; stop a computer from
+hosting (owner-signed revocation pushed to linked computers, unreached ones listed). Transport: `callComputer` over
+the existing native pinned transport with the phone's signed sync headers; blobs read with expo-file-system at offsets.
+The phone states plainly that it does not host and a CLAN is available only while its host computer is on
+(`PHONE_HOSTING_BLOCKED`). The `server` checkpoint section is optional (phones have no host-server tables); all other
+sections stay mandatory. Desktop resolves conflicts (the phone shows the alert and points there). PASS: typecheck
+(desktop + mobile), push test now from a phone-shaped device without host-server storage. Native Android/iOS execution
+NOT TESTED (no emulator in this container).
+
+### Cloud gate after checkpoints G–K (+ rollback fence)
+
+typecheck PASS (desktop + mobile + packages); full serial unit **377 PASS / 14 skipped / 0 FAIL** (45 files + 3
+skipped, 299 s; skips = no LAN mDNS / no SFU binary). Desktop Electron E2E on Linux (Xvfb, unprivileged user,
+dev-insecure keystore, disposable profiles): **25 PASS / 6 FAIL / 2 skipped**; the same 6 fail identically on the
+untouched baseline `4b12b2f` in this container (screen sharing ×3: no SFU binary; Astra world/canvas: Linux software
+GPU; board-tape: duplicate "Leave" locator on Linux), so they are environment-specific, not regressions — they passed on
+macOS before. New `e2e/hosting.test.ts` PASS. Android emulator, iOS, Windows and physical devices NOT RUN.

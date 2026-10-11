@@ -21,7 +21,20 @@ export type SyncHost = {
   linkHello(raw: unknown, serverSpki: string): unknown;
   linkStatus(sessionId: string, nonceB: string): unknown;
 };
-export type SyncServerOptions = { host: SyncHost; tls: { certPem: string; keyPem: string; spkiSha256: string }; objectPath(sha256: string): string | null; port?: number; bind?: string; onChange?(): void };
+/**
+ * Persistent CLAN hosting hand-over, source side (structural; implemented by @clan/core). Callers are already
+ * authenticated linked devices; every call is additionally authorized by an owner-signed delegation to the caller's key.
+ */
+export type ReplicationHost = {
+  offer(callerKey: string, body: unknown): unknown;
+  blob(callerKey: string, clanId: string, sha256: string): string | null;
+  relinquish(callerKey: string, body: unknown): unknown;
+};
+/** Destination side when the current host pushes (a phone accepts no connections). Same authentication; the
+ *  implementation requires the caller to be the CLAN's verified current host and the delegation to name this device. */
+export type ReplicationSink = { [K in 'begin' | 'blob' | 'complete' | 'activate' | 'revoke' | 'resolve' | 'request']: (callerKey: string, body: unknown) => unknown };
+export type SyncServerOptions = { host: SyncHost; tls: { certPem: string; keyPem: string; spkiSha256: string }; objectPath(sha256: string): string | null; port?: number; bind?: string; onChange?(): void;
+  replication?: ReplicationHost; sink?: ReplicationSink; deviceKey?(fp: string): string | null };
 export const SYNC_SERVICE = 'clansync';
 
 export async function startSyncServer(o: SyncServerOptions) {
@@ -30,7 +43,7 @@ export async function startSyncServer(o: SyncServerOptions) {
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => { try { done(null, { raw: body as string, json: JSON.parse(body as string) }); } catch { done(Object.assign(new Error('Malformed JSON.'), { statusCode: 400 })); } });
   const fail = (reply: FastifyReply, e: unknown) => {
     const code = (e as { code?: string }).code;
-    const status = code === 'revoked' ? 403 : code === 'unknown_device' || code === 'bad_auth' || code === 'replay' || code === 'stale' ? 401 : code === 'bad_code' || code === 'no_link' ? 400 : e instanceof z.ZodError ? 400 : 500;
+    const status = ['revoked', 'forbidden', 'invalid_delegation', 'owner_mismatch', 'unanchored'].includes(code ?? '') ? 403 : code === 'insufficient_storage' ? 507 : ['bad_state', 'busy', 'already_relinquished', 'invalid_ack', 'not_authoritative', 'conflict', 'no_authority', 'stale', 'incomplete', 'corrupt', 'not_staged', 'superseded', 'incomplete_data', 'needs_acknowledgment'].includes(code ?? '') ? 409 : code === 'unknown_device' || code === 'bad_auth' || code === 'replay' || code === 'stale' ? 401 : code === 'bad_code' || code === 'no_link' || code === 'invalid' ? 400 : e instanceof z.ZodError ? 400 : 500;
     return reply.code(status).send({ error: code ?? 'error', message: status === 500 ? 'Sync failed on the other device.' : (e as Error).message });
   };
   const authed = (req: FastifyRequest, raw: string) => o.host.verifyRequest({ auth: req.headers['x-clan-sync'] as string | undefined, sig: req.headers['x-clan-sync-sig'] as string | undefined }, req.method, req.url, o.host.bodySha(raw));
@@ -77,6 +90,38 @@ export async function startSyncServer(o: SyncServerOptions) {
       reply.header('content-length', size); return reply.send(createReadStream(path));
     } catch (e) { return fail(reply, e); }
   });
+
+  // ---- persistent hosting hand-over (signed by a linked device, authorized per CLAN by the owner's delegation) ----
+  const sendFile = async (req: FastifyRequest, reply: FastifyReply, path: string) => {
+    const size = (await stat(path)).size;
+    const range = parseRange(req.headers.range, size);
+    if (range === 'invalid') return reply.code(416).header('content-range', `bytes */${size}`).send();
+    reply.header('accept-ranges', 'bytes').header('content-type', 'application/octet-stream');
+    if (range) { reply.code(206).header('content-range', `bytes ${range.start}-${range.end}/${size}`).header('content-length', range.end - range.start + 1); return reply.send(createReadStream(path, range)); }
+    reply.header('content-length', size); return reply.send(createReadStream(path));
+  };
+  const callerKey = (fp: string) => { const k = o.deviceKey?.(fp); if (!k) throw Object.assign(new Error('Unknown device key.'), { code: 'unknown_device' }); return k; };
+  if (o.replication) {
+    const r = o.replication;
+    app.post('/host/offer', async (req, reply) => { try { const b = body(req); return await r.offer(callerKey(authed(req, b.raw)), b.json); } catch (e) { return fail(reply, e); } });
+    app.post('/host/relinquish', async (req, reply) => { try { const b = body(req); return await r.relinquish(callerKey(authed(req, b.raw)), b.json); } catch (e) { return fail(reply, e); } });
+    app.get('/host/blob/:clanId/:sha', async (req, reply) => {
+      try {
+        const key = callerKey(authed(req, ''));
+        const p = z.object({ clanId: z.string().uuid(), sha: z.string().regex(/^[0-9a-f]{64}$/) }).parse(req.params);
+        const path = r.blob(key, p.clanId, p.sha);
+        if (!path) return reply.code(404).send({ error: 'not_found' });
+        return await sendFile(req, reply, path);
+      } catch (e) { return fail(reply, e); }
+    });
+  }
+
+  if (o.sink) {
+    const k = o.sink;
+    for (const step of ['begin', 'blob', 'complete', 'activate', 'revoke', 'resolve', 'request'] as const) {
+      app.post(`/host/push/${step}`, async (req, reply) => { try { const b = body(req); return await k[step](callerKey(authed(req, b.raw)), b.json); } catch (e) { return fail(reply, e); } });
+    }
+  }
 
   const port = await app.listen({ port: o.port ?? 0, host: o.bind ?? '0.0.0.0' }).then(() => (app.server.address() as { port: number }).port);
   return { port, close: () => app.close() };

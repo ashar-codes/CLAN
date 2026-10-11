@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { existsSync } from 'node:fs';
 import { openDb, startClassroomServer, type RunningServer } from '@classroom/server';
 import type { ShareUploadStatus } from '@classroom/protocol';
 import { device, secureJoin, socket, tmp, trustServer, trFor } from '../../server/test/helpers.ts';
@@ -19,7 +20,7 @@ async function setup(type: 'CLASSROOM' | 'STUDY_GROUP' = 'CLASSROOM') {
   const bytes = Buffer.from('verified classroom document');
   const req = { fileName: 'notes.txt', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), to: 'clan', idempotencyKey: randomUUID() };
   const upload = async () => { const u = await s.shares.init(a.memberId, req); return s.shares.append(a.memberId, u.uploadId, 0, Readable.from(bytes)); };
-  return { s, a, bytes, req, upload };
+  return { s, a, bytes, req, upload, db, storageDir, clanId, type };
 }
 describe('Classroom student sharing policy', () => {
   it('defaults to teacher-only; a student cannot grant permission through WSS', async () => {
@@ -50,6 +51,17 @@ describe('Classroom student sharing policy', () => {
     expect(repeated.resource?.id).toBe(approved.resource?.id);
     expect((await s.shares.status(a.memberId, u.uploadId)).approval).toBe('approved');
     expect(s.resources.listForTeacher()).toHaveLength(1);
+  });
+  it('quarantined bytes awaiting review survive a host restart (startup sweep keeps them)', async () => {
+    const { s, upload, db, storageDir, clanId, type } = await setup(); s.classroom.setFilePolicy('approval');
+    const u = await upload();
+    const part = s.storage.tmp(u.uploadId);
+    expect(existsSync(part)).toBe(true);
+    await s.close(); servers.splice(servers.indexOf(s), 1);
+    const again = await startClassroomServer({ title: 'Sharing', host: '127.0.0.1', db, storageDir, clan: { type, id: clanId } });
+    servers.push(again);
+    expect(existsSync(part)).toBe(true);
+    expect(db.prepare('SELECT approval FROM share_uploads WHERE id = ?').get(u.uploadId)).toEqual({ approval: 'pending' });
   });
   it('rechecks removal and policy changes before publishing; rejected bytes stay unpublished', async () => {
     const { s, a, upload } = await setup(); s.classroom.setFilePolicy('approval');

@@ -30,6 +30,8 @@ const DEFAULTS: Record<ClanType, Record<ClanRole, readonly ClanCapability[]>> = 
   TEMPORARY: { host: HOST, member: ['SEND_MESSAGE', 'SEND_FILES', 'PRESENT', 'REQUEST_TO_PRESENT', 'VIEW_MEMBERS', ...BOARD] },
 };
 export const capabilitiesFor = (type: ClanType, role: ClanRole): readonly ClanCapability[] => DEFAULTS[type][role];
+/** Types whose host chooses who may share files (everyone / approval / host only). Others keep their member defaults. */
+export const hasMemberFilePolicy = (type: ClanType) => type === 'CLASSROOM';
 
 /** Which capability each host-side control message needs (enforced by the host server). */
 export const MESSAGE_CAPABILITY: Partial<Record<ClientMessage['t'], ClanCapability>> = {

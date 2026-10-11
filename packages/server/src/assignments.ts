@@ -30,6 +30,8 @@ export class Assignments extends EventEmitter {
   private db: Db; private classroom: Classroom; private storage: Storage; private limits: Limits;
   private now: () => number;
   private writing = new Map<string, string>(); // uploadId -> memberId while a PUT is streaming
+  /** Persistent hosting: throws unless this device still holds the CLAN's epoch (server.ts sets it; re-checked at commit). */
+  guard: () => void = () => {};
   private signer: ReceiptSigner;
 
   constructor(db: Db, classroom: Classroom, storage: Storage, limits: Limits, signer: ReceiptSigner, now = Date.now) {
@@ -169,6 +171,7 @@ export class Assignments extends EventEmitter {
     const safe = safeFileName(u.file_name);
     const dir = this.storage.submissionDir(this.classroom.id, id);
     const dest = this.storage.submissionFile(this.classroom.id, id, safe);
+    this.guard();
     await mkdir(dir, { recursive: true });
     await rename(part, dest);
     const at = this.now();
@@ -176,6 +179,7 @@ export class Assignments extends EventEmitter {
     this.db.exec('BEGIN');
     try {
       const version = (this.db.prepare('SELECT coalesce(max(version), 0) + 1 v FROM submissions WHERE assignment_id = ? AND member_id = ?').get(a.id, u.member_id) as { v: number }).v;
+      this.guard(); // re-checked at the commit point: hosting may have paused while the bytes arrived
       this.db.prepare('INSERT INTO submissions (id, session_id, assignment_id, member_id, device_id, upload_id, version, file_name, safe_name, stored_path, size, sha256, submitted_at, late) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(id, this.classroom.id, a.id, u.member_id, member.deviceId, u.id, version, u.file_name.replace(/[\u0000-\u001f\u007f]/g, ''), safe, this.storage.rel(dest), size, sha, at, late);
       this.db.prepare("UPDATE uploads SET state = 'complete', submission_id = ?, updated_at = ? WHERE id = ?").run(id, at, u.id);
@@ -255,6 +259,8 @@ export class Assignments extends EventEmitter {
   /** Startup: in-flight uploads from previous runs can't continue (their sessions ended). */
   async sweep() {
     this.db.prepare("UPDATE uploads SET state = 'failed', error = 'Interrupted: the class ended before the upload finished.' WHERE state = 'uploading' AND session_id != ?").run(this.classroom.id);
-    await this.storage.sweepTmp(() => false);
+    // Quarantined shares awaiting host review are durable (they survive the session and restarts); keep their bytes.
+    const pending = new Set((this.db.prepare("SELECT id FROM share_uploads WHERE state = 'complete' AND approval = 'pending'").all() as { id: string }[]).map((r) => r.id));
+    await this.storage.sweepTmp((id) => pending.has(id));
   }
 }
