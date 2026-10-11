@@ -382,3 +382,15 @@ bytes, resource `ready`, share quarantine, the host's own in-process file add), 
 gap: freeze is synchronous, so no write can commit between the check and the database statement. PASS: TOCTOU test
 (submission streaming when hosting pauses is not committed — fails without the guard), local-gate test; clan + server
 suites 335 PASS / 13 environment skips (Linux).
+
+### P1-7 checkpoint I: recovery primitives (cloud)
+
+Conflicts now record the fork epoch, the previous state and the competing chain. Only an owner-signed
+`clan-host-resolution` (hosting migration 4) resolves them — never time, chain length or arrival order: if it chooses
+this device's record the previous state returns and the other branch is refused from then on; if it chooses the other
+branch this device adopts it as a standby, its own copy stays untouched and is marked superseded, and no hand-over may
+replace it until the owner acknowledges (after exporting what they want). Resolutions reach linked devices over
+`/host/push/resolve` and members inside the host's authenticated `hello`. `ensureSpace` refuses a destination
+without room for remaining blobs + activation copies + 256 MB reserve before any byte moves (pull and push).
+`handoverStatus` reports role, checkpoint, staging progress, signed transition, conflict and superseded copy for the
+screens. PASS: conflict resolution (forged refused, both outcomes, data retained), storage refusal; clan + fence suites.

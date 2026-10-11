@@ -3,10 +3,10 @@
 // acknowledged and enforces the local state machine: active → frozen → relinquished (never back to writing at that
 // epoch), and staging → verified → acknowledged → active on the destination. It never stores private keys: callers
 // pass a signer backed by the OS keystore. It grants no session, membership or file rights by itself.
-import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  authorityHash, b64u, CheckpointHeader, HostSessionAuthority, sessionAuthorityProblem, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
+  authorityHash, b64u, CheckpointHeader, HostResolution, HostSessionAuthority, resolutionValid, sessionAuthorityProblem, checkpointBlobs, checkpointHash, delegationProblem, hostAuthorized, HostAck, HostDelegation, HostRevocation, revokedDelegations, sectionBytes, sha256Hex,
   signHostStatement, verifyAuthorityChain, type AuthorityRecord, type CheckpointProvider, type HostSigner, type PreflightIssue,
 } from '@classroom/protocol';
 import { z } from 'zod';
@@ -36,6 +36,13 @@ export const schema: ModuleSchema = {
     CREATE TABLE hosting_checkpoints (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), epoch INTEGER NOT NULL, hash TEXT NOT NULL,
       header TEXT NOT NULL, paths TEXT NOT NULL, created_at INTEGER NOT NULL);
     ALTER TABLE hosting_staging ADD COLUMN header TEXT;
+  `, `
+    -- Owner-signed choices at forked epochs, and this device's own branch when it was not chosen: its data is retained,
+    -- never auto-deleted, and no hand-over may replace it until the owner acknowledges (after exporting it if wanted).
+    CREATE TABLE hosting_resolutions (clan_id TEXT NOT NULL REFERENCES clans_clans(id), epoch INTEGER NOT NULL, chosen_hash TEXT NOT NULL, record TEXT NOT NULL,
+      PRIMARY KEY (clan_id, epoch));
+    CREATE TABLE hosting_superseded (clan_id TEXT PRIMARY KEY REFERENCES clans_clans(id), epoch INTEGER NOT NULL, chain TEXT NOT NULL, prev_state TEXT NOT NULL,
+      created_at INTEGER NOT NULL, acknowledged_at INTEGER);
   `],
 };
 
@@ -50,12 +57,13 @@ export const CLAN_TABLES: Record<string, string> = {
   chat_me: 'device-local', chat_outbox: 'device-local', assign_seen: 'device-local (member cache)', search_docs: 'derived index', core_events: 'device-local',
   core_consumed: 'device-local', core_grants: 'personal', identity_users: 'device-local', identity_devices: 'device-local', identity_local: 'device-local',
   hosting_authority: 'hosting control', hosting_transitions: 'hosting control', hosting_revocations: 'hosting control', hosting_staging: 'hosting control',
-  hosting_anchors: 'hosting control', hosting_checkpoints: 'hosting control',
+  hosting_anchors: 'hosting control', hosting_checkpoints: 'hosting control', hosting_resolutions: 'hosting control', hosting_superseded: 'hosting control (retains this device\'s unchosen copy)',
   ...Object.fromEntries(['ai_', 'reminders_', 'tasks_', 'rec_', 'notes_', 'notify_', 'exams_', 'courses_', 'flashcards_', 'sync_', 'capture_', 'diary_', 'saved_', 'study_']
     .map((p) => [p, 'personal: the owner\'s own data, carried between their devices by personal sync, never by CLAN hosting'])),
 };
 export const classifyTable = (t: string) => CLAN_TABLES[t] ?? Object.entries(CLAN_TABLES).find(([k]) => k.endsWith('_') && t.startsWith(k))?.[1] ?? null;
 
+type ConflictInfo = { message: string; prevState: HostState; forkEpoch: number; competing: AuthorityRecord[] | null };
 export type HostState = 'active' | 'frozen' | 'relinquished' | 'standby' | 'conflict';
 export type HostStatus = { clanId: string; epoch: number; hostKey: string; ownerKey: string; state: HostState; writable: boolean; reason: string | null };
 export class HostingError extends Error {
@@ -79,9 +87,11 @@ export class HostAuthority {
   onActivated(f: (clanId: string) => void) { this.activated.push(f); }
   /** `linkedDeviceKey`: true only for a verified, unrevoked personal-sync device key of this account. `dir`: hosting
    *  blobs (outgoing checkpoints, incoming staging). `me`: the local user, owner of an activated CLAN copy. */
-  constructor(db: Db, clans: Clans, o: { now?: () => number; linkedDeviceKey?: (publicKey: string) => boolean; dir: string; me?: () => string }) {
+  private freeBytes: () => Promise<number>;
+  constructor(db: Db, clans: Clans, o: { now?: () => number; linkedDeviceKey?: (publicKey: string) => boolean; dir: string; me?: () => string; freeBytes?: () => Promise<number> }) {
     this.db = db; this.clans = clans; this.now = o.now ?? (() => Date.now()); this.linkedDeviceKey = o.linkedDeviceKey ?? (() => false);
     this.dir = o.dir; this.me = o.me ?? (() => '');
+    this.freeBytes = o.freeBytes ?? (async () => { await mkdir(this.dir, { recursive: true }); const f = await statfs(this.dir); return f.bavail * f.bsize; });
   }
   /** Each owning module (and the host server) contributes one section; both ends must register the same set. */
   register(p: CheckpointProvider) {
@@ -100,6 +110,10 @@ export class HostAuthority {
   private revocations(clanId: string) { return (this.db.prepare('SELECT record FROM hosting_revocations WHERE clan_id = ?').all(clanId) as { record: string }[]).map((x) => HostRevocation.parse(JSON.parse(x.record))); }
   private revoked(r: Row) { return revokedDelegations(r.clan_id, r.owner_key, this.revocations(r.clan_id)); }
   private must(clanId: string) { const r = this.row(clanId); if (!r) throw new HostingError('no_authority', 'This CLAN has no hosting authority record.'); return r; }
+  private conflictOf(r: Row): ConflictInfo | null {
+    if (r.state !== 'conflict' || !r.conflict) return null;
+    try { return JSON.parse(r.conflict) as ConflictInfo; } catch { return { message: r.conflict, prevState: 'standby', forkEpoch: r.epoch, competing: null }; }
+  }
   private setState(clanId: string, state: HostState, conflict: string | null = null) {
     this.db.prepare('UPDATE hosting_authority SET state = ?, conflict = ?, updated_at = ? WHERE clan_id = ?').run(state, conflict, this.now(), clanId);
   }
@@ -140,6 +154,8 @@ export class HostAuthority {
     const p = HostSessionAuthority.safeParse(o.authority);
     if (!p.success || p.data.chain[0]!.clanId !== o.clanId) throw new HostingError('invalid', 'The session sent malformed hosting authority.');
     if (!this.anchorOf(o.clanId)) this.anchorFromPairing(o.clanId, p.data.chain[0]);
+    // Owner decisions travel with the host's session: a member that saw a fork adopts the owner's choice.
+    for (const res of p.data.resolutions ?? []) if (this.row(o.clanId)?.state === 'conflict') { try { this.resolveConflict(res, p.data.chain); } catch { /* not for this fork */ } }
     await this.accept(p.data.chain, o.localKey ?? '');
     const head = p.data.chain[p.data.chain.length - 1]!;
     const problem = sessionAuthorityProblem(p.data, head, o);
@@ -168,7 +184,7 @@ export class HostAuthority {
   status(clanId: string, localKey: string, at = this.now()): HostStatus | null {
     const r = this.row(clanId); if (!r) return null;
     const h = this.head(r);
-    const reason = r.state === 'conflict' ? 'Conflicting hosting records; writes are unavailable until resolved.'
+    const reason = r.state === 'conflict' ? 'Conflicting hosting records; writes are unavailable until the owner resolves them.'
       : h.hostKey !== localKey ? 'Another device is the authorized host.'
       : r.state !== 'active' ? (r.state === 'frozen' ? 'Hosting is paused for a handoff.' : 'This device handed hosting over.')
       : !hostAuthorized(h, at, this.revoked(r)) ? 'This device\'s hosting permission has expired or was revoked.' : null;
@@ -192,6 +208,80 @@ export class HostAuthority {
     if (!s.writable) throw new HostingError('not_authoritative', s.reason!);
     return s.epoch;
   }
+
+  // ---- recovery ----
+  /** What the screens show: this device's role and progress for the CLAN's hand-over, and any conflict. */
+  async handoverStatus(clanId: string, localKey: string) {
+    const r = this.row(clanId);
+    if (!r) return { clanId, hosting: null as null };
+    const s = this.status(clanId, localKey)!, cp = this.checkpointOf(clanId), st = this.staged(clanId, r.epoch);
+    let staging = null;
+    if (st?.header) {
+      const blobs = checkpointBlobs(CheckpointHeader.parse(JSON.parse(st.header)));
+      let received = 0;
+      for (const b of blobs) received += await stat(join(this.inDir(clanId), b.sha256)).then((x) => Math.min(x.size, b.size), () => stat(join(this.inDir(clanId), `${b.sha256}.part`)).then((x) => Math.min(x.size, b.size), () => 0));
+      staging = { hash: st.checkpoint_hash, state: st.state, total: blobs.reduce((n, b) => n + b.size, 0), received };
+    }
+    const c = this.conflictOf(r), sup = this.superseded(clanId);
+    return {
+      clanId, hosting: s, role: s.hostKey === localKey ? 'host' : 'other',
+      checkpoint: cp && cp.header.epoch === r.epoch ? { hash: cp.hash, files: cp.header.files.length, bytes: checkpointBlobs(cp.header).reduce((n, b) => n + b.size, 0) } : null,
+      staging, transition: this.pendingTransition(clanId) ? { epoch: r.epoch + 1 } : null,
+      conflict: c && { message: c.message, forkEpoch: c.forkEpoch, ours: authorityHash(this.chain(r)[c.forkEpoch] ?? this.head(r)), theirs: c.competing ? authorityHash(c.competing[c.forkEpoch] ?? c.competing.at(-1)!) : null,
+        oursHost: (this.chain(r)[c.forkEpoch] ?? this.head(r)).hostKey, theirsHost: c.competing ? (c.competing[c.forkEpoch] ?? c.competing.at(-1)!).hostKey : null },
+      superseded: sup,
+    };
+  }
+  /** Destination: room for the remaining blobs plus the copies made when activating, with a safety reserve. */
+  async ensureSpace(clanId: string, reserve = 256 * 1024 * 1024) {
+    const { header } = this.stagedHeader(clanId);
+    const missing = (await this.missingBlobs(clanId)).reduce((n, b) => n + b.size, 0);
+    const placed = header.files.reduce((n, f) => n + f.size, 0);
+    const need = missing + placed + reserve, free = await this.freeBytes();
+    if (free < need) throw new HostingError('insufficient_storage', `This device needs about ${Math.ceil(need / 1e6)} MB free to receive this CLAN; ${Math.floor(free / 1e6)} MB are available. Free some space and try again — nothing was changed.`);
+    return { need, free };
+  }
+  /** Owner: signs which record is authoritative at a forked epoch. */
+  resolve(clanId: string, owner: HostSigner, epoch: number, chosenHash: string): HostResolution {
+    const r = this.must(clanId);
+    if (owner.publicKey !== r.owner_key) throw new HostingError('forbidden', 'Only the CLAN owner key can resolve a conflict.');
+    return HostResolution.parse(signHostStatement(owner, { type: 'clan-host-resolution' as const, v: 1 as const, clanId, ownerKey: r.owner_key, epoch, chosenHash, issuedAt: this.now() }));
+  }
+  /**
+   * Applies an owner-signed resolution. If it chose this device's record, the previous state returns. If it chose the
+   * other branch (supplied as `chain`), this device adopts that chain as a standby; its own copy is retained untouched
+   * and marked superseded until acknowledged. Never decided by time, epoch length or order of arrival.
+   */
+  resolveConflict(raw: unknown, chain?: unknown) {
+    const p = HostResolution.safeParse(raw);
+    const r = p.success ? this.row(p.data.clanId) : undefined;
+    if (!p.success || !r || !resolutionValid(p.data, r.clan_id, r.owner_key)) throw new HostingError('invalid', 'The resolution is not signed by the CLAN owner.');
+    const res = p.data, mine = this.chain(r);
+    tx(this.db, () => this.db.prepare('INSERT INTO hosting_resolutions (clan_id, epoch, chosen_hash, record) VALUES (?, ?, ?, ?) ON CONFLICT (clan_id, epoch) DO NOTHING').run(res.clanId, res.epoch, res.chosenHash, JSON.stringify(res)));
+    if (this.resolutionAt(res.clanId, res.epoch) !== res.chosenHash) throw new HostingError('conflict', 'The owner already decided this step differently.');
+    const c = this.conflictOf(r);
+    if (mine[res.epoch] && authorityHash(mine[res.epoch]!) === res.chosenHash) {
+      if (c) this.setState(res.clanId, c.prevState);
+      return this.status(res.clanId, '')!;
+    }
+    const chk = verifyAuthorityChain(chain ?? c?.competing, { clanId: res.clanId, ownerKey: r.owner_key });
+    if (!chk.ok || chk.hashes[res.epoch] !== res.chosenHash || chk.hashes[res.epoch - 1] !== (mine[res.epoch - 1] && authorityHash(mine[res.epoch - 1]!))) throw new HostingError('invalid', 'Provide the chosen hosting record chain.');
+    tx(this.db, () => {
+      this.db.prepare('INSERT INTO hosting_superseded (clan_id, epoch, chain, prev_state, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (clan_id) DO UPDATE SET epoch = excluded.epoch, chain = excluded.chain, prev_state = excluded.prev_state, created_at = excluded.created_at, acknowledged_at = NULL')
+        .run(res.clanId, res.epoch, JSON.stringify(mine), c?.prevState ?? r.state, this.now());
+      for (const q of ['DELETE FROM hosting_transitions WHERE clan_id = ?', 'DELETE FROM hosting_checkpoints WHERE clan_id = ?', 'DELETE FROM hosting_staging WHERE clan_id = ?']) this.db.prepare(q).run(res.clanId);
+      this.db.prepare("UPDATE hosting_authority SET epoch = ?, head_hash = ?, chain = ?, state = 'standby', conflict = NULL, updated_at = ? WHERE clan_id = ?")
+        .run(chk.head.epoch, chk.hashes[chk.head.epoch]!, JSON.stringify(chain ?? c?.competing), this.now(), res.clanId);
+    });
+    return this.status(res.clanId, '')!;
+  }
+  resolutionsOf(clanId: string) { return (this.db.prepare('SELECT record FROM hosting_resolutions WHERE clan_id = ? ORDER BY epoch').all(clanId) as { record: string }[]).map((x) => HostResolution.parse(JSON.parse(x.record))); }
+  superseded(clanId: string) {
+    const x = this.db.prepare('SELECT epoch, created_at FROM hosting_superseded WHERE clan_id = ? AND acknowledged_at IS NULL').get(clanId) as { epoch: number; created_at: number } | undefined;
+    return x ? { epoch: x.epoch, at: x.created_at } : null;
+  }
+  /** The owner has kept/exported what they wanted from this device's unchosen copy; hand-overs may replace it now. */
+  acknowledgeSuperseded(clanId: string) { this.db.prepare('UPDATE hosting_superseded SET acknowledged_at = ? WHERE clan_id = ?').run(this.now(), clanId); }
 
   // ---- owner: delegation and revocation ----
   delegate(clanId: string, owner: HostSigner, destKey: string, o: { id: string; ttlMs?: number }): HostDelegation {
@@ -398,6 +488,7 @@ export class HostAuthority {
           if (!anchored || anchored.source === 'pairing') this.anchorLinkedOwner(clanId, g.ownerKey as string);
         });
         this.beginStaging(b.chain, b.delegation, b.header, o.localKey);
+        await this.ensureSpace(clanId); // refuse before any byte is sent; staging stays resumable
         pushing.set(clanId, callerKey);
         const have = await Promise.all((await this.stagingPathList(clanId)).map(async (x) => ({ sha256: x.sha256, size: x.size,
           have: await stat(x.path).then((st) => (st.size === x.size ? x.size : 0), () => stat(`${x.path}.part`).then((st) => Math.min(st.size, x.size), () => 0)) })));
@@ -431,6 +522,11 @@ export class HostAuthority {
         return { epoch: st.epoch, writable: st.writable };
       },
       revoke: (_callerKey: string, raw: unknown) => { this.addRevocation(raw); return { ok: true }; },
+      resolve: (_callerKey: string, raw: unknown) => {
+        const b = z.object({ resolution: z.unknown(), chain: z.array(z.unknown()).max(1000).optional() }).strict().parse(raw);
+        const st = this.resolveConflict(b.resolution, b.chain);
+        return { epoch: st.epoch, state: st.state };
+      },
     };
   }
 
@@ -443,7 +539,8 @@ export class HostAuthority {
   beginStaging(chain: unknown, delegation: HostDelegation, rawHeader: unknown, localKey: string) {
     const head = this.learn(chain, localKey);
     const r = this.must(head.clanId);
-    if (r.state === 'conflict') throw new HostingError('conflict', r.conflict ?? 'Conflicting hosting records.');
+    if (r.state === 'conflict') throw new HostingError('conflict', this.conflictOf(r)?.message ?? 'Conflicting hosting records.');
+    if (this.superseded(r.clan_id)) throw new HostingError('superseded', 'This device still holds a copy the owner did not choose; export or acknowledge it before hosting this CLAN again.');
     const source = this.anchorOf(r.clan_id)?.source;
     if (source !== 'owner' && source !== 'linked-device') throw new HostingError('forbidden', 'Hosting can only move between the owner\'s own devices.');
     const problem = delegationProblem(delegation, { clanId: r.clan_id, ownerKey: r.owner_key, destKey: localKey, at: this.now(), revoked: this.revoked(r) });
@@ -577,14 +674,21 @@ export class HostAuthority {
     const chk = verifyAuthorityChain(chain, { clanId, ownerKey: r?.owner_key ?? anchored });
     if (!chk.ok) throw new HostingError('invalid', chk.reason);
     const rs = chain as AuthorityRecord[], h = chk.head;
-    let conflict: string | null = null;
-    const fail = (msg: string) => { conflict = msg; throw new HostingError('conflict', msg); };
+    let conflict: ConflictInfo | null = null;
+    const fail = (msg: string, forkEpoch: number) => {
+      const chosen = this.resolutionAt(clanId, forkEpoch);
+      // The owner already decided this fork: the other branch is refused without disturbing this device.
+      if (chosen) throw new HostingError('conflict', 'The owner already chose a different hosting record for this step.');
+      conflict = { message: msg, prevState: (r && r.state !== 'conflict' ? r.state : r ? this.conflictOf(r)?.prevState : 'standby') ?? 'standby', forkEpoch, competing: rs };
+      throw new HostingError('conflict', msg);
+    };
     try { return this.apply(clanId, r, rs, h, chk.hashes, localKey, fail, sections); } finally {
-      // Recorded outside the rolled-back transaction: the CLAN stays unavailable for writes until resolved.
-      if (conflict) this.setState(clanId, 'conflict', conflict);
+      // Recorded outside the rolled-back transaction: the CLAN stays unavailable for writes until the owner resolves it.
+      if (conflict) this.setState(clanId, 'conflict', JSON.stringify(conflict));
     }
   }
-  private apply(clanId: string, r: Row | undefined, rs: AuthorityRecord[], h: AuthorityRecord, hashes: string[], localKey: string, fail: (m: string) => never, sections?: Map<string, unknown[]>): AuthorityRecord {
+  private resolutionAt(clanId: string, epoch: number) { return (this.db.prepare('SELECT chosen_hash h FROM hosting_resolutions WHERE clan_id = ? AND epoch = ?').get(clanId, epoch) as { h: string } | undefined)?.h ?? null; }
+  private apply(clanId: string, r: Row | undefined, rs: AuthorityRecord[], h: AuthorityRecord, hashes: string[], localKey: string, fail: (m: string, forkEpoch: number) => never, sections?: Map<string, unknown[]>): AuthorityRecord {
     const chk = { hashes };
     const activate = () => {
       this.requireVerified(clanId, h);
@@ -601,17 +705,17 @@ export class HostAuthority {
       }
       const known = chk.hashes[Math.min(r.epoch, h.epoch)];
       const ours = r.epoch <= h.epoch ? r.head_hash : authorityHash(this.chain(r)[h.epoch]!);
-      if (known !== ours) fail(`Conflicting hosting record at epoch ${Math.min(r.epoch, h.epoch)}.`);
+      if (known !== ours) fail(`Conflicting hosting record at epoch ${Math.min(r.epoch, h.epoch)}.`, Math.min(r.epoch, h.epoch));
       if (h.epoch < r.epoch) throw new HostingError('stale', 'An older hosting record was offered.');
       if (h.epoch === r.epoch) return h;
       if (r.state === 'relinquished') {
         const t = this.pendingTransition(clanId);
-        if (!t || authorityHash(t) !== chk.hashes[r.epoch + 1]) fail('A transition this device did not sign was offered.');
+        if (!t || authorityHash(t) !== chk.hashes[r.epoch + 1]) fail('A transition this device did not sign was offered.', r.epoch + 1);
       } else if (r.state === 'active' || r.state === 'frozen') {
         // A host that never relinquished cannot have been superseded; refuse rather than lose our own writes.
-        fail('A newer hosting record exists although this device never handed over.');
+        fail('A newer hosting record exists although this device never handed over.', r.epoch + 1);
       }
-      if (r.state === 'conflict') throw new HostingError('conflict', r.conflict ?? 'Conflicting hosting records.');
+      if (r.state === 'conflict') throw new HostingError('conflict', this.conflictOf(r)?.message ?? 'Conflicting hosting records.');
       if (h.hostKey === localKey) activate();
       this.db.prepare('UPDATE hosting_authority SET epoch = ?, head_hash = ?, chain = ?, state = ?, conflict = NULL, updated_at = ? WHERE clan_id = ?')
         .run(h.epoch, chk.hashes[h.epoch]!, JSON.stringify(rs), h.hostKey === localKey ? 'active' : 'standby', this.now(), clanId);

@@ -139,7 +139,7 @@ export const checkpointBlobs = (h: CheckpointHeader) => {
  *  session signing key), so members detect a session run by a stale, relinquished or forked host. */
 export const hostSessionStatement = (o: { clanId: string; epoch: number; sessionId: string; teacherPublicKey: string }) =>
   canonicalBytes({ type: 'clan-host-session', v: 1, clanId: o.clanId, epoch: o.epoch, sessionId: o.sessionId, teacherPublicKey: o.teacherPublicKey });
-export const HostSessionAuthority = z.object({ chain: AuthorityChain, proof: Sig }).strict();
+export const HostSessionAuthority = z.object({ chain: AuthorityChain, proof: Sig, resolutions: z.array(z.lazy(() => HostResolution)).max(32).optional() }).strict();
 export type HostSessionAuthority = z.infer<typeof HostSessionAuthority>;
 export function sessionAuthorityProblem(a: HostSessionAuthority, head: AuthorityRecord, o: { sessionId: string; teacherPublicKey: string }): string | null {
   try {
@@ -147,3 +147,13 @@ export function sessionAuthorityProblem(a: HostSessionAuthority, head: Authority
     return ok ? null : 'This session is not run by the CLAN\'s authorized host.';
   } catch { return 'This session is not run by the CLAN\'s authorized host.'; }
 }
+
+// ---- owner-decided conflict resolution (never automatic last-writer-wins) ----
+/** The owner chooses which record is authoritative at a forked epoch. Devices holding the other branch keep their data
+ *  (marked superseded for export) and stop treating it as authoritative. */
+export const HostResolutionBody = z.object({
+  type: z.literal('clan-host-resolution'), v: z.literal(1), clanId: Id, ownerKey: Key, epoch: z.number().int().positive(), chosenHash: Hash, issuedAt: z.number().int().nonnegative(),
+}).strict();
+export const HostResolution = HostResolutionBody.extend({ sig: Sig }).strict();
+export type HostResolution = z.infer<typeof HostResolution>;
+export const resolutionValid = (r: HostResolution, clanId: string, ownerKey: string) => HostResolution.safeParse(r).success && r.clanId === clanId && r.ownerKey === ownerKey && verifySigned(ownerKey, r);

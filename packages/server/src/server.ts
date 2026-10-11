@@ -10,7 +10,7 @@ import { generateKeyPairSync, sign as edSign, createPublicKey, randomUUID, type 
 import * as opaque from '@serenity-kit/opaque';
 import {
   b64u, BleRequest, ClientMessage, DIRECT_PACKAGE_TTL_MS, MESSAGE_CAPABILITY, type BleResponse, type DirectPackage, JoinRequest, PairAbort, PairFinish, PairStart, ReconnectChallengeRequest, ReconnectRequest, STUDENT_ONLY, TEACHER_ONLY,
-  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, hostSessionStatement, type AuthorityRecord, type ServerMessage, type ResourceView,
+  UPLOAD_CONTENT_TYPE, UploadInit, WS_CLOSE, ShareUploadInit, ChatHandle, hostSessionStatement, type AuthorityRecord, type HostResolution, type ServerMessage, type ResourceView,
 } from '@classroom/protocol';
 import { ChatRelay, type ChatStore } from './chat.ts';
 import { WhiteboardRelay, type WhiteboardStore } from './whiteboard.ts';
@@ -67,7 +67,7 @@ export type ServerOptions = {
    * and `sign` (the host device key) over this session's identity inside the authenticated session, to anchor the owner
    * and verify the session's host. Omitted → a legacy single-host CLAN, unchanged.
    */
-  authority?: { assertWritable(): void; chain(): AuthorityRecord[]; sign(bytes: Uint8Array): string };
+  authority?: { assertWritable(): void; chain(): AuthorityRecord[]; sign(bytes: Uint8Array): string; resolutions?(): HostResolution[] };
 };
 /** Client messages that change nothing durable (ephemeral relays and reads); everything else is fenced. */
 const UNFENCED = new Set<ClientMessage['t']>(['wb.sync', 'wb.cursor', 'chat.typing']);
@@ -128,7 +128,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const signer = { publicKey: teacherPublicKey, sign: (bytes: Uint8Array) => b64u.encode(new Uint8Array(edSign(null, bytes, identity.signingKey))) };
   const sessionAuthority = opts.authority && (() => {
     const chain = opts.authority!.chain(), head = chain[chain.length - 1]!;
-    return { chain, proof: opts.authority!.sign(hostSessionStatement({ clanId: head.clanId, epoch: head.epoch, sessionId: classroom.id, teacherPublicKey })) };
+    const resolutions = opts.authority!.resolutions?.() ?? [];
+    return { chain, proof: opts.authority!.sign(hostSessionStatement({ clanId: head.clanId, epoch: head.epoch, sessionId: classroom.id, teacherPublicKey })), ...(resolutions.length ? { resolutions } : {}) };
   });
   const tls = await createClassroomTls(classroom.id);
   db.prepare('UPDATE sessions SET teacher_key = ?, tls_spki = ?, connectivity = ? WHERE id = ?').run(teacherPublicKey, tls.spkiSha256, opts.direct ? 'direct' : 'lan', classroom.id);

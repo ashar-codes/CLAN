@@ -377,4 +377,69 @@ describe('persistent hosting authority', () => {
       expect(w.third.h.localWriteBlocked(w.clan.id)).toBeNull();
     } finally { w.close(); }
   });
+
+  it('conflicts are resolved only by an owner-signed choice; the unchosen copy is kept, never auto-deleted', async () => {
+    const w = world();
+    try {
+      const s = await seed(w);
+      const genesis = w.phone.h.chainOf(w.clan.id)!;
+      const h = await handoff(w);
+      await w.desk.h.accept(h.chain, w.deskKey.publicKey);
+      w.desk.app.chat.post({ id: randomUUID(), threadId: s.thread.id, author: 'h1', authorName: 'Host', body: 'desk wrote this' });
+      // an equal-epoch fork signed with the (copied) epoch-0 host key arrives at the desktop
+      const d2 = w.phone.h.delegate(w.clan.id, w.ownerKey, w.thirdKey.publicKey, { id: randomUUID() });
+      const ack3 = signHostStatement(w.thirdKey, { type: 'clan-host-ack' as const, v: 1 as const, clanId: w.clan.id, epoch: 0, prevHash: authorityHash(genesis[0]!), checkpointHash: h.hash, delegationId: d2.id, destKey: w.thirdKey.publicKey });
+      const { sig: _s, ...body } = h.record;
+      const fork = [...genesis, signHostStatement(w.ownerKey, { ...body, hostKey: w.thirdKey.publicKey, delegation: d2, ack: ack3 })];
+      await expect(w.desk.h.accept(fork, w.deskKey.publicKey)).rejects.toThrow('Conflicting');
+      const st = await w.desk.h.handoverStatus(w.clan.id, w.deskKey.publicKey);
+      expect(st.conflict).toMatchObject({ forkEpoch: 1, oursHost: w.deskKey.publicKey, theirsHost: w.thirdKey.publicKey });
+      expect(w.desk.h.localWriteBlocked(w.clan.id)).toMatch(/Conflicting/);
+      // nothing but the owner's signature resolves it: a forged resolution is refused
+      expect(() => w.desk.h.resolveConflict(signHostStatement(w.deskKey, { type: 'clan-host-resolution' as const, v: 1 as const, clanId: w.clan.id, ownerKey: w.ownerKey.publicKey, epoch: 1, chosenHash: st.conflict!.ours, issuedAt: 1 }))).toThrow('owner');
+      // the owner chooses the desktop's record: it resumes as host and the fork is refused from now on without a new conflict
+      expect(w.desk.h.resolveConflict(w.phone.h.resolve(w.clan.id, w.ownerKey, 1, st.conflict!.ours))).toMatchObject({ state: 'active' });
+      expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)?.writable).toBe(true);
+      await expect(w.desk.h.accept(fork, w.deskKey.publicKey)).rejects.toThrow('already chose');
+      expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)?.writable).toBe(true);
+
+      // the other way: a device holding the unchosen branch keeps its data, becomes a standby, and cannot be overwritten
+      const v = world();
+      try {
+        const sv = await seed(v);
+        const vg = v.phone.h.chainOf(v.clan.id)!;
+        const hv = await handoff(v);
+        await v.desk.h.accept(hv.chain, v.deskKey.publicKey);
+        v.desk.app.chat.post({ id: randomUUID(), threadId: sv.thread.id, author: 'h1', authorName: 'Host', body: 'only on the desktop' });
+        const dd = v.phone.h.delegate(v.clan.id, v.ownerKey, v.thirdKey.publicKey, { id: randomUUID() });
+        const a3 = signHostStatement(v.thirdKey, { type: 'clan-host-ack' as const, v: 1 as const, clanId: v.clan.id, epoch: 0, prevHash: authorityHash(vg[0]!), checkpointHash: hv.hash, delegationId: dd.id, destKey: v.thirdKey.publicKey });
+        const { sig: _x, ...b2 } = hv.record;
+        const other = [...vg, signHostStatement(v.ownerKey, { ...b2, hostKey: v.thirdKey.publicKey, delegation: dd, ack: a3 })];
+        await expect(v.desk.h.accept(other, v.deskKey.publicKey)).rejects.toThrow('Conflicting');
+        const choice = v.phone.h.resolve(v.clan.id, v.ownerKey, 1, authorityHash(other[1]!));
+        expect(v.desk.h.resolveConflict(choice)).toMatchObject({ epoch: 1, state: 'standby', writable: false });
+        expect(v.desk.app.chat.page(sv.thread.id).at(-1)?.body).toBe('only on the desktop'); // retained
+        expect(v.desk.h.superseded(v.clan.id)).toMatchObject({ epoch: 1 });
+        const back = v.phone.h.delegate(v.clan.id, v.ownerKey, v.deskKey.publicKey, { id: randomUUID() });
+        expect(() => v.desk.h.beginStaging(other, back, hv.header, v.deskKey.publicKey)).toThrow('acknowledge');
+        v.desk.h.acknowledgeSuperseded(v.clan.id);
+        expect(v.desk.h.superseded(v.clan.id)).toBeNull();
+      } finally { v.close(); }
+    } finally { w.close(); }
+  });
+
+  it('refuses to receive a CLAN without enough storage, before any byte is transferred', async () => {
+    const w = world();
+    try {
+      await seed(w);
+      const lowDisk = new HostAuthority(w.desk.db, w.desk.app.clans, { now: () => T0, dir: join(w.desk.storageDir, 'hosting'), me: () => w.desk.app.me, freeBytes: async () => 10_000_000 });
+      const d = w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
+      w.phone.h.freeze(w.clan.id, w.ownerKey.publicKey);
+      const { header } = await w.phone.h.prepareCheckpoint(w.clan.id, w.ownerKey.publicKey);
+      w.desk.h.beginStaging(w.phone.h.chainOf(w.clan.id)!, d, header, w.deskKey.publicKey);
+      await expect(lowDisk.ensureSpace(w.clan.id)).rejects.toMatchObject({ code: 'insufficient_storage' });
+      expect((await w.desk.h.missingBlobs(w.clan.id)).length).toBeGreaterThan(0); // nothing was received or changed
+      await expect(w.desk.h.ensureSpace(w.clan.id, 0)).resolves.toBeTruthy();
+    } finally { w.close(); }
+  });
 });

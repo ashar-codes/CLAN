@@ -32,7 +32,7 @@ export type ReplicationHost = {
 };
 /** Destination side when the current host pushes (a phone accepts no connections). Same authentication; the
  *  implementation requires the caller to be the CLAN's verified current host and the delegation to name this device. */
-export type ReplicationSink = { [K in 'begin' | 'blob' | 'complete' | 'activate' | 'revoke']: (callerKey: string, body: unknown) => unknown };
+export type ReplicationSink = { [K in 'begin' | 'blob' | 'complete' | 'activate' | 'revoke' | 'resolve']: (callerKey: string, body: unknown) => unknown };
 export type SyncServerOptions = { host: SyncHost; tls: { certPem: string; keyPem: string; spkiSha256: string }; objectPath(sha256: string): string | null; port?: number; bind?: string; onChange?(): void;
   replication?: ReplicationHost; sink?: ReplicationSink; deviceKey?(fp: string): string | null };
 export const SYNC_SERVICE = 'clansync';
@@ -43,7 +43,7 @@ export async function startSyncServer(o: SyncServerOptions) {
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => { try { done(null, { raw: body as string, json: JSON.parse(body as string) }); } catch { done(Object.assign(new Error('Malformed JSON.'), { statusCode: 400 })); } });
   const fail = (reply: FastifyReply, e: unknown) => {
     const code = (e as { code?: string }).code;
-    const status = ['revoked', 'forbidden', 'invalid_delegation', 'owner_mismatch', 'unanchored'].includes(code ?? '') ? 403 : ['bad_state', 'busy', 'already_relinquished', 'invalid_ack', 'not_authoritative', 'conflict', 'no_authority', 'stale', 'incomplete', 'corrupt', 'not_staged'].includes(code ?? '') ? 409 : code === 'unknown_device' || code === 'bad_auth' || code === 'replay' || code === 'stale' ? 401 : code === 'bad_code' || code === 'no_link' || code === 'invalid' ? 400 : e instanceof z.ZodError ? 400 : 500;
+    const status = ['revoked', 'forbidden', 'invalid_delegation', 'owner_mismatch', 'unanchored'].includes(code ?? '') ? 403 : code === 'insufficient_storage' ? 507 : ['bad_state', 'busy', 'already_relinquished', 'invalid_ack', 'not_authoritative', 'conflict', 'no_authority', 'stale', 'incomplete', 'corrupt', 'not_staged', 'superseded', 'incomplete_data', 'needs_acknowledgment'].includes(code ?? '') ? 409 : code === 'unknown_device' || code === 'bad_auth' || code === 'replay' || code === 'stale' ? 401 : code === 'bad_code' || code === 'no_link' || code === 'invalid' ? 400 : e instanceof z.ZodError ? 400 : 500;
     return reply.code(status).send({ error: code ?? 'error', message: status === 500 ? 'Sync failed on the other device.' : (e as Error).message });
   };
   const authed = (req: FastifyRequest, raw: string) => o.host.verifyRequest({ auth: req.headers['x-clan-sync'] as string | undefined, sig: req.headers['x-clan-sync-sig'] as string | undefined }, req.method, req.url, o.host.bodySha(raw));
@@ -118,7 +118,7 @@ export async function startSyncServer(o: SyncServerOptions) {
 
   if (o.sink) {
     const k = o.sink;
-    for (const step of ['begin', 'blob', 'complete', 'activate', 'revoke'] as const) {
+    for (const step of ['begin', 'blob', 'complete', 'activate', 'revoke', 'resolve'] as const) {
       app.post(`/host/push/${step}`, async (req, reply) => { try { const b = body(req); return await k[step](callerKey(authed(req, b.raw)), b.json); } catch (e) { return fail(reply, e); } });
     }
   }

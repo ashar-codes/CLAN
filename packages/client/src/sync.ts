@@ -62,6 +62,7 @@ export type HostingDestination = {
   missingBlobs(clanId: string): Promise<{ sha256: string; size: number }[]>;
   stagingPath(clanId: string, sha256: string): string;
   completeStaging(clanId: string): Promise<void>;
+  ensureSpace(clanId: string): Promise<unknown>;
   acknowledge(clanId: string, dest: { publicKey: string; sign(bytes: Uint8Array): string }): unknown;
   accept(chain: unknown, localKey: string): Promise<{ epoch: number; writable: boolean }>;
 };
@@ -86,6 +87,7 @@ export async function replicateClan(o: { base: string; tlsCa: string; tlsSpki: s
   o.prepare?.(offer);
   if (offer.transition) return o.hosting.accept([...offer.chain, offer.transition], o.signer.publicKey);
   o.hosting.beginStaging(offer.chain, o.delegation, offer.header, o.signer.publicKey);
+  await o.hosting.ensureSpace(o.clanId); // before any download; nothing changes if there is no room
   for (let attempt = 0; ; attempt++) {
     const missing = await o.hosting.missingBlobs(o.clanId);
     const total = missing.reduce((n, b) => n + b.size, 0); let done = 0;

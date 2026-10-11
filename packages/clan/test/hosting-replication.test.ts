@@ -112,7 +112,7 @@ function pusher(from: Dev, to: Dev, clanId: string, fail?: (path: string) => boo
 
 /** A plain object view of the destination's methods (so a test can override one). */
 function bind(h: HostingDestination): HostingDestination {
-  return { beginStaging: h.beginStaging.bind(h), missingBlobs: h.missingBlobs.bind(h), stagingPath: h.stagingPath.bind(h), completeStaging: h.completeStaging.bind(h), acknowledge: h.acknowledge.bind(h), accept: h.accept.bind(h) };
+  return { ensureSpace: h.ensureSpace.bind(h), beginStaging: h.beginStaging.bind(h), missingBlobs: h.missingBlobs.bind(h), stagingPath: h.stagingPath.bind(h), completeStaging: h.completeStaging.bind(h), acknowledge: h.acknowledge.bind(h), accept: h.accept.bind(h) };
 }
 
 describe('persistent hosting hand-over pushed by the phone', () => {
