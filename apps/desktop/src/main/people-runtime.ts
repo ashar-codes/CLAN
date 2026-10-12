@@ -189,16 +189,26 @@ export async function startPeopleRuntime(o: {
   // Everyone Nearby answer, and nobody learns who is looking.
   const nearby = new Map<string, NearbyPerson>();
   let stopAd: (() => Promise<void>) | null = null, adVis = '', adAt = 0;
-  const advertise = async () => {
-    const vis = p.visibility();
-    if (vis === adVis && now() - adAt < 3_600_000) return;
-    await stopAd?.(); stopAd = null;
-    adVis = vis; adAt = now();
-    if (vis !== 'invisible' && o.discover) {
-      const r1 = randomBytes(12).toString('base64url'), r2 = randomBytes(12).toString('base64url');
-      const a = advertisePeople({ port: server.port, r: r1, t: p.presenceTagFor(r1) }), b = advertiseLinks({ port: linkPort, r: r2, t: p.presenceTagFor(r2) });
-      stopAd = async () => { await a(); await b(); };
-    }
+  let advertising: Promise<void> | null = null, advertiseAgain = false;
+  const advertise = (): Promise<void> => {
+    if (advertising) { advertiseAgain = true; return advertising; }
+    return advertising = (async () => {
+      await null;
+      do {
+        advertiseAgain = false;
+        if (stopped) break;
+        if (p.visibility() === adVis && now() - adAt < 3_600_000) continue;
+        const previous = stopAd; stopAd = null; await previous?.();
+        if (stopped) break;
+        // Visibility may change while the multicast goodbye is in flight.
+        const vis = p.visibility(); adVis = vis; adAt = now();
+        if (vis !== 'invisible' && o.discover) {
+          const r1 = randomBytes(12).toString('base64url'), r2 = randomBytes(12).toString('base64url');
+          const a = advertisePeople({ port: server.port, r: r1, t: p.presenceTagFor(r1) }), b = advertiseLinks({ port: linkPort, r: r2, t: p.presenceTagFor(r2) });
+          stopAd = async () => { await a(); await b(); };
+        }
+      } while (advertiseAgain);
+    })().finally(() => { advertising = null; });
   };
   const probe = async (endpoint: string, invite?: string, signer: Signer = o.signer, expected?: { key: string; spkiSha256?: string }) => {
     const b = await hello(endpoint, signer, { invite });
@@ -307,7 +317,7 @@ export async function startPeopleRuntime(o: {
     nearby: () => [...nearby.values()].filter((n) => now() - n.seenAt < 10 * 60_000 && !p.isBlocked(n.key)).map((n) => ({ ...n, relation: p.contact(n.key)?.relation ?? 'none', connection: cm.status(n.key)?.state ?? 'nearby' })),
     refreshDiscovery: () => { adAt = 0; void agent.refresh(true); return advertise(); },
     sendLive, tick, server, links: cm, linkPort,
-    async stop() { stopped = true; clearInterval(timer); clearInterval(adTimer); clearInterval(directoryTimer); agent.configure(null); stopBrowse(); stopLinkBrowse(); cm.stop(); await ticking; await stopAd?.(); await links.close(); await server.close(); },
+    async stop() { stopped = true; clearInterval(timer); clearInterval(adTimer); clearInterval(directoryTimer); agent.configure(null); stopBrowse(); stopLinkBrowse(); cm.stop(); await ticking; await advertising; await stopAd?.(); await links.close(); await server.close(); },
   };
 }
 export const isUuid = (s: string) => UUID.test(s);
