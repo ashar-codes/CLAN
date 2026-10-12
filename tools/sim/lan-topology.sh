@@ -34,7 +34,7 @@ for role in directory a b; do
   sudo ip netns exec "$ns" "$node_bin" tools/sim/lan-topology.ts "$role" "$fixture" > "$fixture/$role.log" 2>&1 &
   pids+=("$!")
 done
-wait_file() { for ((i=0;i<180;i++)); do test ! -f "$fixture/$1" || return; sleep 1; done; cat "$fixture/"*.log; exit 1; }
+wait_file() { for ((i=0;i<180;i++)); do test ! -f "$fixture/$1" || return 0; sleep 1; done; cat "$fixture/"*.log; exit 1; }
 wait_file disconnect.request
 sudo ip -n clan-btc2a-r link set clan-rb down
 touch "$fixture/disconnected.ready"
