@@ -34,7 +34,7 @@ Application revision is recorded with the delivered installers. No BTC-2/Campus 
 | Final full unit/integration repeat | 459 PASS, 61 files |
 | Native Mac close-window with opt-in availability | PASS; OS window hidden, renderer and People listener retained |
 | Physical Redmi Keep mode | PASS foreground service, notification 4401 and wake lock; message reception NOT TESTED |
-| Final package rebuild after Windows toast identity fix | Pending; append delivery evidence before completion |
+| Final e73cd17 package rebuilds | PASS Android Gradle, macOS DMG, iOS simulator compilation and native Windows CI |
 
 Physical foreground/background/locked message and call tests require the user to enable Keep mode and operate Xiaomi's locked phone; automated input is denied by the OS. They are NOT TESTED until observed. The user's earlier Mac↔Android audio/voice-note success predates this candidate and is not a new PASS. Windows/iPhone physical tests remain NOT TESTED.
 
@@ -61,3 +61,32 @@ The previous E2E expected the old Not sent label. It now checks the requested Fa
 Windows toast registration explicitly matches the NSIS shortcut's QA/production AppUserModelID. Physical Windows notification presentation remains NOT TESTED. Source: [Electron platform notifications](https://www.electronjs.org/docs/latest/tutorial/notifications).
 
 The user elected to perform the remaining real-device cross-platform message/audio/notification scenarios manually. Do not claim them passed. Android service startup is observed evidence, not proof of locked message reception. The Android emulator initially refused startup because disposable native build caches left insufficient disk space; original installers and profiles were not removed.
+
+## BTC-1 test-build delivery
+
+All four delivered packages use application source **e73cd174f70716c8e914c8e8452030b7550f7f37**, version 0.1.0, branch qa/phase-14.3-local. Later Git documentation checkpoints do not change the application runtime tree. No public release is approved. PRs #1–#4 remain open drafts; none merged or force-pushed.
+
+Final four-project typecheck passed. Complete controlled unit/integration repeat: **459 PASS, 61 files**; complete quiet Electron suite with performance tests enabled: **40 PASS, 23 files**. Final Android Gradle QA build includes bundled JavaScript and native modules. Native Windows CI [38282213989](https://github.com/ashar-codes/CLAN/actions/runs/38282213989) built, installed and started the final NSIS package, passed packaged-profile lock/capture tests, and uninstalled without removing beta firewall rules. Download verified GitHub artifact digest, ZIP CRC, exact commit and installer checksum.
+
+Final iOS arm64 simulator compilation and Xcode-project archive integrity passed. Native device-SDK unsigned compilation and 1 passing simulator profile/note/restart XCTest used the immediately preceding BTC-1 candidate; its mobile, packages, manifests and lockfile are byte-identical to the final application source. No Apple Team or provisioning is supplied: physical entitlements and iPhone installation remain NOT TESTED; no IPA exists.
+
+Final macOS DMG mounted and passed strict deep signature verification. Main app and all four Electron helpers have Audio Input and Camera entitlements, with Hardened Runtime preserved. Updated /Applications/CLAN TEST.app without changing user data; previous bundles preserved. The preceding BTC-1 installed candidate passed secure Keychain startup, actual live microphone capture (23,409 recorded bytes), camera capture (45 changing frames), exact-note restart persistence, and native opt-in window-close retaining the renderer and People listener. Final e73cd17 installed app also passed after local Keychain approval: secure startup, live/unmuted microphone capture (23,409 bytes), 640-wide camera capture (45 frames), exact-note restart persistence, native window-close retaining renderer/listener, and tray Quit stopping the listener. Initial OS-approval block is retained in logs; no Keychain bypass was used.
+
+Final APK v2 signature verifies against unchanged QA debug certificate fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c. Final e73cd17 in-place Redmi update returned Success. Physical Android native Keep service and private persistent notification 4401 were re-observed after the final e73cd17 update; a partial wake lock was observed on the preceding BTC-1 candidate. User elected manual cross-platform tests; open/background/locked message delivery, notification presentation, calls, friend alerts, mobile lifecycle, real radio networking and final-device restart data checks are NOT TESTED. Earlier user-reported successful calls/voice notes are not substituted for these results.
+
+Gitleaks final application history: **119 commits, zero findings**. Audit remains 0 critical / 2 high / 2 moderate dependencies in observed build-tooling paths. Review does not claim encrypted desktop databases, continuous suspended-iOS LAN availability, implemented internet relay/push/TURN, phone live hosting, or complete hardware security approval.
+
+Delivered folder: /Users/ashar/Desktop/CLAN - Installers. Prior Desktop installers and guide copied with checksum verification to Installable Files/BTC-1-pre-e73cd17-backup; earlier backups remain intact. Copies verified nonempty and checksum-identical to original source artifacts.
+
+| Delivered file | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Windows/CLAN-Windows.exe | 166236080 | `ec0c3b3fcb6a0bc5a6f4374e41d0c05520a89240f548f9af8b64f98973888dc4` |
+| macOS/CLAN-macOS.dmg | 163388667 | `2d8ec0fd8345f079a58f395941eb12e93932d489aa659e8a8f41cac0f9fe2942` |
+| Android/CLAN-Android.apk | 65874733 | `beecadf6bfd4fa023e7d6f4aaf4108d143229415fd08b55cc9508aa04a5da372` |
+| iOS/CLAN-iOS-Xcode.zip | 1122119035 | `2d56c1391b6197795a280c412221d36a9c1dd4c4d441fd7143a6762d37edd522` |
+
+Read Desktop INSTALLATION-GUIDE.md and docs/BTC_1_DEVICE_TESTING_GUIDE.md for install/update, signing restrictions and manual PASS/FAIL/NOT TESTED scenarios. Windows unsigned; macOS ad-hoc, not notarized; Android debug-signed QA, incompatible with another beta certificate; iOS Xcode project requires supported Apple signing. All packages are TEST / UNVERIFIED. No existing signing key, profile or identity was replaced. BTC-2/Campus and internet relay deployment remain out of scope.
+
+### Final Android emulator completion
+
+After removing only confirmed completed native-build caches, disposable clan_143_qa emulator booted successfully. Final e73cd17 APK passed the complete existing native integration scenario: profile/core opening, approved authenticated linking, two-way personal sync, offline conflict and Keep Both convergence, revoked-device refusal, Share-to-Inbox, OPAQUE/pinned-TLS CLAN joining, two-way chat with history/scroll preservation, two-way whiteboard operations and SHA-256-verified file download. Native offline Create CLAN smoke also passed explicit owner/non-hosted state, restart persistence, confirmed archive/restore, delete cancellation and confirmed owner deletion while retaining a personal note. This exercised a Study Group; all four types and temporary options still require the manual checklist on physical hardware. These are emulator PASS results, not physical-device background/message/call claims.
