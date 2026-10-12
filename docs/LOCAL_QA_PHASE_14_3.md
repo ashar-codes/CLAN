@@ -196,3 +196,62 @@ Before Android beta signing: confirm secure backup of the existing key **and pas
 verify its certificate continuity against a prior beta, then test an actual signed update without clearing app data.
 Before iOS distribution: obtain valid signing/provisioning and a physical-device test; the unsigned simulator app
 is not an IPA. Before any distribution: resolve failing mandatory tests/security findings and get release approval.
+
+## Final local stabilization and TEST delivery — 2026-10-12
+
+Application/package revision: `6f7d946cc46f19805d6bc423e56c7d6642d87410`; version 0.1.0. Final documentation is committed separately; the delivery manifest records both SHAs. All artifacts are TEST/UNVERIFIED. Physical Windows/Android/iPhone validation is explicitly deferred to the user. No public release approval, merge or force-push.
+
+| Check | PASS | FAIL | SKIPPED | NOT TESTED / limits |
+| --- | --- | --- | --- | --- |
+| Full typecheck | All 4 projects | 0 | 0 | Node 24.19.0 |
+| Full unit/integration | 452 / 60 files, repeated | 0 on final runs | 0 | Final repaired revision: 176.01s; earlier run 177.22s |
+| Focused security | 110 / 12 files | 0 | 0 | Authority/fencing, SessionGate, peer links, file ranges, migrations, QR, keystore |
+| Complete Electron E2E with PERF=1 | 30 / 40 | 10; also one screen teardown hook | 0 | Discovery/approval setup; wrong-code test receives throttling; public release blocked |
+| Isolated screen/GPU/file regressions | Screen 3; GPU + CLAN 2 | 0 on successful isolated runs | 0 on these successful runs | Real Electron GPU + SFU/WebRTC, deterministic capture; OS picker NOT TESTED |
+| Optical stress | 1,000 salt/drop runs with exact reconstruction | 0 on final schedule | 0 | Camera/radios-off hardware NOT TESTED |
+| Android native standalone | Gradle QA 1037 tasks; all native modules + bundled JS | 0 | Gradle's normal NO-SOURCE/non-applicable tasks | arm64 .qa, debug certificate |
+| Android emulator integration | Complete scenario twice after linking repair | 0 on final two scenarios | 0 scenario checks | Linking, two-way sync, Keep Both, revocation, share Inbox, OPAQUE/pinning, two-way chat/history, board, 1.5MB SHA download |
+| Android final update/restart | Install -r; encrypted notes and both conflict versions preserved | 0 | 0 | Beta update/certificate continuity NOT TESTED; beta key untouched |
+| iOS simulator native | Release compile; final XCTest 1 case / 0 failures, 52.423s; earlier 54.906s | Prior retry failed AX snapshots | 0 on final retry | Ad-hoc Keychain; existing profile/note/relaunch/exact content |
+| iPhone SDK | Actual unsigned device SDK compile | 0 | 0 | No Team/provisioning; no IPA or capability validation with a Team |
+| Mac packaged DMG | CRC, mount/install, strict deep signature, secure Keychain, exact note save and restart | 0 on final smoke | 0 | Ad-hoc, not notarized; physical media/network paths remain user tests |
+| Packaged profile-lock regression | Mac and Windows: duplicate rejected, link forwarded, identity preserved, separate profile works | 0 final runs | 0 | Earlier Mac Keychain startup timeout retained |
+| Windows x64 native CI | Build, NSIS install/startup/uninstall, beta firewall preservation | 0 final run | 0 workflow steps | Runner evidence, not physical Windows interoperability |
+| Dependency audit | 0 critical | 2 high, 2 moderate remain | 0 | Build/development paths; not a clean scan |
+| Secrets/history | 116 commits, 0 findings before final documentation commit | 0 | 0 | Public repository; bounded automated scan |
+| Real devices/radios | 0 claimed | 0 claimed | 0 claimed | Windows PC, Android phones, physical iPhones, camera/mic/calls, locked/background and cross-platform handover NOT TESTED |
+
+### Defects resolved
+
+- People receipt state now waits for the authenticated link write round; concurrent ticks coalesce into an awaited follow-up. The transport/link/chat subset passed twice.
+- Transformed 3D screen walls no longer trigger LiveKit visibility suspension. Track subscription and connection setup are explicit/serialized; capture fixtures declare a positive frame rate. Assertions still require changing frames.
+- File UI does not claim completion before integrity verification/native save; GPU E2E waits for the actual context-loss listener to be installed. Chat ordering tests observe causal delivery instead of assuming a sleep orders independent sockets.
+- Verified manual linking endpoints remain preferred after adoption. Android driver uses the QA namespace's real activity, validated inputs, device viewport and actual permission prompts. Existing Keep Both implementation was retained; actual convergence now passes. Phone upload is not implemented in this driver and remains NOT TESTED.
+- Existing unreadable desktop identity keys are preserved; startup refuses rather than silently replacing a private identity.
+- Handover/activation/replay wait for fence persistence. Corrupt/unreadable records refuse hosting; shared adapters serialize writes; actual storage failure refuses acknowledgement. Expo lacks fsync, so abrupt power-loss durability is not certified.
+- QR repairs use balanced deterministic selection and bounded dense repair for small blocks without changing the wire format. The original overhead bound remains enforced: 1,000 final runs had zero failures, maximum 167 frames against a 232-frame bound.
+- Discovery shutdown is bounded even if unpublish never calls back. One final screen teardown hook still exceeded 30s and remains unresolved.
+- Simulator signing permits secure Keychain access; initial secure-store/native initialization errors are visible rather than leaving a blank screen. A cold, quiet retry passed unchanged XCTest assertions; the underlying intermittent SDK accessibility fault is not proven resolved.
+- TEST packaging isolates computer profiles and Android package data. Windows TEST firewall rules use the correct executable/product and preserve beta rules through install/uninstall, tested natively in CI.
+
+- Desktop startup now obtains a per-profile Electron process lock before opening identity, database or fence storage. A second launch forwards bounded validated capture links to the existing app; distinct profiles remain independent. The previous packaged build reproduced duplicate writers. Real installed Mac and Windows builds passed duplicate rejection, forwarded capture text, unchanged primary identity and distinct second-profile identity. The initial Mac retry waited on Keychain and timed out; after OS approval, the installed-app regression passed.
+
+### Failed evidence retained
+
+Earlier complete E2E runs: 36 PASS / 2 FAIL / 2 SKIP; then 39 PASS / 1 FAIL / 0 SKIP plus two failed teardown hooks; then 27 PASS / 13 FAIL / 0 SKIP. Final: 30 PASS / 10 FAIL / 0 SKIP plus one failed hook. Nine final cases depend on automatic discovery/approval; the wrong-code case expected No CLAN matches but got Too many attempts. Do not disable rate limiting or relabel these PASS. The complete suite used 49756cb application inputs, identical at f8cc8f7 except Windows packaging. The final 6f7d946 desktop-only profile lock is checked separately against the real packaged app; the complete failed suite was not relabeled or claimed rerun at that final revision.
+
+A later full unit run recorded 428 PASS / 24 FAIL (mostly disk-full errors and long timeouts); the unchanged quiet repeat at 6f7d946 passed all 452 in 176.01s. Completed QA-only unsigned device-build intermediates and module cache were removed after checking that no Xcode build used them; products/logs and old packages remain. An earlier overloaded full unit run had 448 PASS / 3 timeout FAIL; quiet bounded runs passed 451 and then 452 after the added fence regression. Earlier QR failure salts, native download failures, Android activity/permission/endpoint failures and the iOS 213s accessibility-snapshot failure remain in local logs. The final iOS cold/quiet retry passed unchanged assertions. No failed run was hidden.
+
+Final native refresh: Android Gradle 1037 tasks / 27 executed in 53s; final iOS simulator native compilation and XCTest passed (52.423s). Final APK install -r/native restart preserved the existing profile and both Keep Both note versions; the first UI dump returned null root, and a disposable-emulator wake/unlock plus unchanged retry succeeded without clearing data. No mobile/package source changed between f8cc8f7 and 6f7d946; the final change is the desktop lock/capture handler and Windows regression workflow.
+
+Local evidence: /tmp/clan-delivery-final-{typecheck,unit,security}.log; /tmp/clan-delivery-lock-{typecheck2,unit,unit-retry,installed}.log; /tmp/clan-delivery-ios-lock-{build,uitest}.log; /tmp/clan-delivery-android-lock-{build,install}.log; /tmp/clan-delivery-e2e.log; /tmp/clan-delivery-android-{build,scenario,update-smoke}.log; /tmp/clan-delivery-ios-{device-build2,final-uitest}.log; /tmp/clan-delivery-mac-lock-smoke.log; /tmp/clan-delivery-audit.json. Logs contain disposable test inputs and are not committed. Windows evidence: https://github.com/ashar-codes/CLAN/actions/runs/38212448780.
+
+### Remaining limits / decision
+
+Local multicast discovery currently returns no nearby peers/classrooms in the diagnostic setup; manual-address linking and emulator OPAQUE/pinned joining pass. macOS Local Network permission changes/live testing were deferred by the user; do not claim the permission is fixed or that it is the proven sole cause. Full-profile/OS snapshot rollback and abrupt power-loss fencing are not certified by the tested SQLite-backup rollback guarantees. Native radio/background/media and real-device handover remain unverified. Desktop SQLite/files are not application-encrypted; temporary expiry is not forensic erasure of backups/WAL/saved copies.
+
+The dependency scan retains node-forge/braces high and uuid/sprintf-js moderate findings in observed build/development paths; requested fixes for the first two and sprintf-js were unavailable during registry checks. Do not describe this as a clean dependency audit.
+
+Android beta-key backup is unconfirmed: only debug-signed .qa candidates are supplied. No existing beta signing material was accessed, replaced or regenerated. No Apple signing Team/provisioning profiles were available, so physical capability/signing validation and a genuine device IPA are unavailable. The prepared Xcode workspace and instructions are real; a simulator ZIP is not an IPA. Mac signing is ad-hoc, not Developer ID/notarized; electron-builder's internal ad-hoc hardened-runtime package includes its required library-validation exception, while the configured Electron fuses remain enforced. Windows is unsigned.
+
+**TEST builds for personal validation; public release BLOCKED.** Use DEVICE_TESTING_GUIDE.md, report results, then stop delivery work. PRs #1–#4 remain drafts, including https://github.com/ashar-codes/CLAN/pull/4.

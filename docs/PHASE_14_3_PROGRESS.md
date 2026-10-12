@@ -109,3 +109,9 @@ voice notes, profile pictures, a friend's other devices · hostile-peer tests ·
 ## Local native QA — 2026-10-12
 
 See [the native QA/security and artifact record](LOCAL_QA_PHASE_14_3.md) and [draft PR #4](https://github.com/ashar-codes/CLAN/pull/4). Application repairs were built from `fa5bfc7d25b9b1ef56ef1e1b2749fc76e2c288c9`; **release remains BLOCKED**. Internal TEST/UNVERIFIED DMG/APK and an unsigned simulator app exist; Windows, physical-device and release-signing gates remain open. Full test failures and skips are retained in the record.
+
+## Local stabilization / internal delivery — 2026-10-12
+
+Application checkpoint `6f7d946cc46f19805d6bc423e56c7d6642d87410` includes receipt timing, screen subscription, native QA driver, QR scheduling, identity preservation and durable handover-fence repairs. Full unit suite: 452 PASS / 0 FAIL / 0 SKIP; full typecheck PASS. Actual standalone Android Gradle QA build: 1037 tasks executed, PASS. Native Windows CI at the identical revision built/installed/launched NSIS successfully. Mac DMG integrity, installation, strict signature, secure Keychain, exact note save and restart persistence PASS. Current complete Electron E2E discovery failures remain unresolved; see LOCAL_QA_PHASE_14_3.md for the final matrix.
+
+These are TEST/UNVERIFIED candidates, not a public release. Physical devices are deferred to the user's DEVICE_TESTING_GUIDE.md. No release-key use, PR merge or Phase 15 work.
