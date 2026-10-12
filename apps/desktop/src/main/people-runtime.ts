@@ -272,11 +272,12 @@ export async function startPeopleRuntime(o: {
     } })();
   }, (message) => { directoryMessage = message; changed('nearby'); });
   const configureDirectory = (raw: DirectoryConfig | null) => {
-    directory = raw ? directoryConfig(raw, o.allowLoopback) : null;
-    agent.configure(directory ? lanDirectoryClient({ config: directory, signer: o.signer, nonce: () => randomBytes(18).toString('base64url'), fetch: pinnedTransport(directory).fetch, allowLoopback: o.allowLoopback }) : null);
+    const candidate = raw ? directoryConfig(raw, o.allowLoopback) : null;
+    const client = candidate ? lanDirectoryClient({ config: candidate, signer: o.signer, nonce: () => randomBytes(18).toString('base64url'), fetch: pinnedTransport(candidate).fetch, allowLoopback: o.allowLoopback }) : null;
+    directory = candidate; agent.configure(client);
     directoryMessage = directory ? 'Connecting to enrolled LAN directory…' : 'LAN directory disabled.'; if (directory) void agent.refresh(true);
   };
-  if (o.directory) configureDirectory(o.directory);
+  if (o.directory) { try { configureDirectory(o.directory); } catch { directoryMessage = 'Saved LAN directory certificate is invalid. Direct connections still work; check the administrator configuration.'; } }
   const directoryTimer = setInterval(() => void agent.refresh(), 5000); directoryTimer.unref();
 
   return {

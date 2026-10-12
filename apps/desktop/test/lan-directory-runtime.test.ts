@@ -18,6 +18,8 @@ it('directory hints become verified profiles, then authenticated friends and rec
     d.app.people.updateProfile({name:host}); d.app.people.setVisibility('everyone'); rt.configureDirectory(config); runtimes.push(rt); stops.push(() => rt.stop());
   }
   const [ra,rb] = runtimes as [Awaited<ReturnType<typeof startPeopleRuntime>>,Awaited<ReturnType<typeof startPeopleRuntime>>];
+  expect(() => ra.configureDirectory({ ...config, certificate: 'A'.repeat(64) })).toThrow();
+  expect(ra.directory().config).toEqual(config); // failed enrollment cannot replace the working directory
   await new Promise(r => setTimeout(r, 200)); ra.networkChanged(); rb.networkChanged();
   await wait(() => ra.nearby().some(n => n.key === sb.publicKey));
   expect(ra.nearby()[0]).toMatchObject({network:'Internal Network',connection:'nearby'});
@@ -30,3 +32,11 @@ it('directory hints become verified profiles, then authenticated friends and rec
   // Disabling discovery does not terminate a healthy authenticated connection.
   expect(ra.links.connected(sb.publicKey)).toBe(true);
 }, 30000);
+
+it('an invalid saved directory certificate cannot prevent direct networking startup', async () => {
+  const d = setup(), signer = nodeSigner(newEd25519().privatePkcs8);
+  const rt = await startPeopleRuntime({ people:d.app.people, signer, tls:await createClassroomTls('invalid directory fixture',Date.now(),86400000), dir:join(d.storageDir,'people'), bind:'127.0.0.1', discover:false, allowLoopback:true, endpoints:port=>[`127.0.0.1:${port}`], directory:{url:'https://127.0.0.1:7000',certificate:'A'.repeat(64),spkiSha256:'B'.repeat(44)} });
+  stops.push(() => rt.stop());
+  expect(rt.directory().config).toBeNull(); expect(rt.directory().status).toContain('invalid');
+  expect(rt.port).toBeGreaterThan(0); expect(rt.linkPort).toBeGreaterThan(0);
+},30000);

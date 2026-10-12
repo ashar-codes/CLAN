@@ -256,7 +256,7 @@ export class ConnectionManager {
       if (address.startsWith('tcp:')) { const known = this.p.linkAddrs(sl.peerKey); if (!known.includes(address)) { try { this.p.setLinkAddrs(sl.peerKey, [address, ...known].slice(0, 6)); } catch { /* not a storable address */ } } }
       return s;
     } catch (e) {
-      if (o.expectKey && !this.session(o.expectKey)) this.set(o.expectKey, 'failed', (e as Error).message);
+      if (!this.stopped && o.expectKey && !this.session(o.expectKey)) this.set(o.expectKey, 'failed', (e as Error).message);
       throw e;
     }
   }
@@ -291,7 +291,7 @@ export class ConnectionManager {
   async tick() {
     if (this.stopped) return;
     const now = Date.now();
-    for (const s of this.sessions.values()) if (s.open) void s.flush();
+    for (const [key, s] of this.sessions) if (s.open) { if (this.p.isBlocked(key)) s.link.close('blocked'); else void s.flush(); }
     const keys = new Set([...this.p.due(Number.MAX_SAFE_INTEGER, 1000).map((d) => d.to), ...this.p.pendingDownloads().map((t) => t.peerKey)]);
     for (const key of keys) {
       if (this.session(key) || this.dialing.has(key) || this.p.isBlocked(key)) continue;
@@ -311,7 +311,7 @@ export class ConnectionManager {
     }
   }
   networkChanged() { if (this.stopped) return; this.working.clear(); for (const [key, value] of this.state) { this.state.set(key, { ...value, retryAt: 0 }); this.p.wake(key); } void this.tick(); }
-  stop() { this.stopped = true; if (this.timer) clearInterval(this.timer); for (const s of this.sessions.values()) s.link.close('stopped'); this.sessions.clear(); }
+  stop() { this.stopped = true; if (this.timer) clearInterval(this.timer); for (const s of this.sessions.values()) s.link.close('stopped'); this.sessions.clear(); for (const key of this.state.keys()) this.set(key, 'offline'); }
 }
 
 /**

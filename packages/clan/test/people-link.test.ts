@@ -58,6 +58,7 @@ describe('people over clan-link/1 (no TLS server, no router needed)', () => {
     a.cm.stop(); release();
     await expect(pending).rejects.toThrow();
     expect(a.cm.connected(b.key)).toBe(false);
+    expect(a.cm.status(b.key)?.state).toBe('offline');
     await expect(a.cm.connect(b.addr(), options)).rejects.toThrow('stopped');
   });
 
@@ -78,7 +79,8 @@ describe('people over clan-link/1 (no TLS server, no router needed)', () => {
     a.cm.networkChanged();
     await wait(() => a.p.message(message.id)?.state === 'delivered', 3000);
     expect(b.p.page(conv).filter(m => m.id === message.id)).toHaveLength(1);
-    a.p.block(b.key); a.cm.session(b.key)?.link.close('blocked'); a.cm.networkChanged();
+    a.p.block(b.key); await a.cm.tick();
+    await wait(() => !a.cm.connected(b.key)); a.cm.networkChanged();
     await expect(a.cm.connect(b.addr(), { expectKey: b.key })).rejects.toThrow('blocked');
     expect(a.cm.connected(b.key)).toBe(false);
   });

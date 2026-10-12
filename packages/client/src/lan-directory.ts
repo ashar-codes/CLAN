@@ -16,14 +16,15 @@ export function lanDirectoryClient(o: { config: DirectoryConfig; signer: PeerKey
 }
 /** Single in-flight round and generation fencing. Native availability pulses may call this; no JS timer assumption. */
 export class LanDirectoryAgent {
-  private generation = 0; private next = 0; private failures = 0; private pending: Promise<void> | null = null;
+  private generation = 0; private next = 0; private failures = 0; private pending: Promise<void> | null = null; private refreshAgain = false;
   private client: ReturnType<typeof lanDirectoryClient> | null = null;
   private readonly own: () => DirectoryAdvert[]; private readonly receive: (items: DirectoryAdvert[], expires: number) => void; private readonly status: (message: string) => void;
   constructor(own: () => DirectoryAdvert[], receive: (items: DirectoryAdvert[], expires: number) => void, status: (message: string) => void = () => {}) { this.own = own; this.receive = receive; this.status = status; }
   configure(client: ReturnType<typeof lanDirectoryClient> | null) { this.generation++; this.client = client; this.next = 0; this.failures = 0; this.receive([], 0); }
   async refresh(force = false): Promise<void> {
-    if (!this.client || !force && Date.now() < this.next) return;
-    if (this.pending) return this.pending;
+    if (!this.client) return;
+    if (this.pending) { if (force) this.refreshAgain = true; return this.pending; }
+    if (!force && Date.now() < this.next) return;
     const client = this.client, gen = this.generation;
     this.next = Date.now() + 30_000;
     return this.pending = (async () => { await null; try {
@@ -31,6 +32,6 @@ export class LanDirectoryAgent {
       if (gen !== this.generation) return;
       this.failures = 0; this.receive(r.adverts, Date.now() + r.ttlMs); this.status('Internal Network directory available. Peer authentication is still required.');
     } catch { if (gen !== this.generation) return; this.next = Date.now() + Math.min(120_000, 5000 * 2 ** Math.min(++this.failures, 5)); this.receive([], 0); this.status('LAN directory unavailable or not enrolled. Use local discovery or a trusted QR/address; check internal routing with your administrator.'); }
-    finally { this.pending = null; } })();
+    finally { this.pending = null; if (this.refreshAgain) { this.refreshAgain = false; void this.refresh(true); } } })();
   }
 }

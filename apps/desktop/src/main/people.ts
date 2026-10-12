@@ -55,7 +55,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   const rt = await start(saved).catch((e: NodeJS.ErrnoException) => { if (saved && e.code === 'EADDRINUSE') return start(); throw e; });
   if (rt.port !== saved) await writeFile(portFile, String(rt.port));
   if (rt.linkPort !== savedLink) await writeFile(linkPortFile, String(rt.linkPort));
-  c.bus.subscribe('desktop.people', PeopleChanged, (e) => send('people:changed', e.payload));
+  c.bus.subscribe('desktop.people', PeopleChanged, (e) => { send('people:changed', e.payload); if (e.payload.what === 'profile' || e.payload.what === 'relations') { void rt.refreshDiscovery(); void rt.links.tick(); } });
   c.bus.subscribe('desktop.people.alert', PeopleAlert, (e) => {
     const x = e.payload, w = BrowserWindow.getAllWindows()[0], prefs = c.notifications.prefs({ kind: 'user', userId: c.me });
     if (!prefs.direct || x.kind.startsWith('file.') && !prefs.files || w?.isFocused() || !Notification.isSupported()) return;
@@ -94,7 +94,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   });
   handle('people:visibility', async (v, ms) => { const r = p.setVisibility(z.enum(['everyone', 'friends', 'invisible']).parse(v), ms === undefined ? undefined : z.number().int().parse(ms)); await rt.refreshDiscovery(); return r; });
   handle('people:nearby', () => rt.nearby());
-  handle('people:directory', async (raw) => { if (raw !== undefined) { const config = raw === null ? null : directoryConfig(raw); await writeFile(directoryFile, JSON.stringify(config), { mode: 0o600 }); rt.configureDirectory(config); } return rt.directory(); });
+  handle('people:directory', async (raw) => { if (raw !== undefined) { const config = raw === null ? null : directoryConfig(raw); const previous = rt.directory().config; rt.configureDirectory(config); try { await writeFile(directoryFile, JSON.stringify(config), { mode: 0o600 }); } catch (e) { rt.configureDirectory(previous); throw e; } } return rt.directory(); });
   let addresses = candidateInterfaces().map((i) => i.address).sort().join(',');
   const networkTimer = setInterval(() => { const current = candidateInterfaces().map((i) => i.address).sort().join(','); if (current !== addresses) { addresses = current; rt.networkChanged(); } }, 5000); networkTimer.unref();
   handle('people:contacts', (f) => p.contacts(z.enum(['friends', 'requests', 'blocked', 'all']).parse(f ?? 'all')));

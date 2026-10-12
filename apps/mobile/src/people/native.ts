@@ -74,7 +74,7 @@ export function phonePeople(): Promise<PhonePeople> {
     await nearby.ensureNotificationConsent();
     const s = await deviceSigner();
     const signer = { publicKey: s.publicKey, sign: (b: Uint8Array) => s.sign(b) as string };
-    if (!subscribed) { subscribed = true; phoneClan().bus.subscribe('mobile.people', PeopleChanged, () => bump()); }
+    if (!subscribed) { subscribed = true; phoneClan().bus.subscribe('mobile.people', PeopleChanged, (e) => { bump(); if (e.payload.what === 'profile' || e.payload.what === 'relations') { nearby.advertise(true); void refreshDirectory(true); void nearby.cm?.tick(); } }); }
     const links = nearby.manager(signer);
     nearby.onLive(live);
     const devices = () => { try { const acc = phoneClan().sync.account(); if (!acc) return; const p = phoneClan().people; p.announceDevice(acc.accountId, `${p.myProfile().name}’s phone`); if (p.shareDeviceLinks()) void rt?.tick(); } catch { /* not linked yet */ } };

@@ -65,4 +65,14 @@ describe('administrator LAN directory security and routing', () => {
     const agent=new LanDirectoryAgent(()=>[],(ads)=>received.push(ads)); agent.configure({register:async()=>({ok:true}),lookup:()=>{lookups++;return new Promise(r=>{resolve=r;});}});
     const a=agent.refresh(true),b=agent.refresh(true); await new Promise(r=>setTimeout(r,0));expect(lookups).toBe(1);agent.configure(null);resolve({ttlMs:90000,adverts:[advert]});await Promise.all([a,b]);expect(received.every(x=>x.length===0)).toBe(true);
   });
+  it('a privacy/configuration refresh during an in-flight round publishes the newest advertisements next', async () => {
+    let release!: () => void, own: DirectoryAdvert[] = [advert]; const published: DirectoryAdvert[][] = [];
+    const gate = new Promise<void>(r => { release = r; });
+    const agent = new LanDirectoryAgent(() => own, () => {});
+    agent.configure({ register: async ads => { published.push(ads); if (published.length === 1) await gate; }, lookup: async () => ({ttlMs:90000,adverts:[]}) });
+    const first = agent.refresh(true); await new Promise(r => setTimeout(r,0));
+    own = []; void agent.refresh(true); void agent.refresh(true); release(); await first;
+    await new Promise(r => setTimeout(r,0));
+    expect(published).toEqual([[advert],[]]); agent.configure(null);
+  });
 });
