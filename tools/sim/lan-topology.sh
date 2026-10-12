@@ -37,13 +37,13 @@ done
 wait_file() { for ((i=0;i<180;i++)); do test ! -f "$fixture/$1" || return 0; sleep 1; done; cat "$fixture/"*.log; exit 1; }
 wait_file disconnect.request
 sudo ip -n clan-btc2a-r link set clan-rb down
-touch "$fixture/disconnected.ready"
+printf ready > "$fixture/disconnected.ready"
 wait_file queued.done
 sudo ip -n clan-btc2a-b addr del 10.72.0.2/24 dev clan-b
 sudo ip -n clan-btc2a-b addr add 10.72.0.3/24 dev clan-b
 sudo ip -n clan-btc2a-b route replace 10.71.0.0/24 via 10.72.0.1
 sudo ip -n clan-btc2a-r link set clan-rb up
-touch "$fixture/reconnected.ready"
+printf ready > "$fixture/reconnected.ready"
 wait_file a.done
 wait_file b.done
 wait "${pids[1]}"
