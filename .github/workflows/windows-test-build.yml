@@ -35,7 +35,7 @@ jobs:
       - run: pnpm build:desktop
       - name: Build unsigned TEST NSIS installer
         working-directory: apps/desktop
-        run: pnpm exec electron-builder --win nsis --x64 --publish never
+        run: pnpm exec electron-builder --config electron-builder.test.yml --win nsis --x64 --publish never
       - name: Install and launch on disposable runner
         shell: pwsh
         run: |
@@ -43,7 +43,7 @@ jobs:
           if (!$installer) { throw 'No NSIS installer generated' }
           $install = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Installer exit $($install.ExitCode)" }
-          $app = 'C:\Program Files\CLAN\CLAN.exe'
+          $app = 'C:\Program Files\CLAN TEST\CLAN TEST.exe'
           if (!(Test-Path $app)) { throw 'Installed application missing' }
           $env:CLASSROOM_USER_DATA = Join-Path $env:RUNNER_TEMP 'clan-test-profile'
           $process = Start-Process $app -PassThru

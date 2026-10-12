@@ -44,7 +44,11 @@ const joinError = (e: unknown) => {
 // Storage identity first (before anything reads userData or touches safeStorage); the user-visible name is set after ready.
 app.setName(LEGACY_STORAGE_NAME);
 // `--profile=name` gives a separate data dir so one machine can run teacher + students during development.
-const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10);
+const internalQa = app.isPackaged && (() => {
+  try { return JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')).clanInternalQa === true; }
+  catch { return false; }
+})();
+const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10) ?? (internalQa ? 'personal-beta-test' : undefined);
 if (profileArg && /^[\w-]{1,32}$/.test(profileArg)) app.setPath('userData', join(app.getPath('userData'), `profile-${profileArg}`));
 if (process.env.CLASSROOM_USER_DATA) app.setPath('userData', process.env.CLASSROOM_USER_DATA); // tests
 

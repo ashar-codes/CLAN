@@ -1,0 +1,9 @@
+# Internal candidates install beside the beta and use a separate default profile.
+extends: ./electron-builder.yml
+appId: app.classroomlan.desktop.qa
+productName: CLAN TEST
+extraMetadata:
+  clanInternalQa: true
+mac:
+  identity: '-'
+  target: [dmg]
