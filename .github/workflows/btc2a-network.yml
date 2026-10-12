@@ -22,7 +22,10 @@ jobs:
       - run: npm install -g pnpm@11.20.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm build:desktop
       - run: pnpm exec vitest run packages/server/test/lan-directory.test.ts packages/clan/test/people-link.test.ts packages/clan/test/people-transport.test.ts --maxWorkers=1
       - name: Actual routed TCP in disposable Linux namespaces
         if: runner.os == 'Linux'
-        run: bash tools/sim/lan-topology.sh
+        run: |
+          bash tools/sim/lan-topology.sh routed
+          bash tools/sim/lan-topology.sh bridged

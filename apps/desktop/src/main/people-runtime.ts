@@ -274,7 +274,7 @@ export async function startPeopleRuntime(o: {
   const configureDirectory = (raw: DirectoryConfig | null) => {
     directory = raw ? directoryConfig(raw, o.allowLoopback) : null;
     agent.configure(directory ? lanDirectoryClient({ config: directory, signer: o.signer, nonce: () => randomBytes(18).toString('base64url'), fetch: pinnedTransport(directory).fetch, allowLoopback: o.allowLoopback }) : null);
-    if (!directory) directoryMessage = 'LAN directory disabled.'; else void agent.refresh(true);
+    directoryMessage = directory ? 'Connecting to enrolled LAN directory…' : 'LAN directory disabled.'; if (directory) void agent.refresh(true);
   };
   if (o.directory) configureDirectory(o.directory);
   const directoryTimer = setInterval(() => void agent.refresh(), 5000); directoryTimer.unref();

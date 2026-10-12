@@ -10,6 +10,7 @@ import { startPeopleRuntime } from '../../apps/desktop/src/main/people-runtime.t
 import type { DirectoryConfig, PeerEnvelope } from '@classroom/protocol';
 
 const [role, root] = process.argv.slice(2);
+const bridged = process.env.CLAN_TOPOLOGY === 'bridged';
 if (!root || !['directory', 'a', 'b'].includes(role ?? '')) throw Error('Use: lan-topology.ts directory|a|b DISPOSABLE_DIR');
 await mkdir(root, { recursive: true, mode: 0o700 });
 const path = (name: string) => join(root, name);
@@ -31,12 +32,13 @@ if (role === 'directory') {
   await mkdir(storageDir, { recursive: true });
   const db = openDb(':memory:'), app = openClan(db, { storageDir }), p = app.people;
   const live: PeerEnvelope[] = [];
-  let address = role === 'a' ? '10.71.0.2' : '10.72.0.2';
-  const rt = await startPeopleRuntime({ people: p, signer, tls: await createClassroomTls(`DISPOSABLE ${role}`, Date.now(), 86400000), dir: storageDir, bind: '0.0.0.0', discover: false, endpoints: port => [`${address}:${port}`], tickMs: 150, onLive: e => live.push(e) });
+  let address = role === 'a' ? '10.71.0.2' : bridged ? '10.71.0.3' : '10.72.0.2';
+  const rt = await startPeopleRuntime({ people: p, signer, tls: await createClassroomTls(`DISPOSABLE ${role}`, Date.now(), 86400000), dir: storageDir, bind: '0.0.0.0', discover: bridged, endpoints: port => [`${address}:${port}`], tickMs: 150, onLive: e => live.push(e) });
   p.updateProfile({ name: `Topology ${role}` }); p.setVisibility('everyone');
   await put(`${role}.key`, signer.publicKey);
   await wait(async () => !!await exists('directory.json'), 'directory startup');
-  rt.configureDirectory(JSON.parse(await exists('directory.json')) as DirectoryConfig);
+  if (bridged) await rt.refreshDiscovery();
+  else rt.configureDirectory(JSON.parse(await exists('directory.json')) as DirectoryConfig);
   const other = await exists(role === 'a' ? 'b.key' : 'a.key');
   await wait(() => rt.nearby().some(n => n.key === other), 'cross-subnet authenticated discovery');
   // Directory discovery proves visibility, not a persistent authenticated connection.
@@ -58,7 +60,7 @@ if (role === 'directory') {
       rt.links.session(other)?.link.close('fixture network-change event');
       await put('b.offline');
       await wait(async () => !!await exists('reconnected.ready'), 'route restored');
-      address = '10.72.0.3'; rt.networkChanged();
+      address = bridged ? '10.71.0.4' : '10.72.0.3'; rt.networkChanged();
       await wait(async () => {
         for (const c of p.conversations()) for (const m of p.page(c.id)) if (m.transfer?.id && p.transfer(m.transfer?.id)?.state === 'offered') p.acceptFile(m.transfer?.id);
         await rt.tick(); return !!await exists('a.done');
@@ -93,7 +95,7 @@ if (role === 'directory') {
       rt.networkChanged();
       await wait(() => p.message(queued.id)?.state === 'delivered' && p.transfer(file.id)?.state === 'complete' && p.transfer(voice.id)?.state === 'complete', 'automatic queued text/file/voice delivery');
       await put('a.done'); await wait(async () => !!await exists('b.done'), 'receiver integrity and no duplicates');
-      console.log('PASS: C routed TCP, D pinned authenticated directory, E isolated queue, F IP change/reconnect; text receipts, consent/SHA files, voice bytes, live call signaling, no duplicates. Virtual Linux networks; no physical router or microphone test.');
+      console.log(`PASS: ${bridged ? 'A same subnet, B virtual Ethernet bridge and multicast discovery without directory' : 'C routed TCP, D pinned authenticated directory'}; E isolated queue, F IP change/reconnect; text receipts, consent/SHA files, voice bytes, live call signaling, no duplicates. Virtual Linux networks; no physical router/AP or microphone test.`);
     }
   } finally { await rt.stop(); db.close(); }
 }

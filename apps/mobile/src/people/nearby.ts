@@ -75,7 +75,34 @@ class Nearby {
   manager(signer: { publicKey: string; sign(b: Uint8Array): string }) {
     if (!this.cm) {
       this.cm = new ConnectionManager({ people: people(), signer, files: linkFiles, onLive: (e) => this.live?.(e), onChange: () => bump(), myAddrs: () => this.myAddrs() }).use(nativeLinkTransport);
-      initializeDirectory(signer, () => { const r = b64u.encode(getRandomBytes(12)), p = people(); return p.visibility() === 'invisible' || !this.running ? [] : [{ kind: 'link', r, t: p.presenceTagFor(r), endpoints: this.myAddrs().map((a) => a.slice(4)) }].filter((a) => a.endpoints.length) as import('@classroom/protocol').DirectoryAdvert[]; }, (items, expires) => { const generation = ++this.directoryGeneration; for (const [id] of this.entries) if (id.startsWith('directory:')) this.entries.delete(id); void (async () => { const links = items.filter((a) => a.kind === 'link'); const chunk = links.slice(this.directoryRound, this.directoryRound + 8); this.directoryRound = this.directoryRound + 8 >= links.length ? 0 : this.directoryRound + 8; for (const x of chunk) { if (Date.now() > expires || !this.running || generation !== this.directoryGeneration) break; const key = x.t ? people().matchPresence(x.r, x.t) : null; for (const endpoint of x.endpoints) { await this.look(`tcp:${endpoint}`, { id: `directory:${x.r}`, key, name: key ? people().contact(key)?.name ?? 'Friend' : 'Someone on the internal network', profile: null, friend: !!key, via: 'internal', address: `tcp:${endpoint}`, seenAt: Date.now() }, () => generation === this.directoryGeneration && Date.now() <= expires); if (this.entries.has(`directory:${x.r}`)) break; } } })(); });
+      initializeDirectory(signer, () => {
+        const p = people(), r = b64u.encode(getRandomBytes(12));
+        if (p.visibility() === 'invisible' || !this.running) return [];
+        const endpoints = this.myAddrs().map(a => a.slice(4));
+        return endpoints.length ? [{ kind: 'link', r, t: p.presenceTagFor(r), endpoints }] : [];
+      }, (items, expires) => {
+        const generation = ++this.directoryGeneration;
+        for (const [id] of this.entries) if (id.startsWith('directory:')) this.entries.delete(id);
+        const links = items.filter(a => a.kind === 'link');
+        const chunk = links.slice(this.directoryRound, this.directoryRound + 8);
+        this.directoryRound = this.directoryRound + 8 >= links.length ? 0 : this.directoryRound + 8;
+        const valid = () => this.running && generation === this.directoryGeneration && Date.now() <= expires;
+        void (async () => {
+          for (const advert of chunk) {
+            if (!valid()) break;
+            const key = advert.t ? people().matchPresence(advert.r, advert.t) : null;
+            for (const endpoint of advert.endpoints) {
+              if (!valid()) break;
+              await this.look(`tcp:${endpoint}`, {
+                id: `directory:${advert.r}`, key,
+                name: key ? people().contact(key)?.name ?? 'Friend' : 'Someone on the internal network',
+                profile: null, friend: !!key, via: 'internal', address: `tcp:${endpoint}`, seenAt: Date.now(),
+              }, valid);
+              if (this.entries.has(`directory:${advert.r}`)) break;
+            }
+          }
+        })();
+      });
       this.cm.onState(() => { this.keepAlive(); bump(); });
       PeerLink?.addListener('radio', (e) => this.radio(e));
       PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser) { this.setMode('app'); if (AppState.currentState !== 'active') this.stop(); } });
