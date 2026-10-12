@@ -24,6 +24,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build:desktop
       - run: pnpm exec vitest run packages/server/test/lan-directory.test.ts packages/clan/test/people-link.test.ts packages/clan/test/people-transport.test.ts --maxWorkers=1
+      - name: Windows Electron directory, People and media regressions
+        if: runner.os == 'Windows'
+        working-directory: apps/desktop
+        run: pnpm exec vitest run -c vitest.e2e.config.ts e2e/lan-directory.test.ts e2e/people.test.ts
       - name: Actual routed TCP in disposable Linux namespaces
         if: runner.os == 'Linux'
         run: |
