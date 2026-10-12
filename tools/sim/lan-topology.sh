@@ -28,9 +28,6 @@ if test "$topology" = bridged; then
   sudo ip -n clan-btc2a-r addr add 10.71.0.1/24 dev clan-br
   sudo ip -n clan-btc2a-r link set clan-br up
   sudo ip -n clan-btc2a-b addr add 10.71.0.3/24 dev clan-b
-  # No default/Internet route exists in the lab; explicitly route link-local mDNS on each client.
-  sudo ip -n clan-btc2a-a route add 224.0.0.251/32 dev clan-a
-  sudo ip -n clan-btc2a-b route add 224.0.0.251/32 dev clan-b
 else
   sudo ip -n clan-btc2a-r addr add 10.71.0.1/24 dev clan-ra
   sudo ip -n clan-btc2a-b addr add 10.72.0.2/24 dev clan-b
@@ -40,6 +37,11 @@ sudo ip -n clan-btc2a-a link set clan-a up
 sudo ip -n clan-btc2a-b link set clan-b up
 sudo ip -n clan-btc2a-r link set clan-ra up
 sudo ip -n clan-btc2a-r link set clan-rb up
+if test "$topology" = bridged; then
+  # No default/Internet route exists in the lab; explicitly route link-local mDNS on each client.
+  sudo ip -n clan-btc2a-a route add 224.0.0.251/32 dev clan-a
+  sudo ip -n clan-btc2a-b route add 224.0.0.251/32 dev clan-b
+fi
 if test "$topology" = routed; then
   sudo ip -n clan-btc2a-a route add 10.72.0.0/24 via 10.71.0.1
   sudo ip -n clan-btc2a-b route add 10.71.0.0/24 via 10.72.0.1
