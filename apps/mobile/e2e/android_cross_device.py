@@ -13,6 +13,7 @@ import json, os, re, subprocess, sys, time, urllib.request, xml.etree.ElementTre
 
 ADB = os.path.expanduser(os.environ.get('ADB', '~/Library/Android/sdk/platform-tools/adb'))
 PKG = os.environ.get('CLAN_QA_ANDROID_PACKAGE', 'app.classroomlan.student.qa')
+ACTIVITY = f'{PKG}/app.classroomlan.student.MainActivity'  # namespace stays unchanged in the QA package variant
 HOST_IP = os.environ.get('HOST_IP') or subprocess.run(['ipconfig', 'getifaddr', 'en0'], capture_output=True, text=True).stdout.strip()
 
 def adb(*a, timeout=25):
@@ -28,7 +29,7 @@ def nodes():
 def center(n): b = list(map(int, re.findall(r'\d+', n.get('bounds')))); return (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
 def find(label, edit=False, tries=14, scroll=True, clickable=False):
     for i in range(tries):
-        for n in nodes():
+        for n in reversed(nodes()):  # innermost matching control, not an entire clickable dialog/container
             if edit and n.get('class') != 'android.widget.EditText': continue
             if clickable and n.get('clickable') != 'true': continue
             for target in n.iter('node') if clickable else [n]:
@@ -111,7 +112,10 @@ def main():
         for p in procs: assert p.stdout.readline(), 'a test peer failed to start (port still in use by a previous run?)'
         cls = http(47499, '/state')
         adb('shell', 'settings', 'put', 'secure', 'stylus_handwriting_enabled', '0')
-        adb('shell', 'pm', 'clear', PKG); adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(4)
+        assert adb('shell', 'pm', 'clear', PKG).strip() == b'Success', 'disposable package clear failed'
+        launch = adb('shell', 'am', 'start', '-n', ACTIVITY)
+        assert b'Error' not in launch, 'TEST package launch failed'
+        time.sleep(4)
         if any('send you notifications' in (n.get('text') or '') for n in nodes()):
             tap('Allow')  # approve the real OS prompt on this disposable emulator only
         print('profile + core on the phone')
@@ -146,7 +150,7 @@ def main():
         tap('Done')
 
         print('Share to CLAN')
-        adb('shell', f"am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT 'Notes https://example.com/os' -n {PKG}/.MainActivity")
+        adb('shell', f"am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT 'Notes https://example.com/os' -n {ACTIVITY}")
         find('Share to CLAN'); tap('Save to my Inbox'); tap('Keep in Inbox'); find('~Inbox, '); ok('shared link + text saved to the Inbox (offline, private)')
 
         print('live CLAN')

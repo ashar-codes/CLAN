@@ -35,7 +35,7 @@ jobs:
       - run: pnpm build:desktop
       - name: Build unsigned TEST NSIS installer
         working-directory: apps/desktop
-        run: pnpm exec electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false
+        run: pnpm exec electron-builder --win nsis --x64 --publish never
       - name: Install and launch on disposable runner
         shell: pwsh
         run: |
