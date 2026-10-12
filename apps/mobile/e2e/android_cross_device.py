@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Cross-device E2E on a running Android emulator with the CLAN release build installed (scripts/android-dev.sh --release).
+"""Cross-device E2E on a disposable Android emulator with the standalone TEST build (scripts/android-qa.sh).
 
 Starts two real peers on this computer — a "laptop" (tools/sim/sync-peer.ts: @clan/core + PersonalSync + LAN sync
 server) and a CLAN host (tools/sim/class-peer.ts: classroom server with core chat + whiteboard) — and drives the phone
 through accessibility labels (uiautomator) and real Android intents:
   link by code → two-way sync → offline edits on both → conflict → keep both → unlink → refused,
   Share-to-CLAN (SEND intent) → Inbox, join a CLAN (OPAQUE + pinned TLS) → chat both ways → live board both ways →
-  file download (SHA-256 verified) and phone → CLAN file send.
+  file download (SHA-256 verified). Phone file picking/upload remains a separate device test.
 Run from the repo root:  python3 apps/mobile/e2e/android_cross_device.py
 Emulator, not a physical device: real-hardware Wi-Fi, BLE, camera and performance are not covered here."""
 import json, os, re, subprocess, sys, time, urllib.request, xml.etree.ElementTree as ET
 
 ADB = os.path.expanduser(os.environ.get('ADB', '~/Library/Android/sdk/platform-tools/adb'))
-PKG = 'app.classroomlan.student'
+PKG = os.environ.get('CLAN_QA_ANDROID_PACKAGE', 'app.classroomlan.student.qa')
 HOST_IP = os.environ.get('HOST_IP') or subprocess.run(['ipconfig', 'getifaddr', 'en0'], capture_output=True, text=True).stdout.strip()
 
 def adb(*a, timeout=25):
@@ -26,22 +26,31 @@ def nodes():
         time.sleep(1)
     return []
 def center(n): b = list(map(int, re.findall(r'\d+', n.get('bounds')))); return (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
-def find(label, edit=False, tries=14, scroll=True):
+def find(label, edit=False, tries=14, scroll=True, clickable=False):
     for i in range(tries):
         for n in nodes():
             if edit and n.get('class') != 'android.widget.EditText': continue
-            for k in ('content-desc', 'text', 'resource-id'):
-                v = n.get(k) or ''
-                if v == label or (label.startswith('~') and label[1:] in v): return center(n)
+            if clickable and n.get('clickable') != 'true': continue
+            for target in n.iter('node') if clickable else [n]:
+                for k in ('content-desc', 'text', 'resource-id'):
+                    v = target.get(k) or ''
+                    if v == label or (label.startswith('~') and label[1:] in v): return center(n)
         if scroll and i % 2: adb('shell', 'input', 'swipe', '24', *(('1700', '24', '900') if i < tries // 2 else ('700', '24', '1900')), '300')  # at the edge: a board canvas would take the swipe  # down, then back up
         time.sleep(0.6)
     raise AssertionError(f'not on screen: {label}')
 def tap(label):
-    x, y = find(label)
-    for _ in range(3):  # keep clear of the status bar and the tab bar: an edge tap can miss
-        if 260 < y < 2100: break
-        adb('shell', 'input', 'swipe', '24', '1100' if y <= 260 else '1500', '24', '1500' if y <= 260 else '1100', '300'); time.sleep(0.4); x, y = find(label)
-    adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.7)
+    # Accessibility can report a scrolled child's bounds under the fixed bottom tabs.
+    # Derive the safe area from this emulator, rather than assuming a 2340px display.
+    dimensions = re.findall(r'(\d+)x(\d+)', adb('shell', 'wm', 'size').decode())
+    assert dimensions, 'cannot determine emulator viewport'
+    height = int(dimensions[-1][1]); top, bottom = int(height * .045), int(height * .89)
+    for _ in range(12):
+        x, y = find(label, clickable=True)
+        if top < y < bottom or label in ('Home', 'Study', 'People', 'Inbox', 'Diary', 'Me'):
+            adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.7); return
+        start, end = (int(height * .4), int(height * .75)) if y <= top else (int(height * .8), int(height * .4))
+        adb('shell', 'input', 'swipe', '24', str(start), '24', str(end), '300'); time.sleep(0.4)
+    raise AssertionError(f'button is obscured by system/tab bars: {label}')
 def open_chat():
     # Approval mounts chat asynchronously and can show an OS notification prompt after joining.
     # Observe each actual window instead of tapping stale room coordinates through that prompt.
@@ -65,6 +74,8 @@ def type_(label, text, dismiss=True):
     adb('shell', 'input', 'text', text.replace(' ', '%s'))
     if dismiss: adb('shell', 'input', 'keyevent', '111')
     time.sleep(0.3)
+    if label in ('Link code', 'Computer address (only if not found)', 'Six digit classroom code', 'Host address'):
+        until(lambda: any(n.get('class') == 'android.widget.EditText' and n.get('content-desc') == label and n.get('text') == text for n in nodes()), 'text entered in ' + label)
 def until(f, what, secs=40):
     end = time.time() + secs
     while time.time() < end:
@@ -93,6 +104,7 @@ def sync_now():
     raise AssertionError('Sync now did not reach the laptop')
 
 def main():
+    assert adb('shell', 'getprop', 'ro.kernel.qemu').strip() == b'1', 'this destructive QA scenario is emulator-only'
     procs = [subprocess.Popen(['node', 'tools/sim/sync-peer.ts'], stdout=subprocess.PIPE, text=True),
              subprocess.Popen(['node', 'tools/sim/class-peer.ts', '--host', HOST_IP], stdout=subprocess.PIPE, text=True)]
     try:

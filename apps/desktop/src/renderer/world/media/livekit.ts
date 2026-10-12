@@ -9,7 +9,9 @@ import { SCREEN_PROFILES, type MediaDiagnostics, type MediaQuality, type MediaTr
 export function createTransport(): MediaTransport {
   // Separate publisher/subscriber connections avoid Chromium rejecting bundled VP8 payloads with different
   // start-bitrate parameters when a member first watches, then presents. Media still uses the same local SFU.
-  const room = new Room({ adaptiveStream: true, dynacast: true, disconnectOnPageLeave: true, singlePeerConnection: false });
+  // Chromium's visibility observer can suspend a live screen inside the transformed
+  // room wall. Control subscription explicitly when the view attaches/leaves instead.
+  const room = new Room({ adaptiveStream: false, dynacast: true, disconnectOnPageLeave: true, singlePeerConnection: false });
   let video: LocalVideoTrack | null = null, audio: LocalAudioTrack | null = null;
   const screenSubs = new Set<(v: ScreenView | null, who: string | null) => void>();
   const stateSubs = new Set<(s: 'connected' | 'reconnecting' | 'disconnected') => void>();
@@ -23,8 +25,8 @@ export function createTransport(): MediaTransport {
     remote = (v?.t.track as RemoteTrack | undefined) ?? null;
     const view: ScreenView | null = v ? {
       hasAudio: !!a,
-      attach: (el) => { v.t.track!.attach(el); a?.t.track?.attach(el); },
-      detach: (el) => { v.t.track?.detach(el); a?.t.track?.detach(el); },
+      attach: (el) => { v.t.setEnabled(true); a?.t.setEnabled(true); v.t.track!.attach(el); a?.t.track?.attach(el); },
+      detach: (el) => { v.t.track?.detach(el); a?.t.track?.detach(el); v.t.setEnabled(false); a?.t.setEnabled(false); },
     } : null;
     for (const f of screenSubs) f(view, v?.p.identity ?? null);
   };

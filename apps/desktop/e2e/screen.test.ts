@@ -67,6 +67,10 @@ it('Study Group: member presents → host wall shows live frames → switch sour
   expect(await host.getByTestId('wall-state').textContent()).toBe('Sara is presenting their screen');
   const navy = await sample(host);
   expect(navy.blue).toBeGreaterThan(navy.red); // screen pattern: navy background
+  await host.getByRole('button', { name: 'Leave view', exact: true }).click();
+  expect(await host.getByTestId('screen-video').count()).toBe(0);
+  await host.getByRole('button', { name: 'Watch again', exact: true }).click();
+  await expect.poll(async () => (await sample(host)).distinct, { timeout: 20_000 }).toBeGreaterThanOrEqual(4);
   // switch source without ending anything
   await sara.getByRole('button', { name: 'Switch source' }).click();
   await present(sara, 'window');

@@ -10,7 +10,8 @@ export function testPatternStream(variant: 'screen' | 'window', size: { w: numbe
     g.fillStyle = '#fffbf3'; g.font = 'bold 44px sans-serif'; g.fillText(`${variant.toUpperCase()} TEST PATTERN · frame ${f}`, 40, 80); g.fillText(new Date().toISOString().slice(11, 23), 40, size.h - 70);
     f++;
   };
-  const stream = c.captureStream(0);
+  // Advertise the source frame rate as well as requesting every newly drawn frame.
+  const stream = c.captureStream(fps);
   const track = stream.getVideoTracks()[0]! as CanvasCaptureMediaStreamTrack;
   const frame = () => { draw(); track.requestFrame(); };
   frame();

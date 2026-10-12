@@ -111,7 +111,9 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   // Direct local edits to CLAN-owned data follow the same fence as the host server.
   for (const m of [chat, whiteboard, files]) m.guardHostWrites((clanId) => hosting.localWriteBlocked(clanId));
   clans.setCleanupGuard((clanId) => hosting.cleanupBlocked(clanId));
-  void hosting.ready(); // rollback fence check (hosts await it again before serving) // member links and adopted classroom files of the imported CLAN
+  // Retain the rejected readiness promise: hosts must await it before serving. Background initialization
+  // must not crash unrelated personal data use when a corrupt fence correctly refuses hosting.
+  void hosting.ready().catch(() => {});
 
   /** Internal lifecycle step. Requires durable authorized intent; filesystem/server cleanup still must succeed
    * before completeCleanup. It deliberately never deletes private study rows, signing identities or other CLANs. */

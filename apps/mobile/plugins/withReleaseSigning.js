@@ -41,6 +41,9 @@ module.exports = (config) => withAppBuildGradle(config, (c) => {
             signingConfig signingConfigs.debug
         }`);
   }
+  if (process.env.CLAN_INTERNAL_QA === '1' && !g.includes('applicationIdSuffix ".qa"')) {
+    g = g.replace(/(\bqa\s*\{\s*initWith release)/, '$1\n            applicationIdSuffix ".qa"\n            resValue "string", "app_name", "CLAN TEST"');
+  }
   c.modResults.contents = g;
   return c;
 });

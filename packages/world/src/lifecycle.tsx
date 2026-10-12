@@ -7,7 +7,8 @@ export function SceneLifecycle({ onLost }: { onLost(): void }) {
     const canvas = gl.domElement;
     const lost = (event: Event) => { event.preventDefault(); onLost(); };
     canvas.addEventListener('webglcontextlost', lost);
-    return () => canvas.removeEventListener('webglcontextlost', lost);
+    canvas.dataset.clanSceneReady = 'true';
+    return () => { delete canvas.dataset.clanSceneReady; canvas.removeEventListener('webglcontextlost', lost); };
   }, [gl, onLost]);
   return null;
 }

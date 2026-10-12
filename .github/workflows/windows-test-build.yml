@@ -1,0 +1,73 @@
+name: Windows TEST installer
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ['claude/phase-14.3-cd']
+    types: [opened, reopened, synchronize]
+    paths: ['apps/**', 'packages/**', 'native/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.github/workflows/windows-test-build.yml']
+permissions:
+  contents: read
+jobs:
+  installer:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'qa/phase-14.3-local'
+    env:
+      CLAN_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '8.0.x'
+      - run: npm install -g pnpm@11.20.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: dotnet publish native/windows-direct -c Release -o native/windows-direct/bin/publish
+      - name: Fetch pinned Windows SFU
+        shell: bash
+        run: sh native/livekit/fetch.sh win32-x64
+      - run: pnpm build:desktop
+      - name: Build unsigned TEST NSIS installer
+        working-directory: apps/desktop
+        run: pnpm exec electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false
+      - name: Install and launch on disposable runner
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/desktop/release/*.exe | Select-Object -First 1
+          if (!$installer) { throw 'No NSIS installer generated' }
+          $install = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exit $($install.ExitCode)" }
+          $app = 'C:\Program Files\CLAN\CLAN.exe'
+          if (!(Test-Path $app)) { throw 'Installed application missing' }
+          $env:CLASSROOM_USER_DATA = Join-Path $env:RUNNER_TEMP 'clan-test-profile'
+          $process = Start-Process $app -PassThru
+          try {
+            $db = Join-Path $env:CLASSROOM_USER_DATA 'teacher.db'
+            for ($i=0; $i -lt 60 -and !(Test-Path $db); $i++) { Start-Sleep 1 }
+            if (!(Test-Path $db)) { throw 'Installed app did not initialize disposable database' }
+            $process.Refresh()
+            if ($process.HasExited) { throw 'Installed app exited during startup' }
+          } finally { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
+      - name: Label and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force windows-test-delivery | Out-Null
+          $short = $env:CLAN_SOURCE_SHA.Substring(0,7)
+          $installer = Get-ChildItem apps/desktop/release/*.exe | Select-Object -First 1
+          $output = "windows-test-delivery/CLAN-0.1.0-TEST-UNVERIFIED-$short-x64.exe"
+          Copy-Item $installer.FullName $output
+          $sha = (Get-FileHash $output -Algorithm SHA256).Hash.ToLower()
+          "$sha  $(Split-Path $output -Leaf)" | Set-Content windows-test-delivery/SHA256SUMS -Encoding ascii
+          @{commit=$env:CLAN_SOURCE_SHA;version='0.1.0';signing='unsigned';build='Windows x64 NSIS';smoke='runner install and startup passed';physicalTests='NOT TESTED';publicRelease='NOT APPROVED'} | ConvertTo-Json | Set-Content windows-test-delivery/build-evidence.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: CLAN-Windows-TEST-UNVERIFIED
+          path: windows-test-delivery/
+          retention-days: 7
+          if-no-files-found: error

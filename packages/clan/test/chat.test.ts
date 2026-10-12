@@ -73,8 +73,11 @@ describe('group conversation', () => {
     sock(b).send({ t: 'chat.send', id: randomUUID(), thread: { kind: 'direct', to: a.handle }, body: 'x', replyTo: q });
     expect((await sock(b).next('chat.nack')).code).toBe('bad_reply');
     for (let i = 0; i < 3; i++) sock(b).send({ t: 'chat.react', id: q, reaction: '👍', on: true });
+    // Separate sockets have no send-order guarantee. Observe the first applied
+    // reaction before sending the second; retain the exact order/idempotence assertion.
+    await sock(b).next('chat.message', (m) => m.message.id === q && m.message.reactions.some((x) => x.by.includes(b.handle)));
     sock(a).send({ t: 'chat.react', id: q, reaction: '👍', on: true });
-    await new Promise((res) => setTimeout(res, 150));
+    await sock(a).next('chat.message', (m) => m.message.id === q && m.message.reactions.some((x) => x.by.includes(a.handle) && x.by.includes(b.handle)));
     const after = (await json<{ messages: ChatMessageView[] }>(await pageOf(s, a.token, qm.threadId))).messages[0]!;
     expect(after.reactions).toEqual([{ reaction: '👍', by: [b.handle, a.handle] }]);
     sock(b).send({ t: 'chat.react', id: q, reaction: '👍', on: false });

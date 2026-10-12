@@ -1,5 +1,5 @@
 #!/bin/sh
-# Isolated native compile. Produces an unsigned .app for SDK verification, never an installable IPA or distribution.
+# Isolated native compile. Simulator apps are ad-hoc signed for Keychain access; device checks remain unsigned.
 # Xcode first launch/license + CocoaPods must already be ready. Existing profiles/signing settings are not changed.
 set -eu
 SRC="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -23,6 +23,7 @@ CI=1 npx expo prebuild -p ios --no-install
 pod install --project-directory=ios
 SDK=iphonesimulator
 DESTINATION='generic/platform=iOS Simulator'
-case "${1:-}" in --device-compile) SDK=iphoneos; DESTINATION='generic/platform=iOS';; '') ;; *) echo 'Usage: ios-build.sh [--device-compile]' >&2; exit 1;; esac
+SIGNING=YES
+case "${1:-}" in --device-compile) SDK=iphoneos; DESTINATION='generic/platform=iOS'; SIGNING=NO;; '') ;; *) echo 'Usage: ios-build.sh [--device-compile]' >&2; exit 1;; esac
 xcodebuild -workspace ios/CLAN.xcworkspace -scheme CLAN -configuration Release -sdk "$SDK" \
-  -destination "$DESTINATION" -derivedDataPath "$DST/ios-derived" CODE_SIGNING_ALLOWED=NO build
+  -destination "$DESTINATION" -derivedDataPath "$DST/ios-derived" CODE_SIGNING_ALLOWED="$SIGNING" CODE_SIGN_IDENTITY=- build

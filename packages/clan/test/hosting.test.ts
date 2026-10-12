@@ -87,6 +87,21 @@ async function handoff(w: World, o: { src?: Dev; srcKey?: Signer; dst?: Dev; dst
 }
 
 describe('persistent hosting authority', () => {
+  it('refuses a corrupt rollback fence and never overwrites it with a lower epoch', async () => {
+    const w = world();
+    try {
+      await w.phone.h.fenceSettled();
+      const path = join(w.phone.storageDir, 'hosting', 'fence.json');
+      writeFileSync(path, '{corrupt');
+      const h = restart(w.phone, () => w.ownerKey.publicKey);
+      await expect(h.ready()).rejects.toThrow();
+      const other = w.phone.app.clans.create({ type: 'STUDY_GROUP', name: 'Another group', createdBy: w.phone.app.me });
+      h.establish(other.id, w.phone.app.me, w.ownerKey);
+      await expect(h.fenceSettled()).rejects.toThrow();
+      expect(readFileSync(path, 'utf8')).toBe('{corrupt');
+    } finally { w.close(); }
+  });
+
   it('only the owner establishes authority; genesis is writable by the owner device only', () => {
     const w = world();
     try {

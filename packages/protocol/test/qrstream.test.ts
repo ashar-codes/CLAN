@@ -28,12 +28,29 @@ describe('clan-qrx/1 animated QR transfer', () => {
     const bytes = random(48), tx = encodeTransfer({ bytes, name: 'cycle.txt', mime: 'text/plain' }, { blockSize: 16 });
     const rx = new QrxReceiver(); rx.push(tx.frame(0)); rx.accept();
     const wanted = new Set(['0,1', '1,2', '0,1,2']);
-    for (let index = 3; index < 5000 && wanted.size; index++) {
-      const row = blocksFor(index, 3, parseInt(tx.id.slice(0, 8), 16)).sort().join(',');
-      if (wanted.delete(row)) rx.push(tx.frame(index + Math.floor(index / 7) + 1));
+    for (let n = 4; n < 5000 && wanted.size; n++) {
+      const frame = tx.frame(n), f = parseFrame(frame);
+      if (f?.kind !== 'data' || f.index < 3) continue;
+      const row = blocksFor(f.index, 3, parseInt(tx.id.slice(0, 8), 16)).sort().join(',');
+      if (wanted.delete(row)) rx.push(frame);
     }
     expect(wanted.size).toBe(0);
     expect(rx.result().bytes).toEqual(bytes);
+  });
+
+  it('recovers across independent transfer salts with burst loss within two stream lengths', () => {
+    const bytes = random(40_000, 7);
+    for (let run = 0; run < 50; run++) {
+      const tx = encodeTransfer({ bytes, name: 'loss.bin', mime: 'application/octet-stream' }, { blockSize: 400 });
+      const rx = new QrxReceiver(); rx.push(tx.frame(0)); rx.accept();
+      let done = false;
+      for (let n = 1; n < tx.minFrames * 2; n++) {
+        if (n % 13 === 5 || n % 17 === 0 || n % 29 === 0 || n < 5) continue;
+        if (rx.push(tx.frame(n)) === 'done') { done = true; break; }
+      }
+      expect(done).toBe(true);
+      expect(rx.result().bytes).toEqual(bytes);
+    }
   });
 
   it('drops a CRC-valid data frame whose header is truncated', () => {

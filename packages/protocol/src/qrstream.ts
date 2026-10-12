@@ -149,6 +149,28 @@ export function encodeTransfer(file: { bytes: Uint8Array; name: string; mime: st
   if (metaFrame.length > 2900) throw new Error('Description too long for one QR frame.');
   const padded = new Uint8Array(meta.k * bs); padded.set(blob);
   const salt = saltOf(id);
+  // Sequential random symbols can neglect a lost source block for hundreds of frames. Select repair
+  // symbols with balanced coverage, retaining the v1 index-to-block mapping for existing receivers.
+  // Bound both the search and cache; beyond the repair window the original fountain stream continues.
+  const repairs: number[] = [], coverage = new Uint32Array(meta.k).fill(1);
+  let candidate = meta.k;
+  const repairIndex = (offset: number) => {
+    if (offset >= meta.k * 2) return meta.k * 65 + offset;
+    while (repairs.length <= offset) {
+      let best = candidate, bestBlocks: number[] = [], score = -1;
+      const degree = Math.min(8, blocksFor(candidate, meta.k, salt).length);
+      for (let n = 0; n < 32; n++, candidate++) {
+        const blocks = blocksFor(candidate, meta.k, salt);
+        if (blocks.length !== degree) continue; // retain sparse degree variation and bounded peeling
+        const s = blocks.reduce((sum, j) => sum + 1 / (coverage[j]! ** 2), 0) / Math.sqrt(blocks.length);
+        if (s > score) { score = s; best = candidate; bestBlocks = blocks; }
+      }
+      if (!bestBlocks.length) bestBlocks = blocksFor(best, meta.k, salt);
+      repairs.push(best);
+      for (const j of bestBlocks) coverage[j]!++;
+    }
+    return repairs[offset]!;
+  };
   const dataFrame = (index: number) => {
     const body = new Uint8Array(14 + bs), dv = new DataView(body.buffer);
     dv.setUint32(0, index); dv.setUint32(4, meta.k); dv.setUint16(8, bs); dv.setUint32(10, meta.len);
@@ -159,7 +181,11 @@ export function encodeTransfer(file: { bytes: Uint8Array; name: string; mime: st
   return {
     id, meta, info,
     /** Frame i of the stream: a META frame every few frames, otherwise the next fountain symbol. */
-    frame(i: number) { if (i % META_EVERY === 0) return metaFrame; return dataFrame(i - Math.floor(i / META_EVERY) - 1); },
+    frame(i: number) {
+      if (i % META_EVERY === 0) return metaFrame;
+      const symbol = i - Math.floor(i / META_EVERY) - 1;
+      return dataFrame(symbol < meta.k ? symbol : repairIndex(symbol - meta.k));
+    },
     /** Frames needed at minimum (K data + metas) — real transfers need ~5–15 % more. */
     get minFrames() { return meta.k + Math.ceil(meta.k / (META_EVERY - 1)) + 1; },
   };

@@ -97,59 +97,72 @@ export async function startPeopleRuntime(o: {
     if (!r?.tls || !r.endpoints.length) return null;
     return r.endpoints.map((endpoint) => peerClient({ endpoint, tls: r.tls!, peerKey: key, signer: o.signer }));
   };
-  let ticking: Promise<void> | null = null;
-  const tick = (): Promise<void> => ticking ??= (async () => {
-    await null; // never settle synchronously (see LinkSession.flush)
-    try {
-      const due = p.due(now());
-      const byPeer = new Map<string, typeof due>();
-      for (const d of due) byPeer.set(d.to, [...(byPeer.get(d.to) ?? []), d]);
-      for (const [key, items] of byPeer) {
-        if (cm.connected(key)) continue; // an open link session delivers it (with an authenticated receipt)
-        const clients = clientFor(key);
-        if (!clients) { const sent = server.notifyPhone(key); for (const d of items) p.deliveryFailed(d.id, sent ? 'Waiting for the phone to confirm.' : 'Not reachable now.'); continue; }
-        let done = false;
-        for (const c of clients) {
-          try {
-            const results = await c.send(items.map((d) => d.envelope), intro(key));
-            items.forEach((d, i) => { const r = results[i]; if (r?.ok) p.delivered(d.id); else p.deliveryFailed(d.id, r?.error ?? 'refused', r?.final ?? true); });
-            done = true; break;
-          } catch (e) { if (e instanceof PeerHttpError && e.status >= 400 && e.status < 500 && e.status !== 429) { for (const d of items) p.deliveryFailed(d.id, e.message, true); done = true; break; } }
+  let ticking: Promise<void> | null = null, nextTick: Promise<void> | null = null;
+  let stopped = false;
+  const flushLinks = () => Promise.all([...new Set(p.due(Number.MAX_SAFE_INTEGER, 1000).map((d) => d.to))]
+    .map((key) => cm.session(key)?.flush()));
+  const tick = (): Promise<void> => {
+    if (stopped) return Promise.resolve();
+    // A change during a round may be newer than its outbox snapshot. Coalesce callers
+    // into one subsequent round rather than returning a promise that predates their work.
+    if (ticking) return nextTick ??= ticking.then(() => { nextTick = null; return tick(); });
+    return ticking = (async () => {
+      await null; // never settle synchronously (see LinkSession.flush)
+      try {
+        await cm.tick();
+        await flushLinks();
+        const due = p.due(now());
+        const byPeer = new Map<string, typeof due>();
+        for (const d of due) byPeer.set(d.to, [...(byPeer.get(d.to) ?? []), d]);
+        for (const [key, items] of byPeer) {
+          if (cm.connected(key)) continue; // an open link session delivers it (with an authenticated receipt)
+          const clients = clientFor(key);
+          if (!clients) { const sent = server.notifyPhone(key); for (const d of items) p.deliveryFailed(d.id, sent ? 'Waiting for the phone to confirm.' : 'Not reachable now.'); continue; }
+          let done = false;
+          for (const c of clients) {
+            try {
+              const results = await c.send(items.map((d) => d.envelope), intro(key));
+              items.forEach((d, i) => { const r = results[i]; if (r?.ok) p.delivered(d.id); else p.deliveryFailed(d.id, r?.error ?? 'refused', r?.final ?? true); });
+              done = true; break;
+            } catch (e) { if (e instanceof PeerHttpError && e.status >= 400 && e.status < 500 && e.status !== 429) { for (const d of items) p.deliveryFailed(d.id, e.message, true); done = true; break; } }
+          }
+          if (!done) for (const d of items) p.deliveryFailed(d.id, 'Not reachable now.');
+          changed('delivered');
         }
-        if (!done) for (const d of items) p.deliveryFailed(d.id, 'Not reachable now.');
-        changed('delivered');
-      }
-      for (const t of p.pendingDownloads()) {
-        if (downloadsNow.has(t.id) || cm.connected(t.peerKey)) continue;
-        const clients = clientFor(t.peerKey);
-        if (!clients) continue; // a phone pushes its own files
-        downloadsNow.add(t.id);
-        void (async () => {
-          const dest = join(incoming, t.id);
-          try {
-            for (const c of clients) {
-              try { await c.download(t.id, dest, t.size, (n) => p.progress(t.id, n)); await p.completeDownload(t.id, dest); changed('transfers'); return; }
-              catch (e) {
-                if (e instanceof PeerHttpError && e.status === 404) { p.failDownload(t.id, 'The sender no longer offers this file.'); return; }
-                if ((e as { code?: string }).code === 'ENOSPC') { p.failDownload(t.id, 'The disk is full. Free some space, then retry.'); return; }
-                if ((e as { code?: string }).code === 'corrupt') return;
+        for (const t of p.pendingDownloads()) {
+          if (downloadsNow.has(t.id) || cm.connected(t.peerKey)) continue;
+          const clients = clientFor(t.peerKey);
+          if (!clients) continue; // a phone pushes its own files
+          downloadsNow.add(t.id);
+          void (async () => {
+            const dest = join(incoming, t.id);
+            try {
+              for (const c of clients) {
+                try { await c.download(t.id, dest, t.size, (n) => p.progress(t.id, n)); await p.completeDownload(t.id, dest); changed('transfers'); return; }
+                catch (e) {
+                  if (e instanceof PeerHttpError && e.status === 404) { p.failDownload(t.id, 'The sender no longer offers this file.'); return; }
+                  if ((e as { code?: string }).code === 'ENOSPC') { p.failDownload(t.id, 'The disk is full. Free some space, then retry.'); return; }
+                  if ((e as { code?: string }).code === 'corrupt') return;
+                }
               }
-            }
-          } finally { downloadsNow.delete(t.id); await rm(dest, { force: true }).catch(() => {}); }
-        })();
-      }
-      // pictures of people we can reach over TLS (link sessions fetch their own)
-      for (const c of p.contacts('all').slice(0, 50)) {
-        const want = p.wantedAvatar(c.key);
-        if (!want || cm.connected(c.key) || avatarTried.has(`${c.key}:${want}`)) continue;
-        avatarTried.add(`${c.key}:${want}`);
-        const clients = clientFor(c.key); if (!clients) continue;
-        void clients[0]!.avatar().then((a) => { if (a) { p.storeAvatar(c.key, a.mime, a.data); changed('contacts'); } }, () => {});
-      }
-      await p.sweep();
-    } catch (e) { console.warn('[people]', (e as Error).message); }
-    finally { ticking = null; }
-  })();
+            } finally { downloadsNow.delete(t.id); await rm(dest, { force: true }).catch(() => {}); }
+          })();
+        }
+        // pictures of people we can reach over TLS (link sessions fetch their own)
+        for (const c of p.contacts('all').slice(0, 50)) {
+          const want = p.wantedAvatar(c.key);
+          if (!want || cm.connected(c.key) || avatarTried.has(`${c.key}:${want}`)) continue;
+          avatarTried.add(`${c.key}:${want}`);
+          const clients = clientFor(c.key); if (!clients) continue;
+          void clients[0]!.avatar().then((a) => { if (a) { p.storeAvatar(c.key, a.mime, a.data); changed('contacts'); } }, () => {});
+        }
+        await cm.tick(); // include sessions that connected during the HTTPS round
+        await flushLinks();
+        await p.sweep();
+      } catch (e) { console.warn('[people]', (e as Error).message); }
+      finally { ticking = null; }
+    })();
+  };
   const timer = setInterval(() => void tick(), o.tickMs ?? 3000);
   timer.unref?.();
 
@@ -252,7 +265,7 @@ export async function startPeopleRuntime(o: {
     nearby: () => [...nearby.values()].filter((n) => now() - n.seenAt < 10 * 60_000 && !p.isBlocked(n.key)).map((n) => ({ ...n, relation: p.contact(n.key)?.relation ?? 'none' })),
     refreshDiscovery: () => { adAt = 0; return advertise(); },
     sendLive, tick, server, links: cm, linkPort,
-    async stop() { clearInterval(timer); clearInterval(adTimer); stopBrowse(); stopLinkBrowse(); cm.stop(); await stopAd?.(); await links.close(); await server.close(); },
+    async stop() { stopped = true; clearInterval(timer); clearInterval(adTimer); stopBrowse(); stopLinkBrowse(); cm.stop(); await ticking; await stopAd?.(); await links.close(); await server.close(); },
   };
 }
 export const isUuid = (s: string) => UUID.test(s);

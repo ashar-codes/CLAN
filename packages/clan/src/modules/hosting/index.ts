@@ -103,12 +103,28 @@ export class HostAuthority {
   private fenceFile() { return join(this.dir, 'fence.json'); }
   private loaded: Promise<void> | null = null;
   private fenceWrites: Promise<void> = Promise.resolve();
+  private fenceFailure: unknown = null;
+  private async readFence(): Promise<Record<string, { epoch: number; relinquished: boolean }>> {
+    let bytes: Uint8Array;
+    try { bytes = await readFile(this.fenceFile()); }
+    catch (e) { if ((e as { code?: string }).code === 'ENOENT') return {}; throw e; }
+    const parsed = z.object({ v: z.literal(1), clans: z.record(z.string(), z.object({
+      epoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), relinquished: z.boolean(),
+    })) }).parse(JSON.parse(new TextDecoder().decode(bytes)));
+    return parsed.clans;
+  }
   /** Await before hosting a session (desktop does so before starting a host server). Idempotent. */
-  ready() { return this.loaded ??= this.checkFence(); }
+  async ready() {
+    await (this.loaded ??= this.checkFence());
+    await this.fenceWrites;
+    if (this.fenceFailure) throw this.fenceFailure;
+  }
   private async checkFence() {
-    let f: { clans?: Record<string, { epoch: number; relinquished: boolean }> } = {};
-    try { f = JSON.parse(new TextDecoder().decode(await readFile(this.fenceFile()))); } catch { /* first run, or no fence yet */ }
-    for (const [clanId, x] of Object.entries(f.clans ?? {})) {
+    const clans = await this.readFence(); // corruption/unreadable fences must refuse hosting, never look like first run
+    // Startup may finish after this disposable/closing Node database was closed.
+    // No authority can be served from a closed database; do not access it after I/O.
+    if ((this.db as Db & { readonly isOpen?: boolean }).isOpen === false) return;
+    for (const [clanId, x] of Object.entries(clans)) {
       const r = this.row(clanId);
       if (!r || typeof x?.epoch !== 'number') continue;
       const older = r.epoch < x.epoch || (r.epoch === x.epoch && x.relinquished && (r.state === 'active' || r.state === 'frozen'));
@@ -122,8 +138,7 @@ export class HostAuthority {
     const write = async () => {
       await mkdir(this.dir, { recursive: true });
       // never lower what the file already promises (a restored database must not rewrite the fence downwards)
-      let prev: Record<string, { epoch: number; relinquished: boolean }> = {};
-      try { prev = JSON.parse(new TextDecoder().decode(await readFile(this.fenceFile()))).clans ?? {}; } catch { /* none yet */ }
+      const prev = await this.readFence();
       for (const [id, p] of Object.entries(prev)) { const n = clans[id]; if (!n || p.epoch > n.epoch || (p.epoch === n.epoch && p.relinquished)) clans[id] = p; }
       const tmp = `${this.fenceFile()}.tmp`;
       await rm(tmp, { force: true });
@@ -131,11 +146,11 @@ export class HostAuthority {
       try { await fh.write(new TextEncoder().encode(JSON.stringify({ v: 1, clans }))); } finally { await fh.close(); }
       await rename(tmp, this.fenceFile());
     };
-    // Best effort: a failed write only weakens rollback detection (the database commit already happened).
-    return this.fenceWrites = this.fenceWrites.then(write, write).catch(() => {});
+    // The database commit already happened. Keep its data, but refuse hosting until durable fencing recovers.
+    return this.fenceWrites = this.fenceWrites.then(write).then(() => { this.fenceFailure = null; }, (e) => { this.fenceFailure = e; });
   }
   /** Resolves when the rollback fence file reflects every committed hosting change so far. */
-  fenceSettled() { return this.fenceWrites.catch(() => {}); }
+  async fenceSettled() { await this.fenceWrites; if (this.fenceFailure) throw this.fenceFailure; }
 
   /** Each owning module (and the host server) contributes one section; both ends must register the same set. */
   register(p: CheckpointProvider) {

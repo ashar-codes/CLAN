@@ -39,7 +39,9 @@ it('Astra object actions, responsive layout, reduced motion and GPU fallback sta
     (window as unknown as { __sceneListeners: Set<unknown> }).__sceneListeners = active;
   });
   await tab('Study');
-  await p.locator('canvas').waitFor(); await p.locator('canvas').dispatchEvent('webglcontextlost');
+  // The DOM canvas exists before the asynchronous Three.js scene has installed its lifecycle handler.
+  const readyCanvas = p.locator('canvas[data-clan-scene-ready="true"]');
+  await readyCanvas.waitFor(); await readyCanvas.dispatchEvent('webglcontextlost');
   await p.getByText('3D is unavailable. Your courses are ready below.').waitFor();
   expect(await p.locator('canvas').count()).toBe(0);
   expect(await p.evaluate(() => (window as unknown as { __sceneListeners: Set<unknown> }).__sceneListeners.size)).toBe(0);

@@ -40,7 +40,8 @@ export default function App() {
   const [ready, setReady] = useState<string | null>(null);
   const [share, clearShare] = useIncomingShare();
 
-  useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); }); }, []);
+  useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); })
+    .catch((e) => setReady(`CLAN could not open its secure identity: ${(e as Error).message}`)); }, []);
   // CLAN core (encrypted database) opens once the profile exists; then personal sync runs while the app is in front.
   useEffect(() => {
     if (!profile?.fullName || editing) return;
@@ -51,10 +52,10 @@ export default function App() {
       c.sync.onApplied(() => bump());
       stop = startSyncSchedule();
       setReady('ok');
-    }, (e) => setReady(`CLAN could not open its data: ${(e as Error).message}`));
+    }).catch((e) => setReady(`CLAN could not open its data: ${(e as Error).message}`));
     return () => stop();
   }, [profile?.fullName, editing]);
-  if (!profile) return null;
+  if (!profile) return ready ? <SafeAreaProvider><SafeAreaView style={[s.fill, { backgroundColor: c.bg, padding: 24 }]}><Text style={{ color: c.text }} accessibilityRole="alert">{ready}</Text></SafeAreaView></SafeAreaProvider> : null;
 
   return (
     <SafeAreaProvider><SafeAreaView style={[s.fill, { backgroundColor: c.bg }]} edges={['top', 'bottom', 'left', 'right']}>
