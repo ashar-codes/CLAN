@@ -18,6 +18,7 @@ import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroo
 import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
+import { backgroundWindow } from './background.ts';
 import { registerStudy } from './study.ts';
 import { registerSync } from './sync.ts';
 import { registerHosting } from './hosting.ts';
@@ -410,6 +411,7 @@ function createWindow() {
     // Calls, recording and presenting must continue when another window is in front.
     webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
   });
+  backgroundWindow(win);
   // Links (Saved, chat) open in the system browser; the app window itself never navigates or opens pages.
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (url !== win.webContents.getURL()) e.preventDefault(); });

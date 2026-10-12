@@ -3,6 +3,9 @@
 package expo.modules.peerlink
 
 import android.content.Context
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.os.Build
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -10,13 +13,14 @@ import java.util.concurrent.Executors
 
 class PeerLinkModule : Module() {
   private val ctx: Context get() = appContext.reactContext ?: throw IllegalStateException("No context")
+  private var ring: Ringtone? = null
   private val io = Executors.newCachedThreadPool()
   private val sockets by lazy { PeerSockets { e -> sendEvent("socket", e) } }
   private val radios by lazy { PeerRadios(ctx.applicationContext) { name, e -> sendEvent(name, e) } }
 
   override fun definition() = ModuleDefinition {
     Name("PeerLink")
-    Events("socket", "radio", "availability")
+    Events("socket", "radio", "availability", "availabilityTick")
 
     Function("capabilities") { radios.capabilities() }
 
@@ -61,11 +65,18 @@ class PeerLinkModule : Module() {
     // ---- staying available during an active session (foreground service with a notification) ----
     Function("availabilityStart") { text: String ->
       PeerLinkService.onStopRequested = { sendEvent("availability", mapOf("running" to false, "byUser" to true)) }
+      PeerLinkService.onPulse = { changed -> sendEvent("availabilityTick", mapOf("networkChanged" to changed)) }
       PeerLinkService.start(ctx, text)
+    }
+    Function("availabilityMicrophone") { active: Boolean -> PeerLinkService.microphone(ctx, active) }
+    Function("ring") { active: Boolean ->
+      ring?.stop(); ring = null
+      if (active) { ring = RingtoneManager.getRingtone(ctx, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)); if (Build.VERSION.SDK_INT >= 28) ring?.isLooping = true; ring?.play() }
     }
     Function("availabilityStop") { PeerLinkService.stop(ctx) }
     Function("availabilityRunning") { PeerLinkService.running }
 
-    OnDestroy { sockets.closeAll(); radios.stopAll(); io.shutdown() }
+    OnDestroy {
+      ring?.stop(); ring = null; PeerLinkService.onPulse = null; PeerLinkService.onStopRequested = null; PeerLinkService.stop(ctx); sockets.closeAll(); radios.stopAll(); io.shutdown() }
   }
 }

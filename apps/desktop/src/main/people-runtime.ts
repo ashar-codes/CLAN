@@ -69,8 +69,9 @@ export async function startPeopleRuntime(o: {
         return { have: have + bytes.length };
       },
       queuedFor: (k) => p.due(Number.MAX_SAFE_INTEGER, 1000).filter((d) => d.to === k).map((d) => ({ id: d.id, envelope: d.envelope })),
-      sent: (id) => { p.delivered(id); changed('delivered'); },
-      onPhone: (k, on) => { if (on) p.wake(k); changed('presence'); },
+      sent: (id, recipient) => { p.delivered(id, recipient); changed('delivered'); },
+      refused: (id, recipient) => { if (p.queuedFor(recipient).some((q) => q.id === id)) p.deliveryFailed(id, 'Recipient refused this item.', true); },
+      onPhone: (k, on) => { if (on) { p.wake(k); p.friendReachable(k); } changed('presence'); },
     },
   });
 
@@ -121,6 +122,7 @@ export async function startPeopleRuntime(o: {
           let done = false;
           for (const c of clients) {
             try {
+              for (const d of items) p.sending(d.id);
               const results = await c.send(items.map((d) => d.envelope), intro(key));
               items.forEach((d, i) => { const r = results[i]; if (r?.ok) p.delivered(d.id); else p.deliveryFailed(d.id, r?.error ?? 'refused', r?.final ?? true); });
               done = true; break;
@@ -204,6 +206,7 @@ export async function startPeopleRuntime(o: {
   };
   const seen = (c: { key: string; name: string; profile: ProfileView | null; relation: string; verified: boolean } | null, endpoint: string, r: string) => {
     if (!c?.profile || p.isBlocked(c.key)) return;
+    if (!nearby.has(c.key)) p.friendReachable(c.key);
     byAdvert.set(r, c.key);
     nearby.set(c.key, { key: c.key, name: c.name, profile: c.profile, endpoint, relation: c.relation, seenAt: now(), verified: c.verified });
     changed('nearby');

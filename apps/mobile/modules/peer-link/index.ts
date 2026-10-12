@@ -33,9 +33,12 @@ type NativeApi = {
   awareStart(r: string, t: string, port: number): Promise<void>; awareConnect(peer: string): Promise<void>; awareStop(): void;
   hotspotStart(): Promise<{ ssid: string; passphrase: string }>; hotspotStop(): void;
   joinWifi(ssid: string, passphrase: string): Promise<void>; leaveWifi(): void;
-  availabilityStart(text: string): void; availabilityStop(): void; availabilityRunning(): boolean;
+  availabilityStart(text: string): void;
+  availabilityMicrophone?(active: boolean): void;
+  ring?(active: boolean): void; availabilityStop(): void; availabilityRunning(): boolean;
   addListener(event: 'socket', cb: (e: SocketEvent) => void): { remove(): void };
   addListener(event: 'radio', cb: (e: RadioEvent) => void): { remove(): void };
+  addListener(event: 'availabilityTick', cb: (e: { networkChanged: boolean }) => void): { remove(): void };
   addListener(event: 'availability', cb: (e: { running: boolean; byUser?: boolean }) => void): { remove(): void };
 };
 export const PeerLink = requireOptionalNativeModule<NativeApi>('PeerLink');

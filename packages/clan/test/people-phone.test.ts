@@ -70,7 +70,8 @@ describe('phone people runtime (Node stand-ins for the native transport)', () =>
     pcD.app.people.updateProfile({ name: 'Desk' });
     stops.push(() => pc.stop());
     const phD = setup(), ph = phD.app.people, dir = mkdtempSync(join(tmpdir(), 'phone-people-'));
-    const phone = startPhonePeople({ people: ph, signer: nodeSigner(newEd25519().privatePkcs8), env: nodeEnv(dir), tickMs: 200 });
+    const phSigner = nodeSigner(newEd25519().privatePkcs8);
+    const phone = startPhonePeople({ people: ph, signer: phSigner, env: nodeEnv(dir), tickMs: 200 });
     ph.updateProfile({ name: 'Phone person' });
     stops.push(() => phone.stop());
 
@@ -110,5 +111,27 @@ describe('phone people runtime (Node stand-ins for the native transport)', () =>
     await wait(() => pcD.app.people.transfer(t2.id)?.state === 'complete', 20_000);
     expect(readFileSync(pcD.app.people.filePath(t2.id)!)).toEqual(mine);
     await wait(() => ph.transfer(t2.id)?.state === 'complete');
+
+    // Restart/unreachable: durable outbox survives; a native pulse can drive all processing without a JS retry timer.
+    phone.stop(); await wait(() => !pc.server.phoneConnected(ph.myKey()));
+    const pending = pcD.app.people.sendText(conv, 'queued while phone stopped');
+    const voicePath = join(pcD.storageDir, 'queued.webm'); writeFileSync(voicePath, Buffer.alloc(1024, 7));
+    const voice = await pcD.app.people.offerFile(conv, voicePath, { name: 'queued.webm', mime: 'audio/webm', voiceMs: 1200 });
+    const filePath = join(pcD.storageDir, 'queued.bin'); writeFileSync(filePath, Buffer.alloc(2048, 9));
+    const file = await pcD.app.people.offerFile(conv, filePath, { name: 'queued.bin', mime: 'application/octet-stream' });
+    await rm(voicePath); await rm(filePath); await pc.tick();
+    expect(pcD.app.people.message(pending.id)?.state).toBe('queued');
+    const restarted = startPhonePeople({ people: ph, signer: phSigner, env: nodeEnv(dir), tickMs: 3_600_000 }); stops.push(() => restarted.stop());
+    await wait(() => ph.page(conv).some((m) => m.text === 'queued while phone stopped'));
+    await wait(() => pcD.app.people.message(pending.id)?.state === 'delivered');
+    await wait(() => ph.transfer(file.id)?.state === 'offered');
+    expect(ph.filePath(file.id)).toBeNull(); // explicit file consent survives reconnect
+    for (let i = 0; i < 15 && ph.transfer(voice.id)?.state !== 'complete'; i++) { await restarted.tick(); await pc.tick(); await new Promise((r) => setTimeout(r, 100)); }
+    expect(ph.transfer(voice.id)?.state).toBe('complete'); expect(readFileSync(ph.filePath(voice.id)!)).toEqual(Buffer.alloc(1024, 7));
+    ph.acceptFile(file.id);
+    for (let i = 0; i < 15 && ph.transfer(file.id)?.state !== 'complete'; i++) { await restarted.tick(); await pc.tick(); await new Promise((r) => setTimeout(r, 100)); }
+    expect(ph.transfer(file.id)?.state).toBe('complete'); expect(readFileSync(ph.filePath(file.id)!)).toEqual(Buffer.alloc(2048, 9));
+    await pc.tick(); await restarted.tick(); expect(ph.page(conv).filter((m) => m.text === 'queued while phone stopped')).toHaveLength(1);
+
   }, 90_000);
 });

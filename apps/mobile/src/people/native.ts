@@ -2,7 +2,7 @@
 // pinned-transport module, files through expo-file-system, the device identity key from the Keystore/Keychain.
 // Phones also speak clan-link/1 directly to other phones (src/people/nearby.ts): the same People store and outbox,
 // whichever path reaches the person. Background behaviour follows the Nearby availability setting.
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { getRandomBytes } from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import { b64u } from '@classroom/protocol';
@@ -12,6 +12,8 @@ import { deviceSigner } from '../storage';
 import { phoneClan } from '../core/clan';
 import { bump } from '../ui/kit';
 import { startPhonePeople, type PhoneEnv, type PhonePeople } from './runtime';
+import { PeerLink } from '../../modules/peer-link';
+import { initializePeopleNotifications } from './notifications';
 import { nearby } from './nearby';
 import type { PeerEnvelope } from '@classroom/protocol';
 
@@ -49,10 +51,17 @@ const env: PhoneEnv = {
   nonce: () => b64u.encode(getRandomBytes(18)),
 };
 
+let devicesTimer: ReturnType<typeof setInterval> | null = null;
+if (Platform.OS === 'android') PeerLink?.addListener('availabilityTick', (e) => {
+  if (!nearby.keepInBackground()) return;
+  if (e.networkChanged) rt?.reconnect();
+  void rt?.tick(); void nearby.cm?.tick(); nearby.advertise();
+});
 let rt: PhonePeople | null = null, starting: Promise<PhonePeople> | null = null, wanted = false;
-// Stopped whenever the app leaves the foreground; started again when it returns (if people were in use).
+// iOS/default Android suspend on background; explicit Android availability retains authenticated networking.
+PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser && AppState.currentState !== 'active') { rt?.stop(); rt = null; if (devicesTimer) clearInterval(devicesTimer); devicesTimer = null; } });
 AppState.addEventListener('change', (st) => {
-  if (st !== 'active') { rt?.stop(); rt = null; } // the computer path; direct links follow the Nearby setting (nearby.ts)
+  if (st !== 'active' && !nearby.keepInBackground()) { rt?.stop(); rt = null; if (devicesTimer) clearInterval(devicesTimer); devicesTimer = null; } // the computer path; direct links follow the Nearby setting (nearby.ts)
   else if (wanted) void phonePeople().catch(() => {});
 });
 /** Starts people networking for this app session (idempotent). */
@@ -60,14 +69,17 @@ export function phonePeople(): Promise<PhonePeople> {
   wanted = true;
   if (rt) return Promise.resolve(rt);
   return starting ??= (async () => {
+    initializePeopleNotifications();
+    await nearby.ensureNotificationConsent();
     const s = await deviceSigner();
     const signer = { publicKey: s.publicKey, sign: (b: Uint8Array) => s.sign(b) as string };
     if (!subscribed) { subscribed = true; phoneClan().bus.subscribe('mobile.people', PeopleChanged, () => bump()); }
     const links = nearby.manager(signer);
     nearby.onLive(live);
     const devices = () => { try { const acc = phoneClan().sync.account(); if (!acc) return; const p = phoneClan().people; p.announceDevice(acc.accountId, `${p.myProfile().name}’s phone`); if (p.shareDeviceLinks()) void rt?.tick(); } catch { /* not linked yet */ } };
-    setInterval(devices, 60_000);
+    if (devicesTimer) clearInterval(devicesTimer); devicesTimer = setInterval(devices, 60_000);
     rt = startPhonePeople({ people: phoneClan().people, signer, env, links, onLive: live, onChange: () => bump() });
+    if (AppState.currentState !== 'active' && !nearby.keepInBackground()) { rt.stop(); rt = null; throw new Error('People networking resumes when CLAN is open.'); }
     void nearby.start();
     devices();
     return rt;

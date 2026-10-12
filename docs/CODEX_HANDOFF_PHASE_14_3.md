@@ -92,3 +92,8 @@ Application source `6f7d946cc46f19805d6bc423e56c7d6642d87410`, branch qa/phase-1
 Fixed receipt round completion, transformed-wall screen track suspension, causal chat test ordering, premature file completion UI, GPU initialization observation, bounded discovery cleanup, authenticated manual-link endpoint loss, unreadable identity replacement, QR repair scheduling and asynchronous/corrupt rollback-fence persistence and duplicate desktop profile writers (real Mac/Windows packaged regression PASS). Android's conflict convergence, revocation, chat history, board and SHA-verified download scenario passed on the disposable emulator. Full unit regression at this revision: 452 PASS / 0 FAIL / 0 SKIP. Desktop multicast discovery remains a locally reproduced blocker; do not substitute isolated successes for a clean complete suite.
 
 The user will perform physical Windows/Android/iPhone tests after receiving artifacts. Beta key backup is unconfirmed, so Android remains debug-signed .qa. No Apple Team/provisioning credentials are available, so no device IPA is claimed. Public release stays BLOCKED. Stop after test delivery; no CLAN Ask/Phase 15 work is authorized.
+
+
+## BTC-1 handoff (2026-10-12)
+
+See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.

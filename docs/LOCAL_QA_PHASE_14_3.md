@@ -255,3 +255,8 @@ The dependency scan retains node-forge/braces high and uuid/sprintf-js moderate 
 Android beta-key backup is unconfirmed: only debug-signed .qa candidates are supplied. No existing beta signing material was accessed, replaced or regenerated. No Apple signing Team/provisioning profiles were available, so physical capability/signing validation and a genuine device IPA are unavailable. The prepared Xcode workspace and instructions are real; a simulator ZIP is not an IPA. Mac signing is ad-hoc, not Developer ID/notarized; electron-builder's internal ad-hoc hardened-runtime package includes its required library-validation exception, while the configured Electron fuses remain enforced. Windows is unsigned.
 
 **TEST builds for personal validation; public release BLOCKED.** Use DEVICE_TESTING_GUIDE.md, report results, then stop delivery work. PRs #1–#4 remain drafts, including https://github.com/ashar-codes/CLAN/pull/4.
+
+
+## BTC-1 update (2026-10-12)
+
+See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.

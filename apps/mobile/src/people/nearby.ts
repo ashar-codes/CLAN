@@ -8,21 +8,23 @@
 // Adverts carry a random id and the presence tag. Matching a friend → connect as ourselves; anything else is looked at
 // under a throwaway identity (only people visible to Everyone Nearby answer, and they learn nothing about us).
 import { AppState, PermissionsAndroid, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { getRandomBytes } from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import { b64u, type ProfileView } from '@classroom/protocol';
 import { ConnectionManager, probeAnonymously, type LinkFiles, type LinkState } from '@clan/core';
 import { PeerLink, capabilities, listen, nativeLinkTransport, stopListening, type PeerCapabilities, type RadioEvent } from '../../modules/peer-link';
 import { phoneClan } from '../core/clan';
+import { retainPeople } from './availability';
 import { bump } from '../ui/kit';
 
-export type NearbyMode = 'off' | 'app' | 'session';
+export type NearbyMode = 'off' | 'app' | 'session' | 'keep';
 export type NearbyEntry = { id: string; key: string | null; name: string; profile: ProfileView | null; friend: boolean; via: 'wifi' | 'apple' | 'direct' | 'aware'; address: string | null; device?: string; seenAt: number };
 
 const people = () => phoneClan().people;
 const settingsFile = () => { const d = new Directory(Paths.document, 'people'); if (!d.exists) d.create({ intermediates: true, idempotent: true }); return new File(d, 'nearby.json'); };
 function loadSettings(): { mode: NearbyMode; port: number } {
-  try { const f = settingsFile(); if (f.exists) { const v = JSON.parse(f.textSync()) as { mode?: string; port?: number }; return { mode: v.mode === 'off' || v.mode === 'session' ? v.mode : 'app', port: Number(v.port) || 0 }; } } catch { /* defaults */ }
+  try { const f = settingsFile(); if (f.exists) { const v = JSON.parse(f.textSync()) as { mode?: string; port?: number }; return { mode: v.mode === 'off' || v.mode === 'session' || v.mode === 'keep' && Platform.OS === 'android' ? v.mode : 'app', port: Number(v.port) || 0 }; } } catch { /* defaults */ }
   return { mode: 'app', port: 0 };
 }
 const saveSettings = (s: { mode: NearbyMode; port: number }) => { try { settingsFile().write(JSON.stringify(s)); } catch { /* not fatal */ } };
@@ -52,6 +54,12 @@ class Nearby {
   private dialedDevice = '';
   private live: ((e: import('@classroom/protocol').PeerEnvelope) => void) | null = null;
 
+  async ensureNotificationConsent() {
+    if (Platform.OS === 'android' && this.settings.mode === 'keep' && !(await Notifications.getPermissionsAsync()).granted) {
+      this.setMode('app'); this.status = 'Allow notifications and enable Keep CLAN Available again to receive in the background.'; bump();
+    }
+  }
+  keepInBackground() { return retainPeople(Platform.OS, this.settings.mode, this.sessionActive()); }
   get mode() { return this.settings.mode; }
   myAddrs() {
     if (!this.port || !PeerLink) return [];
@@ -65,12 +73,12 @@ class Nearby {
       this.cm = new ConnectionManager({ people: people(), signer, files: linkFiles, onLive: (e) => this.live?.(e), onChange: () => bump(), myAddrs: () => this.myAddrs() }).use(nativeLinkTransport);
       this.cm.onState(() => { this.keepAlive(); bump(); });
       PeerLink?.addListener('radio', (e) => this.radio(e));
-      PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser) { this.setMode('app'); } });
+      PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser) { this.setMode('app'); if (AppState.currentState !== 'active') this.stop(); } });
       AppState.addEventListener('change', (st) => { if (st === 'active') void this.start(); else this.background(); });
     }
     return this.cm;
   }
-  setMode(m: NearbyMode) { this.settings = { ...this.settings, mode: m }; saveSettings(this.settings); if (m === 'off') this.stop(); else void this.start(); bump(); }
+  setMode(m: NearbyMode) { this.settings = { ...this.settings, mode: m }; saveSettings(this.settings); this.keepAlive(); if (m === 'off') this.stop(); else void this.start(); bump(); }
   state(key: string): LinkState | null { return this.cm?.status(key)?.state ?? null; }
   /** Talk to someone found nearby as ourselves (needed to send a request or chat). */
   async connectAs(entry: NearbyEntry) {
@@ -89,7 +97,7 @@ class Nearby {
   }
 
   async start() {
-    if (!PeerLink || !this.cm || this.settings.mode === 'off' || AppState.currentState !== 'active' && !this.sessionActive()) return;
+    if (!PeerLink || !this.cm || this.settings.mode === 'off' || AppState.currentState !== 'active' && !this.keepInBackground()) return;
     if (!this.running) {
       try {
         this.port = await listen(this.settings.port, (l) => void this.cm!.accept(l));
@@ -104,6 +112,7 @@ class Nearby {
       this.timers.push(setInterval(() => { for (const [id, e] of this.entries) if (Date.now() - e.seenAt > 10 * 60_000) this.entries.delete(id); bump(); }, 60_000));
     }
     this.advertise(true);
+    this.keepAlive();
   }
   /** Rotated hourly and whenever visibility changes; nothing while Invisible. */
   advertise(force = false) {
@@ -115,14 +124,15 @@ class Nearby {
     try { PeerLink.advertise(this.r, people().presenceTagFor(this.r), this.port); } catch { /* reported */ }
   }
   private sessionActive() { return !!this.cm && people().contacts('all').some((c) => this.cm!.connected(c.key)); }
-  /** Android: keep a visible foreground service only while a nearby session is open (mode `session`). */
+  /** Explicit Android availability: a visible, stoppable foreground service; never start from the background. */
   private keepAlive() {
     if (!PeerLink) return;
-    const want = this.settings.mode === 'session' && this.sessionActive();
-    try { if (want && !PeerLink.availabilityRunning()) PeerLink.availabilityStart('A nearby chat, call or transfer is open.'); else if (!want && PeerLink.availabilityRunning()) PeerLink.availabilityStop(); } catch { /* not fatal */ }
+    const want = this.keepInBackground();
+    if (want && AppState.currentState !== 'active' && !PeerLink.availabilityRunning()) return;
+    try { if (want && !PeerLink.availabilityRunning()) PeerLink.availabilityStart('Receiving local messages. Battery use may increase.'); else if (!want && PeerLink.availabilityRunning()) PeerLink.availabilityStop(); } catch { this.status = 'Background availability could not start. Keep CLAN open and check Android permissions.'; if (this.settings.mode === 'keep') { this.settings = { ...this.settings, mode: 'app' }; saveSettings(this.settings); } bump(); }
   }
   private background() {
-    if (this.settings.mode === 'session' && this.sessionActive()) { this.keepAlive(); return; } // stays (Android FGS / iOS short task)
+    if (this.keepInBackground()) { this.keepAlive(); return; } // stays (Android FGS / iOS short task)
     this.stop(false);
   }
   stop(closeSessions = true) {
@@ -134,7 +144,7 @@ class Nearby {
     this.entries.clear(); bump();
   }
 
-  private upsert(e: NearbyEntry) { this.entries.set(e.id, e); bump(); }
+  private upsert(e: NearbyEntry) { if (!this.entries.has(e.id) && e.friend && e.key) people().friendReachable(e.key); this.entries.set(e.id, e); bump(); }
   private radio(e: RadioEvent) {
     if (e.type === 'error') { this.status = e.message; bump(); return; }
     if (e.type === 'lost') { for (const [id, x] of this.entries) if (x.address === `svc:${e.name}` || id.endsWith(`:${e.name}`)) this.entries.delete(id); bump(); return; }

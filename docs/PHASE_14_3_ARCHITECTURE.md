@@ -168,3 +168,8 @@ Unreadable existing desktop identity files are preserved and startup refuses to 
 Windows installer firewall rules derive their names and executable path from the packaged product. TEST install/uninstall cannot delete beta rules. Native Windows CI seeds beta-rule sentinels and verifies both preservation and local-subnet, program-scoped TEST rules.
 
 Desktop profile concurrency: the final TEST source acquires Electron's per-userData process lock before keystore/database initialization. Duplicate launches forward bounded capture URLs through the existing strict intake parser; they do not open a second writer. Independent QA profiles retain separate locks. This complements per-file fence write serialization.
+
+
+## BTC-1 background and offline delivery (2026-10-12)
+
+See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.

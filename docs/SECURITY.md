@@ -256,3 +256,8 @@ Application revision: `6f7d946cc46f19805d6bc423e56c7d6642d87410`. Existing unrea
 The dependency audit still reports 0 critical, 2 high and 2 moderate findings in build/development dependency paths. This is not a clean scan. Desktop database/files are not application-encrypted; temporary expiry is active-store deletion, not forensic erasure of WAL, backups or another participant's saved copies. Mobile power-loss fsync, physical radios, actual microphone/camera, host handover across physical combinations and OS background policy remain unverified. No public release approval is granted.
 
 Desktop profile concurrency: the final TEST source acquires Electron's per-userData process lock before keystore/database initialization. Duplicate launches forward bounded capture URLs through the existing strict intake parser; they do not open a second writer. Independent QA profiles retain separate locks. This complements per-file fence write serialization.
+
+
+## BTC-1 audit follow-up (2026-10-12)
+
+See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.

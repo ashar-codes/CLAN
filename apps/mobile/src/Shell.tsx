@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
 import { dataNotice, phoneClan, me } from './core/clan';
+import { nearby } from './people/nearby';
 import { syncNow } from './sync/phone';
 import { cleanupClanCopy } from './clan-lifecycle';
 import { StudyScreen, type MobileStudyTab } from './screens/Study';
@@ -11,8 +12,8 @@ import { DiaryScreen } from './screens/Diary';
 import { DevicesScreen } from './screens/Devices';
 import { HostingScreen } from './screens/Hosting';
 import { PeopleScreen } from './screens/People';
+import { onPeopleNotification } from './people/notifications';
 import { phonePeople } from './people/native';
-import { PhoneCallProvider } from './people/Call';
 import { act, bump, Btn, Card, Field, Mate, Muted, RoomBand, Row, Screen, useC, useData, when } from './ui/kit';
 
 type Tab = 'home' | 'study' | 'people' | 'inbox' | 'diary' | 'me';
@@ -21,19 +22,19 @@ const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study
 export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEditProfile(): void; intake?: ReactNode }) {
   const c = useC();
   const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false), [hosting, setHosting] = useState(false);
+  useEffect(() => onPeopleNotification(() => { setTab('people'); setJoining(false); setDevices(false); setHosting(false); }), []);
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
   const inboxCount = useData(() => phoneClan().capture.inbox(me()).length) ?? 0;
-  // people you already know reach you while the app is open (foreground only; nothing runs in the background)
-  useEffect(() => { try { if (phoneClan().people.contacts('all').length) void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
+  // Known contacts reconnect on launch; optional Android availability is restored only after foreground consent.
+  useEffect(() => { try { if (phoneClan().people.contacts('all').length || nearby.mode === 'keep') void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
   const peopleCount = useData(() => phoneClan().people.conversations().reduce((n, x) => n + x.unread + (x.state === 'invited_in' ? 1 : 0), 0) + phoneClan().people.contacts('requests').filter((r) => r.relation === 'incoming').length) ?? 0;
   const body = intake ?? (joining ? <Screen><Btn label="← Back" onPress={() => setJoining(false)} />{join}</Screen>
-    : tab === 'home' ? <Home onJoin={() => setJoining(true)} go={setTab} onStudy={(t) => { setStudyInitial(t); setTab('study'); }} />
-    : tab === 'study' ? <StudyScreen initial={studyInitial} /> : tab === 'people' ? <PeopleScreen /> : tab === 'inbox' ? <InboxScreen /> : tab === 'diary' ? <DiaryScreen />
+    : tab === 'home' ? <Home onCreate={() => { setTab('me'); setHosting(true); }} onJoin={() => setJoining(true)} go={setTab} onStudy={(t) => { setStudyInitial(t); setTab('study'); }} />
+    : tab === 'study' ? <StudyScreen initial={studyInitial} /> : tab === 'people' ? <PeopleScreen onJoin={() => setJoining(true)} /> : tab === 'inbox' ? <InboxScreen /> : tab === 'diary' ? <DiaryScreen />
     : devices ? <View style={{ flex: 1 }}><DevicesScreen /><View style={{ position: 'absolute', top: 12, right: 16 }}><Btn small label="Done" onPress={() => setDevices(false)} /></View></View>
     : hosting ? <View style={{ flex: 1 }}><HostingScreen /><View style={{ position: 'absolute', top: 12, right: 16 }}><Btn small label="Done" onPress={() => setHosting(false)} /></View></View>
     : <MeScreen onDevices={() => setDevices(true)} onHosting={() => setHosting(true)} onEditProfile={onEditProfile} />);
   return (
-    <PhoneCallProvider>
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1 }}>{body}</View>
       {!intake && (
@@ -48,11 +49,10 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
         </View>
       )}
     </View>
-    </PhoneCallProvider>
   );
 }
 
-function Home({ onJoin, go, onStudy }: { onJoin(): void; go(t: Tab): void; onStudy(t: MobileStudyTab): void }) {
+function Home({ onCreate, onJoin, go, onStudy }: { onCreate(): void; onJoin(): void; go(t: Tab): void; onStudy(t: MobileStudyTab): void }) {
   const c = useC();
   const name = useData(() => phoneClan().identity.displayName(phoneClan().me)) ?? 'Me';
   const today = useData(() => phoneClan().agenda.today(me())) ?? [];
@@ -71,7 +71,7 @@ function Home({ onJoin, go, onStudy }: { onJoin(): void; go(t: Tab): void; onStu
     <Screen>
       {!!dataNotice() && <Card tone="warn"><Text accessibilityRole="alert" style={{ color: c.text }}>{dataNotice()}</Text></Card>}
       <RoomBand title={`${name.split(' ')[0]}'s desk`} sub={new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} right={<Mate name={name} size={52} />} />
-      <Row><Btn primary label="Join a CLAN" onPress={onJoin} /><Btn label={session ? 'Studying…' : 'Start studying'} onPress={() => onStudy('session')} /><Btn label="Capture" onPress={() => go('inbox')} /></Row>
+      <Row><Btn label="Create CLAN" onPress={onCreate} /><Btn primary label="Join a CLAN" onPress={onJoin} /><Btn label={session ? 'Studying…' : 'Start studying'} onPress={() => onStudy('session')} /><Btn label="Capture" onPress={() => go('inbox')} /></Row>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }} accessibilityLabel="My Space objects">
         {objects.map(({ title, hint, run, color, glyph }) => <Pressable key={title} accessibilityRole="button" accessibilityLabel={`${title}: ${hint}`} onPress={run} style={({ pressed }) => ({ width: '47%', minHeight: 104, padding: 14, borderRadius: 20, borderWidth: 1, borderColor: c.border, backgroundColor: pressed ? c.bg2 : c.surface })}>
           <Text accessible={false} style={{ color, fontSize: 30 }}>{glyph}</Text><Text style={{ color: c.text, fontWeight: '800', fontSize: 16 }}>{title}</Text><Text style={{ color: c.text2, fontSize: 12 }}>{hint}</Text>

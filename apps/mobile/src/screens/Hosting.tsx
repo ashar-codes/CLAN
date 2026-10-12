@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Text } from 'react-native';
 import type { ClanType } from '@classroom/protocol';
 import { phoneClan } from '../core/clan';
-import { createHostedClan, handToComputer, hostingOverview, linkedComputers, PHONE_HOSTING_BLOCKED, requestMove, revokeHost } from '../sync/hosting';
+import { createHostedClan, createOwnedClan, handToComputer, hostingOverview, linkedComputers, PHONE_HOSTING_BLOCKED, requestMove, revokeHost } from '../sync/hosting';
 import { bump, Btn, Card, Choice, Field, H1, Muted, Row, Screen, useC, useData } from '../ui/kit';
 
 type Overview = Awaited<ReturnType<typeof hostingOverview>>;
@@ -16,6 +16,7 @@ export function HostingScreen() {
   const computers = useData(() => linkedComputers()) ?? [];
   const owned = useData(() => phoneClan().clans.list(phoneClan().me, { includeArchived: true }).filter((x) => phoneClan().clans.members(x.id).some((m) => m.userId === phoneClan().me && m.role === 'owner'))) ?? [];
   const [views, setViews] = useState<Record<string, Overview>>({});
+  const [temporary, setTemporary] = useState('permanent');
   const [name, setName] = useState(''), [type, setType] = useState<ClanType>('STUDY_GROUP'), [to, setTo] = useState(''), [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null), [progress, setProgress] = useState<string | null>(null), [confirm, setConfirm] = useState<string | null>(null);
   const refresh = async () => { const out: Record<string, Overview> = {}; for (const x of owned) out[x.id] = await hostingOverview(x.id).catch(() => null as never); setViews(out); };
@@ -29,24 +30,29 @@ export function HostingScreen() {
 
   return (
     <Screen>
-      <H1>Hosting</H1>
+      <H1>Create CLAN & hosting</H1>
       <Card tone="warn"><Muted>{PHONE_HOSTING_BLOCKED}</Muted></Card>
-      {!computers.length && <Card><Muted>Link this phone to your computer first (Me › My Devices).</Muted></Card>}
+      {!computers.length && <Card><Muted>You can create and own a CLAN offline now. Link a computer later to host a live session and invite participants (Me › My Devices).</Muted></Card>}
       {msg && <Card><Text style={{ color: c.text }} accessibilityRole="alert">{msg}</Text></Card>}
       {progress && <Card><Text style={{ color: c.text }} accessibilityLiveRegion="polite">{progress}</Text></Card>}
-      {computers.length > 0 && <Card title="New CLAN hosted on your computer">
+      <Card title="Create a CLAN">
         <Field label="CLAN name" value={name} onChange={setName} maxLength={80} />
         <Choice label="Type" value={type} options={TYPES} onChange={(v) => setType(v as ClanType)} />
-        <Choice label="Host computer" value={target?.fp ?? ''} options={computers.map((d) => [d.fp, d.name] as const)} onChange={setTo} />
+        <Choice label="Lifetime" value={temporary} options={[["permanent", "Permanent"], ["day", "Temporary: 24 hours"], ["week", "Temporary: 7 days"]]} onChange={setTemporary} />
+        <Muted>Owned on this phone, offline. Live invitations and shared sessions become available after secure computer handover.</Muted>
+        <Btn primary label="Create offline CLAN" disabled={!name.trim() || busy} onPress={() => void run(() => createOwnedClan({ type, name: name.trim(), expiresAt: temporary === 'permanent' ? undefined : Date.now() + (temporary === 'day' ? 1 : 7) * 86_400_000 }), `Created "${name.trim()}". You own it; it is not live-hosted yet.`)} />
+        {computers.length > 0 && <><Choice label="Host computer" value={target?.fp ?? ''} options={computers.map((d) => [d.fp, d.name] as const)} onChange={setTo} />
         {confirm === 'create'
           ? <><Muted small>This phone will own "{name.trim()}" and {target?.name} will host it. The CLAN is available while {target?.name} is on and CLAN is open there.</Muted>
             <Row><Btn primary label="Create and hand over" disabled={busy} onPress={() => void run(() => createHostedClan({ type, name: name.trim(), computerFp: target!.fp }, onProgress), `${target?.name} now hosts "${name.trim()}".`)} /><Btn label="Cancel" onPress={() => setConfirm(null)} /></Row></>
           : <Btn primary label="Create…" disabled={!name.trim() || !target || busy} onPress={() => setConfirm('create')} />}
-      </Card>}
+        </>}
+      </Card>
       <Btn label="Refresh hosting status" onPress={() => void refresh()} />
       {owned.map((x) => {
         const v = views[x.id], h = v?.hosting;
         return <Card key={x.id} title={x.name}>
+          <Muted small>{x.type.replaceAll('_', ' ')} · {phoneClan().clans.members(x.id).filter((m) => m.status === 'active').length} member(s) · You own this CLAN{x.expiresAt ? ` · expires ${new Date(x.expiresAt).toLocaleString()}` : ''}</Muted>
           {!v ? <Muted small>Tap Refresh to see who hosts it.</Muted>
             : !h ? <Muted small>Only this phone holds it; it is not hosted.</Muted>
             : h.state === 'conflict' ? <Text style={{ color: c.text }} accessibilityRole="alert">Two hosts claim this CLAN. Open it on one of your computers to choose which record stands; nothing is deleted.</Text>

@@ -586,3 +586,12 @@ button.link.ai-link { border: 0; }
 .qr-video { max-width: 100%; border-radius: 12px; background: #000; }
 .qr-frame { background: #fff; padding: 6px; border-radius: 8px; image-rendering: pixelated; max-width: 100%; height: auto; }
 .ok { color: var(--ok); font-weight: 700; }
+/* Real discovery, decorative layout. Reduced-motion and hidden windows stop the sweep. */
+.clan-radar { position:relative; width:min(100%,520px); height:320px; margin:12px auto; overflow:hidden; border:1px solid var(--line); border-radius:28px; background:var(--paper-2); }
+.radar-ring { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); border:1px solid var(--line); border-radius:50%; pointer-events:none; }
+.radar-sweep { position:absolute; width:320px; height:320px; left:calc(50% - 160px); top:0; border-radius:50%; background:conic-gradient(from 0deg, transparent 0deg, transparent 290deg, rgba(53,126,108,.22) 360deg); animation:clan-sweep 9s linear infinite; pointer-events:none; }
+.radar-peer { position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; max-width:110px; gap:2px; background:var(--paper); border:1px solid var(--line); font-size:14px; animation:radar-appear .5s ease-out; }
+.radar-peer small { overflow:hidden; max-width:96px; text-overflow:ellipsis; white-space:nowrap; }.radar-peer.verified { border-color:var(--campus); }.radar-count { position:absolute; bottom:10px; left:14px; font-size:12px; }
+@keyframes clan-sweep { to { transform:rotate(360deg); } } @keyframes radar-appear { from { opacity:0; } to { opacity:1; } }
+@media(prefers-reduced-motion:reduce) { .radar-sweep,.radar-peer { animation:none; } }
+html[data-radar-paused] .radar-sweep { animation-play-state:paused; }

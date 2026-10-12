@@ -19,6 +19,9 @@ electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
   enableCookieEncryption: true
 mac:
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   category: public.app-category.education
   # Each package ships only its own native binaries (Windows x64 variants are installed for cross-packaging).
   # (a list of only exclusions makes electron-builder add **/*, i.e. the whole app dir — keep the includes here)

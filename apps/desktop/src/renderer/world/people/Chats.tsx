@@ -122,7 +122,7 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
 
 function Bubble({ m, onError }: { m: PeopleMessage; onError(e: string): void }) {
   if (m.kind === 'event' || m.kind === 'call') return <p className="msg-event muted small-text" role="note">{m.text} · {clock(m.createdAt)}</p>;
-  const st = m.mine ? ({ queued: 'Sending…', delivered: 'Delivered', read: 'Read', failed: 'Not sent', received: '' } as const)[m.state] : '';
+  const st = m.mine ? ({ queued: 'Pending', sending: 'Sending…', delivered: 'Delivered', read: 'Read', failed: 'Failed', received: '' } as const)[m.state] : '';
   return (
     <div className={`msg ${m.mine ? 'mine' : 'theirs'}`} data-state={m.state}>
       {m.transfer ? (m.kind === 'voice' ? <VoiceNote t={m.transfer} mine={m.mine} onError={onError} /> : <FileCard t={m.transfer} mine={m.mine} onError={onError} />) : <p className="msg-text">{m.text}</p>}

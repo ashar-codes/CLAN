@@ -8,8 +8,12 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 import { parseProfileQr, profileQr, safetyNumber, TEMP_TTLS } from '@classroom/protocol';
+import { browse } from '../discovery';
+import type { Candidate } from '@classroom/client';
+import { Radar } from '../ui/Radar';
 import type { Contact, PeopleMessage } from '@clan/core';
-import { phoneClan } from '../core/clan';
+import { phoneClan, me } from '../core/clan';
+import { allowPeopleNotifications, takePeopleChat, onPeopleNotification, setPeopleViewing } from '../people/notifications';
 import { phonePeople } from '../people/native';
 import { verify } from '../FileActions';
 import { nearby, parseWifiQr, wifiQr } from '../people/nearby';
@@ -25,11 +29,12 @@ const REL: Record<string, string> = { friend: 'Friend', incoming: 'Asked to be f
 const ttlText = (ms: number | null) => !ms ? 'Saved chat' : ms <= 3_600_000 ? 'Disappears after 1 hour' : ms <= 86_400_000 ? 'Disappears after 24 hours' : 'Disappears after 7 days';
 const mb = (n: number) => n < 1e6 ? `${Math.max(1, Math.round(n / 1e3))} KB` : `${(n / 1e6).toFixed(1)} MB`;
 
-export function PeopleScreen() {
+export function PeopleScreen({ onJoin }: { onJoin(): void }) {
   const [seg, setSeg] = useState<Seg>('chats'), [chat, setChat] = useState<string | null>(null), [err, setErr] = useState<string | null>(null);
   useEffect(() => { void phonePeople().catch((e) => setErr((e as Error).message)); }, []);
   const unread = useData(() => people().conversations().reduce((n, c) => n + c.unread + (c.state === 'invited_in' ? 1 : 0), 0)) ?? 0;
   const requests = useData(() => people().contacts('requests').filter((r) => r.relation === 'incoming').length) ?? 0;
+  useEffect(() => { const open = (id: string | null) => { if (id) { setChat(id); setSeg('chats'); } }; open(takePeopleChat()); return onPeopleNotification(open); }, []);
   const open = (id: string) => { setChat(id); setSeg('chats'); };
   const [optical, setOptical] = useState(false);
   if (optical) return <OpticalScreen onBack={() => setOptical(false)} />;
@@ -43,12 +48,12 @@ export function PeopleScreen() {
         <Btn small label={requests ? `Friends · ${requests}` : 'Friends'} on={seg === 'friends'} onPress={() => setSeg('friends')} />
       </Row>
       <Err msg={err} />
-      {seg === 'nearby' ? <Nearby onChat={open} onOptical={() => setOptical(true)} /> : seg === 'friends' ? <Friends onChat={open} /> : <ChatList onOpen={open} />}
+      {seg === 'nearby' ? <Nearby onJoin={onJoin} onChat={open} onOptical={() => setOptical(true)} /> : seg === 'friends' ? <Friends onChat={open} /> : <ChatList onOpen={open} />}
     </Screen>
   );
 }
 
-function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): void }) {
+function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: string): void; onOptical(): void }) {
   const c = useC();
   const [scan, setScan] = useState(false), [show, setShow] = useState<null | 'profile' | 'friend' | 'chat'>(null);
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string | null>(null), [ok, setOk] = useState<string | null>(null);
@@ -59,6 +64,9 @@ function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): 
   const myCode = useData(() => show ? profileQr({ key: people().myKey(), endpoints: [], links: nearby.myAddrs(), name: people().myProfile().name, invite: people().inviteToken(), intent: show }) : null);
   const entries = useData(() => [...nearby.entries.values()].sort((x, y) => Number(y.friend) - Number(x.friend))) ?? [];
   const caps = nearby.caps;
+  const prefs = useData(() => phoneClan().notifications.prefs(me()));
+  const [radarMode, setRadarMode] = useState<'people' | 'clans'>('people'), [clans, setClans] = useState<Candidate[]>([]);
+  useEffect(() => radarMode === 'clans' ? browse(setClans) : undefined, [radarMode]);
   const run = async (f: () => Promise<unknown>, done?: string) => { setBusy(true); setErr(null); setOk(null); try { await f(); if (done) setOk(done); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); bump(); } };
   /** Every CLAN code this phone understands, from the camera or a picture. */
   const onCode = (t: string) => {
@@ -77,6 +85,7 @@ function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): 
   const intended = connected && people().contact(connected.key);
   return (
     <>
+      <Card title="Notifications"><Row>{(['direct', 'files', 'previews'] as const).map((key) => <Btn small key={key} label={`${key === 'direct' ? 'Messages & calls' : key === 'files' ? 'Files' : 'Notification previews'}: ${prefs?.[key] ? 'On' : 'Off'}`} on={!!prefs?.[key]} onPress={() => { phoneClan().notifications.setPrefs(me(), { [key]: !prefs?.[key] }); bump(); }} />)}</Row><Btn label={`Friend nearby alerts: ${people().nearbyAlerts() ? 'On' : 'Off'}`} on={people().nearbyAlerts()} onPress={() => void run(async () => { const on = !people().nearbyAlerts(); if (on && !await allowPeopleNotifications()) throw new Error('Allow notifications first.'); people().nearbyAlerts(on); })} /><Btn label="Enable message and call notifications" onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are denied. Allow them in system settings.'); }, 'Notifications enabled.')} /><Muted small>Notification previews follow your privacy preferences. Files still require acceptance.</Muted></Card>
       <Card title="Who can find you">
         <Row gap={6}>
           <Btn small label="Everyone nearby (1 h)" on={vis === 'everyone'} onPress={() => setErr(act(() => people().setVisibility('everyone', 3_600_000)))} />
@@ -88,9 +97,10 @@ function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): 
         <Row gap={6}>
           <Btn small label="Off" on={nearby.mode === 'off'} onPress={() => nearby.setMode('off')} />
           <Btn small label="While using CLAN" on={nearby.mode === 'app'} onPress={() => nearby.setMode('app')} />
-          <Btn small label="Stay available in a session" on={nearby.mode === 'session'} onPress={() => nearby.setMode('session')} />
+          {Platform.OS === 'android' && <Btn small label="Keep CLAN Available" on={nearby.mode === 'keep'} onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are required for visible background availability.'); if (!await nearby.permissions()) throw new Error('Allow Nearby devices and notifications in Settings.'); nearby.setMode('keep'); await phonePeople(); })} />}
+          <Btn small label="Stay available in a session" on={nearby.mode === 'session'} onPress={() => void run(async () => { if (Platform.OS === 'android' && !await allowPeopleNotifications()) throw new Error('Allow notifications for a visible background session.'); nearby.setMode('session'); })} />
         </Row>
-        <Muted small>{Platform.OS === 'android' ? 'During an open chat, call or transfer, Android keeps it connected with a visible notification. Nothing runs when no session is open.' : 'iPhone keeps a session only while CLAN is open (plus a short moment after you leave, and during a call). Nobody can reach you while CLAN is closed.'}</Muted>
+        <Muted small>{Platform.OS === 'android' ? 'Keep CLAN Available receives local messages with a persistent notification, even without an open chat. Uses more battery; Android/MIUI battery restrictions or force-stop can interrupt it. Stop from the notification or select While using CLAN.' : 'iPhone keeps a session only while CLAN is open (plus a short moment after you leave, and during a call). Nobody can reach you while CLAN is closed.'}</Muted>
       </Card>
 
       <Card title="Connect with a code">
@@ -132,7 +142,11 @@ function Nearby({ onChat, onOptical }: { onChat(id: string): void; onOptical(): 
         {!!nearby.status && <Muted small>{nearby.status}</Muted>}
       </Card>
 
-      {entries.map((e) => (
+      <Row><Btn label="People Radar" on={radarMode === 'people'} onPress={() => setRadarMode('people')} /><Btn label="CLAN Radar" on={radarMode === 'clans'} onPress={() => setRadarMode('clans')} /></Row>
+      <Radar items={radarMode === 'people' ? entries.map((e) => ({ id: e.id, name: e.name, kind: 'Person', verified: e.friend && !!e.key && !!people().contact(e.key)?.verified })) : clans.map((x) => ({ id: x.sid ?? x.url, name: x.title ?? 'CLAN', kind: 'CLAN' }))} onSelect={(id) => { if (radarMode === 'clans') onJoin(); else setOk(`Choose the Connect or Chat action for ${entries.find((x) => x.id === id)?.name ?? 'this person'} below.`); }} />
+      <Muted small>Real discovery only. Positions do not indicate distance. CLAN discovery is an untrusted hint; joining requires the host's code.</Muted>
+      {radarMode === 'clans' && <><Btn primary label="Join or request access by code" onPress={onJoin} />{clans.map((x) => <Card key={x.sid ?? x.url} title={x.title ?? 'CLAN'}><Btn label={`Join ${x.title ?? 'CLAN'}`} onPress={onJoin} /></Card>)}{!clans.length && <Muted>No CLANs discovered. Use the host address or QR fallback in Join.</Muted>}</>}
+      {radarMode === 'people' && entries.map((e) => (
         <Card key={e.id}>
           <Row><PersonPic pic={e.key ? people().avatarOf(e.key) : null} name={e.name} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', color: c.text }}>{e.name}{e.friend ? ' · friend' : ''}</Text>
             <Muted small>{e.via === 'direct' ? 'Wi-Fi Direct' : e.via === 'aware' ? 'Wi-Fi Aware' : e.via === 'apple' ? 'Apple peer-to-peer' : 'Same network'}{e.key && nearby.state(e.key) ? ` · ${STATE[nearby.state(e.key)!]}` : ''}{e.profile?.university ? ` · ${e.profile.university}` : ''}</Muted></View></Row>
@@ -248,6 +262,7 @@ function roomFor(bytes: number) {
 
 const PAGE = 40;
 function ChatView({ id, onBack }: { id: string; onBack(): void }) {
+  useEffect(() => { setPeopleViewing(id); return () => setPeopleViewing(null); }, [id]);
   const c = useC();
   const calls = usePhoneCall();
   const [limit, setLimit] = useState(PAGE), [text, setText] = useState(''), [err, setErr] = useState<string | null>(null);
@@ -294,7 +309,7 @@ function ChatView({ id, onBack }: { id: string; onBack(): void }) {
 
 function Bubble({ m, onError, onAct }: { m: PeopleMessage; onError(e: string): void; onAct(f: () => unknown): void }) {
   const c = useC(), t = m.transfer;
-  const st = m.mine ? ({ queued: 'Sending…', delivered: 'Delivered', read: 'Read', failed: 'Not sent', received: '' } as const)[m.state] : '';
+  const st = m.mine ? ({ queued: 'Pending', sending: 'Sending…', delivered: 'Delivered', read: 'Read', failed: 'Failed', received: '' } as const)[m.state] : '';
   if (m.kind === 'event' || m.kind === 'call') return <Muted small>{m.text} · {when(m.createdAt)}</Muted>;
   const share = async () => {
     try {

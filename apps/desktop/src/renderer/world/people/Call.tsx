@@ -26,6 +26,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   engine.current ??= new CallEngine({
     createPeer: () => new RTCPeerConnection({ iceServers: [] }) as unknown as PeerLike,
     microphone: () => microphone() as never,
+    attempt: (key, id) => api.people.attempt(key, id),
     signal: (k, b) => api.people.signal(k, b),
     log: (o) => void api.people.logCall(o).catch(() => {}),
     nameOf: (k) => api.people.contact(k).then((c) => c?.name ?? null, () => null),
@@ -36,6 +37,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [call, setCall] = useState<CallView | null>(null);
   useEffect(() => e.subscribe(setCall), [e]);
   useEffect(() => api.people.onLive(({ from, body }) => e.onSignal(from, body)), [e]);
+  useEffect(() => {
+    if (call?.phase !== 'ringing') return;
+    const ctx = new AudioContext(); void ctx.resume().catch(() => {});
+    const ring = () => { const osc = ctx.createOscillator(), gain = ctx.createGain(); osc.frequency.value = 440; gain.gain.value = 0.07; osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.4); };
+    ring(); const timer = setInterval(ring, 1800); return () => { clearInterval(timer); void ctx.close(); };
+  }, [call?.phase]);
   const [, tick] = useState(0);
   useEffect(() => { if (call?.phase !== 'connected') return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [call?.phase]);
   useEffect(() => () => { if (e.active) e.hangup(); }, [e]);

@@ -78,6 +78,7 @@ export class LinkSession {
         for (let round = 0; round < 20 && this.open; round++) {
           const due = this.p.due(Number.MAX_SAFE_INTEGER, 1000).filter((d) => d.to === this.peerKey).slice(0, 50);
           if (!due.length) break;
+          for (const d of due) this.p.sending(d.id);
           const r = await this.ask({ t: 'env', envelopes: due.map((d) => d.envelope) });
           const results = Array.isArray(r.results) ? r.results as { ok?: boolean; error?: string; final?: boolean }[] : [];
           due.forEach((d, i) => { const x = results[i]; if (x?.ok) this.p.delivered(d.id); else this.p.deliveryFailed(d.id, x?.error ?? 'refused', x?.final ?? true); });

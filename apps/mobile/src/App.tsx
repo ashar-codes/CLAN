@@ -12,6 +12,9 @@ import { keyFingerprint } from '@classroom/protocol';
 import { migrateOldPhoneData } from './core/migrate';
 import { setupPhoneSync, startSyncSchedule } from './sync/phone';
 import { bump, ThemeRoot } from './ui/kit';
+import { onPeopleNotification } from './people/notifications';
+import { PeopleScreen } from './screens/People';
+import { PhoneCallProvider } from './people/Call';
 import { Shell } from './Shell';
 import { PresentationCard } from './media/Watch';
 import { IntakeScreen, useIncomingShare } from './share/Intake';
@@ -38,6 +41,8 @@ export default function App() {
   const [editing, setEditing] = useState(false);
   const [joined, setJoined] = useState<PairedJoin | null>(null);
   const [ready, setReady] = useState<string | null>(null);
+  const [notice, setNotice] = useState(false);
+  useEffect(() => onPeopleNotification(() => { if (joined) setNotice(true); }), [joined]);
   const [share, clearShare] = useIncomingShare();
 
   useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); })
@@ -61,7 +66,7 @@ export default function App() {
     <SafeAreaProvider><SafeAreaView style={[s.fill, { backgroundColor: c.bg }]} edges={['top', 'bottom', 'left', 'right']}>
       <OpaqueBridgeHost />
       <KeyboardAvoidingView style={s.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ThemeRoot>
+        <ThemeRoot><PhoneCallProvider>
         {editing ? (
           <ProfileForm c={c} initial={profile} onSaved={(p) => { setProfile(p); setEditing(false); }} />
         ) : joined ? (
@@ -69,7 +74,8 @@ export default function App() {
         ) : ready === 'ok' ? (
           <Shell onEditProfile={() => setEditing(true)} intake={share ? <IntakeScreen share={share} onDone={clearShare} /> : undefined} join={<JoinScreen c={c} profile={profile as StudentProfile} onJoined={setJoined} onEdit={() => setEditing(true)} />} />
         ) : ready ? <Text style={{ color: c.danger, padding: 20 }}>{ready}</Text> : <ActivityIndicator style={{ marginTop: 80 }} size="large" />}
-        </ThemeRoot>
+        {notice && joined && ready === 'ok' && <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: c.bg }}><Pressable onPress={() => setNotice(false)} accessibilityRole="button"><Text style={{ color: c.text, padding: 16 }}>Return to CLAN</Text></Pressable><PeopleScreen onJoin={() => Alert.alert('Already in a CLAN', 'Return to your current CLAN and leave it before joining another.')} /></View>}
+        </PhoneCallProvider></ThemeRoot>
       </KeyboardAvoidingView>
     </SafeAreaView></SafeAreaProvider>
   );
