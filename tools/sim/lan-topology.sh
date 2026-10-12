@@ -9,7 +9,7 @@ for name in "${names[@]}"; do
   if sudo ip netns list | awk '{print $1}' | grep -Fxq "$name"; then echo 'Lab namespace already exists; abort'; exit 1; fi
 done
 pids=()
-cleanup() { for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done; for name in "${names[@]}"; do sudo ip netns delete "$name"; done; }
+cleanup() { cat "$fixture/"*.log 2>/dev/null || true; for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done; for name in "${names[@]}"; do sudo ip netns delete "$name"; done; }
 trap cleanup EXIT
 for name in "${names[@]}"; do sudo ip netns add "$name"; sudo ip -n "$name" link set lo up; done
 sudo ip link add clan-a type veth peer name clan-ra
