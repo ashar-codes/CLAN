@@ -41,6 +41,8 @@ if (role === 'directory') {
   await wait(() => rt.nearby().some(n => n.key === other), 'cross-subnet authenticated discovery');
   // Directory discovery proves visibility, not a persistent authenticated connection.
   if (rt.nearby().find(n => n.key === other)?.connection === 'connected') throw Error('Hint incorrectly marked connected');
+  await put(`${role}.discovered`);
+  await wait(async () => !!await exists(role === 'a' ? 'b.discovered' : 'a.discovered'), 'both discovery checks before connecting');
   try {
     if (role === 'b') {
       await wait(() => p.contacts('requests').length > 0, 'friend request');
