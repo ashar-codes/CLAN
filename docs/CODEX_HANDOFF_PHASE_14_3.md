@@ -103,3 +103,5 @@ BTC-1 final application revision: e73cd174f70716c8e914c8e8452030b7550f7f37. Four
 ## BTC-2A checkpoint
 
 New work lives on `btc-2a-universal-lan`, based on BTC-1 `fd33b95e`. Read `BTC_2A_RESULTS.md` and `BTC_2A_LAN_DIRECTORY.md` before claiming network/platform results. The original BTC-1 Desktop installers, installed application, profiles and signing keys remain protected. BTC-2B and installer regeneration are outside this stage.
+
+BTC-2A implementation source checkpoint: `4b0ad6b8de1f6d9e306b7daf6a7cd7b7ae336e7f`. [Final source CI](https://github.com/ashar-codes/CLAN/actions/runs/38300212005) passes real bridged/routed Linux networking and Windows Electron regressions. Native Android builds and prior disposable emulator integration pass; final emulator restart is blocked by missing API 36 SDK system images. iOS native compilation passes but simulator SecureStore startup fails with missing signing entitlement (-34018). No Apple provisioning, physical router/device PASS, updated BTC-2A installer or public-release readiness is claimed. Restore platform test prerequisites and follow BTC_2A_RESULTS.md before proceeding to hardware delivery.
