@@ -52,6 +52,19 @@ const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(1
 if (profileArg && /^[\w-]{1,32}$/.test(profileArg)) app.setPath('userData', join(app.getPath('userData'), `profile-${profileArg}`));
 if (process.env.CLASSROOM_USER_DATA) app.setPath('userData', process.env.CLASSROOM_USER_DATA); // tests
 
+// A profile owns one identity and rollback fence. Different profiles can run together; the same profile cannot.
+const pendingIntakeUrls: string[] = [];
+const ownsProfile = app.requestSingleInstanceLock();
+if (!ownsProfile) app.quit();
+else app.on('second-instance', (_event, argv) => {
+  for (const arg of argv.slice(0, 32)) if (arg.startsWith('clan://') && arg.length <= 16_384) {
+    if (chatHooks) void chatHooks.intake(arg);
+    else if (pendingIntakeUrls.length < 32) pendingIntakeUrls.push(arg);
+  }
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
+});
+
 let server: RunningServer | null = null;
 let keystore: Keystore;
 let trust: Trust;
@@ -408,6 +421,7 @@ function createWindow() {
 
 registerMediaScheme(); // privileged scheme must be declared before ready
 app.whenReady().then(async () => {
+  if (!ownsProfile) return;
   keystore = new Keystore(); // initialise OS key storage under the legacy storage identity…
   app.setName(PRODUCT_NAME); // …then present as CLAN
   trust = new Trust(keystore, app.getPath('userData'));
@@ -430,6 +444,7 @@ app.whenReady().then(async () => {
   const aiCreds = new Credentials();
   clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName, providerFactory(aiCreds));
   chatHooks = registerChat({ clan, server: () => server, trust, files: studentFiles });
+  for (const url of pendingIntakeUrls.splice(0)) void chatHooks.intake(url);
   registerStudy(clan);
   registerAI(clan, aiCreds);
   registerBoards(clan);

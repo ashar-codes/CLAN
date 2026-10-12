@@ -69,6 +69,8 @@ jobs:
             if (!(Test-Path $db)) { throw 'Installed app did not initialize disposable database' }
             $process.Refresh()
             if ($process.HasExited) { throw 'Installed app exited during startup' }
+            node apps/desktop/e2e/packaged-profile-lock.mjs $app
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged profile-lock/capture regression failed' }
           } finally { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
           $uninstaller = Get-ChildItem 'C:\Program Files\CLAN TEST\Uninstall*.exe' | Select-Object -First 1
           if (!$uninstaller) { throw 'Uninstaller missing' }

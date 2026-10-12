@@ -160,6 +160,7 @@ export function registerChat(o: { clan: ClanApp; server: () => RunningServer | n
   setInterval(later, 10 * 60_000).unref();
 
   return {
+    intake,
     /** Host started a session: this device's place in its conversations, and typed events for person-scoped files. */
     hosted(s: RunningServer) {
       const hc = s.chat;
