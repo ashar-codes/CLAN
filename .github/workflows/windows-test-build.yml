@@ -39,12 +39,28 @@ jobs:
       - name: Install and launch on disposable runner
         shell: pwsh
         run: |
+          # Sentinel production rules on this disposable runner: installing/uninstalling TEST must preserve them.
+          $betaNames = @('CLAN (local network)', 'CLAN discovery (local network)', 'CLAN screen sharing (local network)')
+          foreach ($name in $betaNames) {
+            New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Block -Program "$env:WINDIR\System32\notepad.exe" -Protocol TCP | Out-Null
+          }
           $installer = Get-ChildItem apps/desktop/release/*.exe | Select-Object -First 1
           if (!$installer) { throw 'No NSIS installer generated' }
           $install = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Installer exit $($install.ExitCode)" }
           $app = 'C:\Program Files\CLAN TEST\CLAN TEST.exe'
           if (!(Test-Path $app)) { throw 'Installed application missing' }
+          foreach ($name in $betaNames) {
+            if (!(Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) { throw "TEST installer removed beta firewall rule: $name" }
+          }
+          $rules = @('CLAN TEST (local network)', 'CLAN TEST discovery (local network)', 'CLAN TEST screen sharing (local network)')
+          foreach ($name in $rules) {
+            $rule = Get-NetFirewallRule -DisplayName $name -ErrorAction Stop
+            if ($rule.Direction -ne 'Inbound' -or $rule.Action -ne 'Allow') { throw "Invalid TEST rule: $name" }
+            $expectedProgram = if ($name -like '*screen sharing*') { 'C:\Program Files\CLAN TEST\resources\livekit-server.exe' } else { $app }
+            if (($rule | Get-NetFirewallApplicationFilter).Program -ne $expectedProgram) { throw "Wrong TEST executable: $name" }
+            if (($rule | Get-NetFirewallAddressFilter).RemoteAddress -notcontains 'LocalSubnet') { throw "TEST firewall rule is not local-subnet scoped: $name" }
+          }
           $env:CLASSROOM_USER_DATA = Join-Path $env:RUNNER_TEMP 'clan-test-profile'
           $process = Start-Process $app -PassThru
           try {
@@ -54,6 +70,17 @@ jobs:
             $process.Refresh()
             if ($process.HasExited) { throw 'Installed app exited during startup' }
           } finally { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
+          $uninstaller = Get-ChildItem 'C:\Program Files\CLAN TEST\Uninstall*.exe' | Select-Object -First 1
+          if (!$uninstaller) { throw 'Uninstaller missing' }
+          $removed = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw 'TEST uninstall failed' }
+          foreach ($name in $rules) {
+            if (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue) { throw "TEST uninstall left firewall rule: $name" }
+          }
+          foreach ($name in $betaNames) {
+            if (!(Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) { throw "TEST uninstall removed beta firewall rule: $name" }
+          }
+
       - name: Label and checksum
         shell: pwsh
         run: |
@@ -64,7 +91,7 @@ jobs:
           Copy-Item $installer.FullName $output
           $sha = (Get-FileHash $output -Algorithm SHA256).Hash.ToLower()
           "$sha  $(Split-Path $output -Leaf)" | Set-Content windows-test-delivery/SHA256SUMS -Encoding ascii
-          @{commit=$env:CLAN_SOURCE_SHA;version='0.1.0';signing='unsigned';build='Windows x64 NSIS';smoke='runner install and startup passed';physicalTests='NOT TESTED';publicRelease='NOT APPROVED'} | ConvertTo-Json | Set-Content windows-test-delivery/build-evidence.json
+          @{commit=$env:CLAN_SOURCE_SHA;version='0.1.0';signing='unsigned';build='Windows x64 NSIS';smoke='runner install, startup, uninstall and beta firewall preservation passed';physicalTests='NOT TESTED';publicRelease='NOT APPROVED'} | ConvertTo-Json | Set-Content windows-test-delivery/build-evidence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: CLAN-Windows-TEST-UNVERIFIED
