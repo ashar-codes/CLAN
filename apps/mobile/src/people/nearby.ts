@@ -1,3 +1,4 @@
+import { initializeDirectory, refreshDirectory } from './directory';
 // Nearby on the phone: one connection manager for clan-link/1 over every path this phone has — the current Wi-Fi or a
 // hotspot (NSD/Bonjour), Apple peer-to-peer Wi-Fi (iPhone ↔ iPhone), Wi-Fi Direct and Wi-Fi Aware (Android) — plus the
 // person's choice of availability:
@@ -19,7 +20,7 @@ import { retainPeople } from './availability';
 import { bump } from '../ui/kit';
 
 export type NearbyMode = 'off' | 'app' | 'session' | 'keep';
-export type NearbyEntry = { id: string; key: string | null; name: string; profile: ProfileView | null; friend: boolean; via: 'wifi' | 'apple' | 'direct' | 'aware'; address: string | null; device?: string; seenAt: number };
+export type NearbyEntry = { id: string; key: string | null; name: string; profile: ProfileView | null; friend: boolean; via: 'wifi' | 'apple' | 'direct' | 'aware' | 'internal'; address: string | null; device?: string; seenAt: number };
 
 const people = () => phoneClan().people;
 const settingsFile = () => { const d = new Directory(Paths.document, 'people'); if (!d.exists) d.create({ intermediates: true, idempotent: true }); return new File(d, 'nearby.json'); };
@@ -49,6 +50,9 @@ class Nearby {
   private r = '';
   private rAt = 0;
   private running = false;
+  private generation = 0;
+  private directoryGeneration = 0;
+  private directoryRound = 0;
   private probed = new Map<string, number>();
   private timers: ReturnType<typeof setInterval>[] = [];
   private dialedDevice = '';
@@ -71,6 +75,7 @@ class Nearby {
   manager(signer: { publicKey: string; sign(b: Uint8Array): string }) {
     if (!this.cm) {
       this.cm = new ConnectionManager({ people: people(), signer, files: linkFiles, onLive: (e) => this.live?.(e), onChange: () => bump(), myAddrs: () => this.myAddrs() }).use(nativeLinkTransport);
+      initializeDirectory(signer, () => { const r = b64u.encode(getRandomBytes(12)), p = people(); return p.visibility() === 'invisible' || !this.running ? [] : [{ kind: 'link', r, t: p.presenceTagFor(r), endpoints: this.myAddrs().map((a) => a.slice(4)) }].filter((a) => a.endpoints.length) as import('@classroom/protocol').DirectoryAdvert[]; }, (items, expires) => { const generation = ++this.directoryGeneration; for (const [id] of this.entries) if (id.startsWith('directory:')) this.entries.delete(id); void (async () => { const links = items.filter((a) => a.kind === 'link'); const chunk = links.slice(this.directoryRound, this.directoryRound + 8); this.directoryRound = this.directoryRound + 8 >= links.length ? 0 : this.directoryRound + 8; for (const x of chunk) { if (Date.now() > expires || !this.running || generation !== this.directoryGeneration) break; const key = x.t ? people().matchPresence(x.r, x.t) : null; for (const endpoint of x.endpoints) { await this.look(`tcp:${endpoint}`, { id: `directory:${x.r}`, key, name: key ? people().contact(key)?.name ?? 'Friend' : 'Someone on the internal network', profile: null, friend: !!key, via: 'internal', address: `tcp:${endpoint}`, seenAt: Date.now() }, () => generation === this.directoryGeneration && Date.now() <= expires); if (this.entries.has(`directory:${x.r}`)) break; } } })(); });
       this.cm.onState(() => { this.keepAlive(); bump(); });
       PeerLink?.addListener('radio', (e) => this.radio(e));
       PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser) { this.setMode('app'); if (AppState.currentState !== 'active') this.stop(); } });
@@ -109,9 +114,11 @@ class Nearby {
       this.running = true;
       try { PeerLink.browse(); } catch { /* reported by radio events */ }
       this.timers.push(setInterval(() => this.advertise(), 60_000));
+      this.timers.push(setInterval(() => { if (AppState.currentState === 'active' || this.keepInBackground()) void refreshDirectory(); }, 5000));
       this.timers.push(setInterval(() => { for (const [id, e] of this.entries) if (Date.now() - e.seenAt > 10 * 60_000) this.entries.delete(id); bump(); }, 60_000));
     }
     this.advertise(true);
+    void refreshDirectory(true);
     this.keepAlive();
   }
   /** Rotated hourly and whenever visibility changes; nothing while Invisible. */
@@ -137,7 +144,7 @@ class Nearby {
   }
   stop(closeSessions = true) {
     if (!PeerLink) return;
-    this.running = false;
+    this.running = false; this.generation++; this.directoryGeneration++;
     for (const t of this.timers) clearInterval(t); this.timers = [];
     try { PeerLink.stopAdvertise(); PeerLink.stopBrowse(); PeerLink.p2pStop(); PeerLink.awareStop(); stopListening(); PeerLink.availabilityStop(); } catch { /* not fatal */ }
     if (closeSessions) for (const c of people().contacts('all')) this.cm?.session(c.key)?.link.close('Nearby turned off');
@@ -166,13 +173,14 @@ class Nearby {
     else if (e.via === 'aware') { if (friend) void this.connectAware(e.peer, base); else this.upsert({ ...base, via: 'aware', address: `aware-peer:${e.peer}` }); }
   }
   /** Friend → connect as ourselves (expecting their key); anyone else → a throwaway-identity look at their public profile. */
-  private async look(address: string, entry: Omit<NearbyEntry, 'address'> & { address: string | null }) {
-    const cm = this.cm; if (!cm) return;
+  private async look(address: string, entry: Omit<NearbyEntry, 'address'> & { address: string | null }, valid = () => true) {
+    const cm = this.cm, generation = this.generation; if (!cm) return;
     try {
-      if (entry.key) { await cm.connect(address, { expectKey: entry.key }); this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); return; }
+      if (entry.key) { if (!cm.connected(entry.key)) await cm.connect(address, { expectKey: entry.key }); if (!this.running || generation !== this.generation || !valid()) return; this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); return; }
       const { key, profile } = await probeAnonymously(await nativeLinkTransport.dial(address));
+      if (!this.running || generation !== this.generation || !valid()) return;
       const c = people().meet({ profile });
-      if (people().isBlocked(c.key)) return;
+      if (people().isBlocked(c.key) || c.key === people().myKey()) return;
       if (address.startsWith('tcp:')) { try { people().setLinkAddrs(c.key, [address]); } catch { /* unusual address */ } }
       this.upsert({ ...entry, key, name: c.name, profile: c.profile, address });
     } catch { /* not visible to us: never shown */ }

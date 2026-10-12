@@ -99,3 +99,7 @@ The user will perform physical Windows/Android/iPhone tests after receiving arti
 See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.
 
 BTC-1 final application revision: e73cd174f70716c8e914c8e8452030b7550f7f37. Four TEST packages delivered to /Users/ashar/Desktop/CLAN - Installers with checksums and signing restrictions in BTC_1.md. Physical tests explicitly deferred to user. Do not repackage older revisions or count manual tests as PASS. Documentation checkpoint may follow this immutable build revision.
+
+## BTC-2A checkpoint
+
+New work lives on `btc-2a-universal-lan`, based on BTC-1 `fd33b95e`. Read `BTC_2A_RESULTS.md` and `BTC_2A_LAN_DIRECTORY.md` before claiming network/platform results. The original BTC-1 Desktop installers, installed application, profiles and signing keys remain protected. BTC-2B and installer regeneration are outside this stage.

@@ -261,3 +261,7 @@ Desktop profile concurrency: the final TEST source acquires Electron's per-userD
 ## BTC-1 audit follow-up (2026-10-12)
 
 See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.
+
+### BTC-2A internal LAN discovery
+
+The optional administrator LAN directory requires explicit client opt-in, certificate/SPKI pinning and signed, enrolled public-key requests with replay/expiry limits. It returns untrusted rotating discovery hints; existing peer authentication, blocking, attachment consent and CLAN OPAQUE/host authority remain authoritative. Native pinned transports refuse redirects. No payload forwarding or firewall changes are implemented. See [trust, deployment, limits and tests](BTC_2A_LAN_DIRECTORY.md) and [verification record](BTC_2A_RESULTS.md).

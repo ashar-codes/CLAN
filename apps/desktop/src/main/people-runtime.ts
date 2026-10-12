@@ -1,6 +1,10 @@
 // People runtime for a computer (no Electron imports: tests drive it directly). Joins the People core (rules and
 // storage), the people endpoint (server), the peer client and DNS-SD: delivers the outbox, downloads accepted files,
 // finds nearby people, carries live call signaling, and serves phones over their authenticated socket.
+import { networkInterfaces } from 'node:os';
+import { lanDirectoryClient, LanDirectoryAgent } from '@classroom/client';
+import { pinnedTransport } from '@classroom/client/node';
+import { directoryConfig, type DirectoryConfig, type DirectoryAdvert } from '@classroom/protocol';
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, open, stat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,7 +14,7 @@ import { hello, peerClient, PeerHttpError } from '@classroom/client/people';
 import { ConnectionManager, probeAnonymously, type LinkFiles, type People } from '@clan/core';
 import { newEd25519, nodeSigner } from '@classroom/client/node';
 
-export type NearbyPerson = { key: string; name: string; profile: ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean };
+export type NearbyPerson = { key: string; name: string; profile: ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean; network?: string; connection?: string };
 type Signer = { publicKey: string; sign(b: Uint8Array): string };
 type Tls = { certPem: string; keyPem: string; certificate: string; spkiSha256: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -21,7 +25,7 @@ export async function startPeopleRuntime(o: {
   /** Accept 127.x endpoints from introductions (tests and development only). */
   allowLoopback?: boolean;
   /** Port for clan-link/1 (phones, hotspots and other router-free paths); a fresh one when omitted or taken. */
-  linkPort?: number;
+  linkPort?: number; directory?: DirectoryConfig | null; ownClans?(): DirectoryAdvert[]; onClans?(items: DirectoryAdvert[], expires: number): void;
 }) {
   const p = o.people, now = o.now ?? (() => Date.now());
   p.setSigner(o.signer);
@@ -85,7 +89,7 @@ export async function startPeopleRuntime(o: {
   };
   let linkPort = 0;
   const linkAddrs = () => o.endpoints(server.port).map((e) => `tcp:${e.slice(0, e.lastIndexOf(':'))}:${linkPort}`);
-  const cm = new ConnectionManager({ people: p, signer: o.signer, files, onLive: (e) => o.onLive?.(e), onChange: changed, myAddrs: linkAddrs, tickMs: o.tickMs ?? 3000 }).use(tcpTransport());
+  const cm = new ConnectionManager({ people: p, signer: o.signer, files, onLive: (e) => o.onLive?.(e), onChange: changed, myAddrs: linkAddrs, tickMs: o.tickMs ?? 3000, networks: () => Object.values(networkInterfaces()).flatMap((v) => v ?? []).filter((v) => v.family === 'IPv4' && !v.internal).map((v) => ({ address: v.address, netmask: v.netmask })) }).use(tcpTransport());
   const links = await listenLinks({ port: o.linkPort, bind: o.bind, onLink: (l) => void cm.accept(l) })
     .catch((e: NodeJS.ErrnoException) => { if (o.linkPort && e.code === 'EADDRINUSE') return listenLinks({ bind: o.bind, onLink: (l) => void cm.accept(l) }); throw e; });
   linkPort = links.port;
@@ -196,19 +200,20 @@ export async function startPeopleRuntime(o: {
       stopAd = async () => { await a(); await b(); };
     }
   };
-  const probe = async (endpoint: string, invite?: string, signer: Signer = o.signer) => {
+  const probe = async (endpoint: string, invite?: string, signer: Signer = o.signer, expected?: { key: string; spkiSha256?: string }) => {
     const b = await hello(endpoint, signer, { invite });
+    if (expected && (b.key !== expected.key || expected.spkiSha256 && b.spkiSha256 !== expected.spkiSha256)) throw new Error('That device did not match the expected identity.');
     const c = peerClient({ endpoint, tls: b, peerKey: b.key, signer, invite });
     const profile = await c.profile();
     const contact = p.meet({ profile, endpoints: [endpoint], tls: { certificate: b.certificate, spkiSha256: b.spkiSha256 } });
     if (signer === o.signer) p.wake(b.key);
     return { binding: b, contact };
   };
-  const seen = (c: { key: string; name: string; profile: ProfileView | null; relation: string; verified: boolean } | null, endpoint: string, r: string) => {
+  const seen = (c: { key: string; name: string; profile: ProfileView | null; relation: string; verified: boolean } | null, endpoint: string, r: string, network = 'Same LAN') => {
     if (!c?.profile || p.isBlocked(c.key)) return;
     if (!nearby.has(c.key)) p.friendReachable(c.key);
     byAdvert.set(r, c.key);
-    nearby.set(c.key, { key: c.key, name: c.name, profile: c.profile, endpoint, relation: c.relation, seenAt: now(), verified: c.verified });
+    nearby.set(c.key, { key: c.key, name: c.name, profile: c.profile, endpoint, relation: c.relation, seenAt: now(), verified: c.verified, network });
     changed('nearby');
   };
   const byAdvert = new Map<string, string>(); // advert id -> key
@@ -242,6 +247,38 @@ export async function startPeopleRuntime(o: {
   void advertise();
   const adTimer = setInterval(() => void advertise(), 30_000); adTimer.unref?.();
 
+  let directory: DirectoryConfig | null = null, directoryMessage = 'LAN directory disabled.', directoryRound = 0, directoryGeneration = 0;
+  const agent = new LanDirectoryAgent(() => {
+    const vis = p.visibility(), r = randomBytes(12).toString('base64url');
+    const ads: DirectoryAdvert[] = vis === 'invisible' ? [] : [{ kind: 'link', r, t: p.presenceTagFor(r), endpoints: linkAddrs().map((a) => a.slice(4)) }];
+    return [...ads.filter((a) => a.endpoints.length), ...(o.ownClans?.() ?? [])];
+  }, (items, expires) => {
+    const generation = ++directoryGeneration;
+    for (const [id] of byAdvert) if (id.startsWith('dir:')) lost(id);
+    o.onClans?.(items.filter((a) => a.kind === 'clan'), expires);
+    const selected = items.filter((a) => a.kind === 'link');
+    const chunk = selected.slice(directoryRound, directoryRound + 8); directoryRound = directoryRound + 8 >= selected.length ? 0 : directoryRound + 8;
+    void (async () => { for (const ad of chunk) {
+      if (stopped || generation !== directoryGeneration || Date.now() > expires) break;
+      const friend = ad.t ? p.matchPresence(ad.r, ad.t) : null;
+      for (const ep of ad.endpoints) {
+        try {
+          const addr = `tcp:${ep}`;
+          if (friend) { if (!cm.connected(friend)) await cm.connect(addr, { expectKey: friend }); if (generation !== directoryGeneration || stopped) break; seen(p.contact(friend), addr, `dir:${ad.r}`, 'Internal Network'); }
+          else { const { key, profile } = await probeAnonymously(await tcpTransport(3000).dial(addr)); if (stopped || generation !== directoryGeneration || key === o.signer.publicKey) break; const c = p.meet({ profile }); if (!p.isBlocked(key)) { p.setLinkAddrs(key, [addr, ...p.linkAddrs(key)].slice(0, 6)); seen(c, addr, `dir:${ad.r}`, 'Internal Network'); } }
+          break;
+        } catch { /* directory hints cannot override authentication or visibility */ }
+      }
+    } })();
+  }, (message) => { directoryMessage = message; changed('nearby'); });
+  const configureDirectory = (raw: DirectoryConfig | null) => {
+    directory = raw ? directoryConfig(raw, o.allowLoopback) : null;
+    agent.configure(directory ? lanDirectoryClient({ config: directory, signer: o.signer, nonce: () => randomBytes(18).toString('base64url'), fetch: pinnedTransport(directory).fetch, allowLoopback: o.allowLoopback }) : null);
+    if (!directory) directoryMessage = 'LAN directory disabled.'; else void agent.refresh(true);
+  };
+  if (o.directory) configureDirectory(o.directory);
+  const directoryTimer = setInterval(() => void agent.refresh(), 5000); directoryTimer.unref();
+
   return {
     port: server.port, binding,
     myQr: (intent?: 'profile' | 'friend' | 'chat') => profileQr({ key: o.signer.publicKey, endpoints: o.endpoints(server.port), spkiSha256: o.tls.spkiSha256, links: linkAddrs(), name: p.myProfile().name, invite: p.inviteToken(), intent }),
@@ -250,25 +287,26 @@ export async function startPeopleRuntime(o: {
       const q = parseProfileQr(text);
       if (!q) throw new Error('That is not a CLAN profile code.');
       let last: Error = new Error('Could not reach that person. Make sure you are on the same network.');
-      for (const l of q.endpoints.length ? [] : q.links) {
-        try { await cm.connect(l, { expectKey: q.key, invite: q.invite }); p.markVerified(q.key); for (let i = 0; i < 20 && !p.contact(q.key)?.profile; i++) await new Promise((r) => setTimeout(r, 100)); return p.contact(q.key)!; }
-        catch (err) { last = err as Error; }
-      }
       for (const e of q.endpoints) {
         try {
-          const r = await probe(e, q.invite);
+          const r = await probe(e, q.invite, o.signer, { key: q.key, spkiSha256: q.spkiSha256 });
           if (r.binding.key !== q.key || r.binding.spkiSha256 !== q.spkiSha256) throw new Error('That device did not match the code (identity changed).');
           p.markVerified(q.key);
           return p.contact(q.key)!;
         } catch (err) { last = err as Error; }
       }
+      for (const l of q.links) {
+        try { await cm.connect(l, { expectKey: q.key, invite: q.invite }); p.markVerified(q.key); for (let i = 0; i < 20 && !p.contact(q.key)?.profile; i++) await new Promise((r) => setTimeout(r, 100)); return p.contact(q.key)!; }
+        catch (err) { last = err as Error; }
+      }
       throw last;
     },
-    probe,
-    nearby: () => [...nearby.values()].filter((n) => now() - n.seenAt < 10 * 60_000 && !p.isBlocked(n.key)).map((n) => ({ ...n, relation: p.contact(n.key)?.relation ?? 'none' })),
-    refreshDiscovery: () => { adAt = 0; return advertise(); },
+    probe, configureDirectory, directory: () => ({ config: directory, status: directoryMessage }),
+    networkChanged: () => { cm.networkChanged(); adAt = 0; void advertise(); void agent.refresh(true); void tick(); },
+    nearby: () => [...nearby.values()].filter((n) => now() - n.seenAt < 10 * 60_000 && !p.isBlocked(n.key)).map((n) => ({ ...n, relation: p.contact(n.key)?.relation ?? 'none', connection: cm.status(n.key)?.state ?? 'nearby' })),
+    refreshDiscovery: () => { adAt = 0; void agent.refresh(true); return advertise(); },
     sendLive, tick, server, links: cm, linkPort,
-    async stop() { stopped = true; clearInterval(timer); clearInterval(adTimer); stopBrowse(); stopLinkBrowse(); cm.stop(); await ticking; await stopAd?.(); await links.close(); await server.close(); },
+    async stop() { stopped = true; clearInterval(timer); clearInterval(adTimer); clearInterval(directoryTimer); agent.configure(null); stopBrowse(); stopLinkBrowse(); cm.stop(); await ticking; await stopAd?.(); await links.close(); await server.close(); },
   };
 }
 export const isUuid = (s: string) => UUID.test(s);

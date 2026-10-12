@@ -3,6 +3,7 @@
 // end to end and applied by People.receive with the link-authenticated key; a message counts as delivered only when
 // the other device's authenticated reply says it was applied; files move only after consent and are verified.
 import { b64u, ephemeralSigner, linkInitiate, linkRespond, type ByteLink, type LinkSigner, type PeerEnvelope, type SecureLink } from '@classroom/protocol';
+import { orderLanRoutes, type RouteNetwork } from '@classroom/protocol';
 import type { People } from './index.ts';
 
 /** File access the session needs (Node fs on computers, expo-file-system on phones). */
@@ -204,9 +205,13 @@ export class ConnectionManager {
   private readonly listeners = new Set<() => void>();
   private readonly hooks: { onLive?(e: PeerEnvelope): void; onChange?(what: string): void; myAddrs(): string[] };
   private timer: ReturnType<typeof setInterval> | null = null;
+  private stopped = false;
+  private readonly working = new Map<string, string>();
+  private readonly connects = new Map<string, Promise<LinkSession>>();
+  private readonly networks: () => RouteNetwork[];
 
-  constructor(o: { people: People; signer: LinkSigner; files: LinkFiles; onLive?(e: PeerEnvelope): void; onChange?(what: string): void; myAddrs?(): string[]; tickMs?: number }) {
-    this.p = o.people; this.signer = o.signer; this.files = o.files;
+  constructor(o: { people: People; signer: LinkSigner; files: LinkFiles; onLive?(e: PeerEnvelope): void; onChange?(what: string): void; myAddrs?(): string[]; tickMs?: number; networks?(): RouteNetwork[] }) {
+    this.p = o.people; this.signer = o.signer; this.files = o.files; this.networks = o.networks ?? (() => []);
     this.hooks = { onLive: o.onLive, onChange: (w) => { o.onChange?.(w); }, myAddrs: o.myAddrs ?? (() => []) };
     this.timer = setInterval(() => void this.tick(), o.tickMs ?? 3000);
     (this.timer as { unref?(): void }).unref?.();
@@ -225,20 +230,29 @@ export class ConnectionManager {
 
   /** A link someone opened to us: authenticate, apply visibility rules before revealing ourselves, then keep it. */
   async accept(link: ByteLink) {
+    if (this.stopped) { link.close(); return null; }
     try {
       let invite: string | null = null;
       const sl = await linkRespond(link, { signer: this.signer, accept: (k, inv) => { invite = inv; return this.p.reachableBy(k, inv) || 'Not accepting this connection.'; } });
+      if (this.stopped || this.p.isBlocked(sl.peerKey)) { sl.close('stopped or blocked'); return null; }
       return this.adopt(sl, invite);
     } catch { return null; }
   }
   /** Dial an address. `expectKey` when we know who should answer; `invite` from their code. */
-  async connect(address: string, o: { expectKey?: string; invite?: string } = {}) {
+  connect(address: string, o: { expectKey?: string; invite?: string } = {}): Promise<LinkSession> {
+    if (this.stopped || o.expectKey && this.p.isBlocked(o.expectKey)) return Promise.reject(new Error('Connection is stopped or this person is blocked.'));
+    const id = `${o.expectKey ?? ''}|${address}|${o.invite ?? ''}`;
+    const current = this.connects.get(id); if (current) return current;
+    const next = this.dial(address, o).finally(() => this.connects.delete(id)); this.connects.set(id, next); return next;
+  }
+  private async dial(address: string, o: { expectKey?: string; invite?: string }) {
     const t = this.transports.find((x) => x.handles(address));
     if (!t) throw new Error('No way to reach that address from this device.');
     if (o.expectKey && !this.session(o.expectKey)) this.set(o.expectKey, this.state.get(o.expectKey)?.s === 'reconnecting' ? 'reconnecting' : 'connecting');
     try {
       const sl = await linkInitiate(await t.dial(address), { signer: this.signer, expectKey: o.expectKey, invite: o.invite });
-      const s = this.adopt(sl);
+      if (this.stopped || this.p.isBlocked(sl.peerKey)) { sl.close('stopped or blocked'); throw new Error('Connection stopped or person blocked.'); }
+      const s = this.adopt(sl); if (s.link === sl) this.working.set(sl.peerKey, address);
       if (address.startsWith('tcp:')) { const known = this.p.linkAddrs(sl.peerKey); if (!known.includes(address)) { try { this.p.setLinkAddrs(sl.peerKey, [address, ...known].slice(0, 6)); } catch { /* not a storable address */ } } }
       return s;
     } catch (e) {
@@ -251,7 +265,7 @@ export class ConnectionManager {
     const key = sl.peerKey, cur = this.sessions.get(key);
     if (cur?.open) {
       const initiator = (s: SecureLink) => s.role === 'initiator' ? this.signer.publicKey : s.peerKey;
-      const keepNew = initiator(sl) < initiator(cur.link) || initiator(sl) === initiator(cur.link);
+      const keepNew = initiator(sl) < initiator(cur.link);
       if (!keepNew) { sl.close('duplicate'); return cur; }
     }
     const s = new LinkSession(this.p, sl, this.files, this.hooks, invite, this.inflight);
@@ -261,7 +275,7 @@ export class ConnectionManager {
     for (const l of this.listeners) l();
     this.hooks.onChange?.('presence');
     sl.onClose(() => {
-      if (this.sessions.get(key) !== s) return;
+      if (this.stopped || this.sessions.get(key) !== s) return;
       this.sessions.delete(key);
       this.set(key, this.wanted(key) ? 'reconnecting' : 'offline');
       void this.tick();
@@ -275,26 +289,29 @@ export class ConnectionManager {
 
   /** Deliver over open sessions; redial (with backoff) people we have something for and an address to try. */
   async tick() {
+    if (this.stopped) return;
     const now = Date.now();
     for (const s of this.sessions.values()) if (s.open) void s.flush();
     const keys = new Set([...this.p.due(Number.MAX_SAFE_INTEGER, 1000).map((d) => d.to), ...this.p.pendingDownloads().map((t) => t.peerKey)]);
     for (const key of keys) {
       if (this.session(key) || this.dialing.has(key) || this.p.isBlocked(key)) continue;
-      const addrs = this.p.linkAddrs(key).filter((a) => this.transports.some((t) => t.handles(a)));
+      const addrs = orderLanRoutes(this.p.linkAddrs(key).filter((a) => this.transports.some((t) => t.handles(a))), this.networks(), this.working.get(key));
       if (!addrs.length) continue;
       const st = this.state.get(key) ?? { s: 'offline' as LinkState, retryAt: 0, tries: 0 };
       if (st.retryAt > now) continue;
       this.dialing.add(key);
       void (async () => {
         let ok = false;
-        for (const a of addrs) { try { await this.connect(a, { expectKey: key }); ok = true; break; } catch { /* next address */ } }
+        for (const a of addrs) { if (this.stopped || this.p.isBlocked(key)) break; try { await this.connect(a, { expectKey: key }); ok = true; break; } catch { /* next address */ } }
+        if (this.stopped) return;
         const tries = ok ? 0 : st.tries + 1, live = !!this.session(key);
         this.state.set(key, { ...(this.state.get(key) ?? st), s: live ? 'connected' : 'offline', retryAt: live ? 0 : Date.now() + Math.min(60_000, 2000 * 2 ** Math.min(tries, 5)), tries: live ? 0 : tries });
         for (const l of this.listeners) l();
       })().finally(() => this.dialing.delete(key));
     }
   }
-  stop() { if (this.timer) clearInterval(this.timer); for (const s of this.sessions.values()) s.link.close('stopped'); this.sessions.clear(); }
+  networkChanged() { if (this.stopped) return; this.working.clear(); for (const [key, value] of this.state) { this.state.set(key, { ...value, retryAt: 0 }); this.p.wake(key); } void this.tick(); }
+  stop() { this.stopped = true; if (this.timer) clearInterval(this.timer); for (const s of this.sessions.values()) s.link.close('stopped'); this.sessions.clear(); }
 }
 
 /**

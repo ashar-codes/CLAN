@@ -1,3 +1,4 @@
+import { setDirectoryHost, directoryClassrooms, onDirectoryClassrooms } from './lan-directory.ts';
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor, session, shell, type WebContents } from 'electron';
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import * as opaque from '@serenity-kit/opaque';
@@ -220,7 +221,7 @@ function registerIpc() {
 
   ipcMain.handle('teacher:start', async (e, raw: unknown): Promise<StartedClassroom> => {
     const a = StartArgs.parse(raw);
-    if (server) await server.close();
+    if (server) await server.close(); setDirectoryHost(null);
     await direct.stop();
     // Every hosted session belongs to a canonical CLAN: re-host keeps it; classrooms reuse their course's CLAN; others are created.
     await clan.hosting.ready(); // a database restored from an older backup never resumes hosting
@@ -269,6 +270,7 @@ function registerIpc() {
     server.resources.on('progress', (resourceId: string, bytes: number, size: number) => e.sender.send('teacher:import', { resourceId, bytes, size }));
     server.classroom.setPolicy(a.policy);
     if (a.distribution === 'peer') server.classroom.setPeerAssist(true);
+    setDirectoryHost({ sid: server.classroom.id, title, type, url: server.bootstrapUrl });
     return { url: server.url, code: server.classroom.code, teacherToken: server.classroom.teacherToken, title, host, iface,
       direct: directNet ? { ssid: directNet.ssid, band: directNet.band, strategy: directNet.strategy, vpn: directNet.vpn } : null };
   });
@@ -279,6 +281,7 @@ function registerIpc() {
     return { assertWritable: () => void clan.hosting.assertWritable(clanId, signer.publicKey), chain: () => clan.hosting.chainOf(clanId)!, sign: (b: Uint8Array) => signer.sign(b) };
   };
   ipcMain.handle('teacher:stop', async () => {
+    setDirectoryHost(null);
     const ended = server?.classroom.clan;
     await server?.close(); server = null; clearTimeout(expiryTimer);
     await direct.stop(); // AP down, its credentials gone, firewall rules removed
@@ -396,7 +399,11 @@ function registerIpc() {
   ipcMain.handle('discover:start', (e) => {
     browsers.get(e.sender)?.();
     // Discovery is a hint only ("there may be a classroom here"); OPAQUE decides.
-    const stop = browse((list) => { discovered = list; if (!e.sender.isDestroyed()) e.sender.send('discover:list', list); });
+    let local: import('@classroom/server/discovery').DiscoveredClassroom[] = [];
+    const emit = () => { const byId = new Map([...directoryClassrooms(), ...local].map((x) => [x.sid, x])); discovered = [...byId.values()]; if (!e.sender.isDestroyed()) e.sender.send('discover:list', discovered); };
+    const stopLan = browse((list) => { local = list; emit(); }); const stopDir = onDirectoryClassrooms(emit);
+    const expiry = setInterval(emit, 5000); expiry.unref(); emit();
+    const stop = () => { stopLan(); stopDir(); clearInterval(expiry); };
     browsers.set(e.sender, stop);
     e.sender.once('destroyed', () => { browsers.get(e.sender)?.(); browsers.delete(e.sender); });
   });

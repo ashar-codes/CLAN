@@ -5,7 +5,7 @@ import { Radar } from './Radar.tsx';
 import { ClanPlace, type PlaceType } from '@clan/design';
 import type { Experience } from './experience.ts';
 
-export type NearbyClan = { sid: string; title: string; type: string };
+export type NearbyClan = { sid: string; title: string; type: string; discoverySource?: 'directory' };
 const TYPES = ['CLASSROOM', 'STUDY_GROUP', 'PROJECT_TEAM', 'FRIENDS', 'TEMPORARY'];
 const LABEL: Record<string, string> = { CLASSROOM: 'Classroom', STUDY_GROUP: 'Study group', PROJECT_TEAM: 'Project team', FRIENDS: 'Friends', TEMPORARY: 'Temporary' };
 
@@ -23,7 +23,7 @@ export function Commons({ nearby, experience, onJoin, onCreate, people }: { near
       <div className="row between"><h2 className="section-title">CLANs</h2>
         <div className="row"><button className="primary" onClick={onJoin}>Join by Code</button><button onClick={onCreate}>Start one here</button></div></div>
       <p className="muted small-text">CLANs running on this network right now. Joining always needs the host’s six-digit code.</p>
-      {mode === 'clans' && <><Radar items={nearby.map((n) => ({ id: n.sid, name: n.title, kind: LABEL[n.type] ?? 'CLAN' }))} onSelect={onJoin} /><p className="muted small-text">Decorative positions; no distances. Discovery is an untrusted hint. Join by the host’s code to authenticate.</p></>}
+      {mode === 'clans' && <><Radar items={nearby.map((n) => ({ id: n.sid, name: n.title, kind: `${LABEL[n.type] ?? 'CLAN'} · ${n.discoverySource === 'directory' ? 'Internal Network' : 'Nearby'} (not joined)` }))} onSelect={onJoin} /><p className="muted small-text">Decorative positions; no distances. Discovery is an untrusted hint, not a connected session. Same-LAN advertisements and Internal Network directory hints still require authenticated joining. Join by the host’s code to authenticate.</p></>}
       {mode === 'clans' && (nearby.length === 0 ? (
         <div className="plaza empty" role="status">
           {experience !== 'minimal' && <svg viewBox="0 0 600 220" aria-hidden className="plaza-art">

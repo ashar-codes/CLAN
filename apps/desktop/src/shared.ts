@@ -309,10 +309,11 @@ export type PeopleContact = import('@clan/core').Contact & { safetyNumber?: stri
 export type PeopleConversation = import('@clan/core').Conversation;
 export type PeopleMessage = import('@clan/core').PeopleMessage;
 export type PeopleTransfer = import('@clan/core').PeopleTransfer;
-export type NearbyPersonView = { key: string; name: string; profile: import('@classroom/protocol').ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean };
+export type NearbyPersonView = { key: string; name: string; profile: import('@classroom/protocol').ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean; network?: string; connection?: string };
 export type MyPeopleProfile = { key: string; fingerprint: string; qr: string; port: number; profile: { name: string; fields: Record<string, unknown>; fieldVisibility: Record<string, 'everyone' | 'friends' | 'nobody'>;
   visibility: 'everyone' | 'friends' | 'invisible'; everyoneUntil: number | null; avatar: { sha256: string; size: number; mime: string; objectId: string } | null; updatedAt: number } };
 export type PeopleApi = {
+  directory(config?: import('@classroom/protocol').DirectoryConfig | null): Promise<{ config: import('@classroom/protocol').DirectoryConfig | null; status: string }>;
   nearbyAlerts(on?: boolean): Promise<boolean>;
   attempt(key: string, callId: string): Promise<void>;
   me(): Promise<MyPeopleProfile>; qrImage(intent?: 'profile' | 'friend' | 'chat'): Promise<string>; resetQr(): Promise<MyPeopleProfile>;

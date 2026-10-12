@@ -1,3 +1,4 @@
+import { refreshDirectory } from './directory';
 // The phone's people runtime on the real native pieces: first contact and certificate-pinned TLS from the
 // pinned-transport module, files through expo-file-system, the device identity key from the Keystore/Keychain.
 // Phones also speak clan-link/1 directly to other phones (src/people/nearby.ts): the same People store and outbox,
@@ -54,8 +55,8 @@ const env: PhoneEnv = {
 let devicesTimer: ReturnType<typeof setInterval> | null = null;
 if (Platform.OS === 'android') PeerLink?.addListener('availabilityTick', (e) => {
   if (!nearby.keepInBackground()) return;
-  if (e.networkChanged) rt?.reconnect();
-  void rt?.tick(); void nearby.cm?.tick(); nearby.advertise();
+  if (e.networkChanged) { rt?.reconnect(); nearby.cm?.networkChanged(); void refreshDirectory(true); }
+  void refreshDirectory(); void rt?.tick(); void nearby.cm?.tick(); nearby.advertise();
 });
 let rt: PhonePeople | null = null, starting: Promise<PhonePeople> | null = null, wanted = false;
 // iOS/default Android suspend on background; explicit Android availability retains authenticated networking.

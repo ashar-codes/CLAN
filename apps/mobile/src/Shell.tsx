@@ -1,3 +1,4 @@
+import { directorySettings } from './people/directory';
 // The phone shell: Home · Study · Inbox · Diary · Me, a bottom bar with large targets, and the CLAN room look
 // (wall, wood, the student's CLANmate). Joining a live CLAN opens the existing pinned-TLS join flow.
 import { useEffect, useState, type ReactNode } from 'react';
@@ -26,7 +27,7 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
   const inboxCount = useData(() => phoneClan().capture.inbox(me()).length) ?? 0;
   // Known contacts reconnect on launch; optional Android availability is restored only after foreground consent.
-  useEffect(() => { try { if (phoneClan().people.contacts('all').length || nearby.mode === 'keep') void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
+  useEffect(() => { try { if (phoneClan().people.contacts('all').length || nearby.mode === 'keep' || directorySettings()) void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
   const peopleCount = useData(() => phoneClan().people.conversations().reduce((n, x) => n + x.unread + (x.state === 'invited_in' ? 1 : 0), 0) + phoneClan().people.contacts('requests').filter((r) => r.relation === 'incoming').length) ?? 0;
   const body = intake ?? (joining ? <Screen><Btn label="← Back" onPress={() => setJoining(false)} />{join}</Screen>
     : tab === 'home' ? <Home onCreate={() => { setTab('me'); setHosting(true); }} onJoin={() => setJoining(true)} go={setTab} onStudy={(t) => { setStudyInitial(t); setTab('study'); }} />

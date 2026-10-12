@@ -1,7 +1,7 @@
 import { Bonjour } from 'bonjour-service';
 import { lanUrls, SERVICE_TYPE, type Advertisement } from '@classroom/protocol';
 
-export type DiscoveredClassroom = { sid: string; title: string; url: string; type: string; alt?: string[] };
+export type DiscoveredClassroom = { sid: string; title: string; url: string; type: string; alt?: string[]; discoverySource?: 'directory' };
 
 /** Opt-in discovery diagnostics (CLAN_DEBUG_DISCOVERY=1): advertise/browse lifecycle and endpoints, to stderr. */
 export const dlog = (...a: unknown[]) => { if (process.env.CLAN_DEBUG_DISCOVERY === '1') console.error(`[discovery ${new Date().toISOString().slice(11, 23)}]`, ...a); };

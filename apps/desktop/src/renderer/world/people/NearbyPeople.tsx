@@ -10,6 +10,9 @@ import { Radar } from '../Radar.tsx';
 import { OpticalTransfer } from './Optical.tsx';
 
 export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
+  const [directoryText, setDirectoryText] = useState(''), [directoryStatus, setDirectoryStatus] = useState('');
+  const directory = () => api.people.directory().then((r) => setDirectoryStatus(r.status));
+  useEffect(() => { void directory(); }, []);
   const [alerts, setAlerts] = useState(false);
   useEffect(() => { void api.people.nearbyAlerts().then(setAlerts); }, []);
   const [list] = usePeople(() => api.people.nearby());
@@ -31,11 +34,12 @@ export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
           <button aria-pressed={vis === 'friends'} onClick={() => act(() => api.people.visibility('friends').then(reloadMe), 'Only friends can find you.')}>Friends only</button>
           <button aria-pressed={vis === 'invisible'} onClick={() => act(() => api.people.visibility('invisible').then(reloadMe), 'You are invisible. Discovery is off.')}>Invisible</button>
         </div>
-        <p className="muted small-text">Everyone Nearby shows only the fields you mark “everyone”, on this Wi-Fi only, and switches back to Friends Only by itself. Avoid it on public or shared networks. Your location is never shown.</p>
+        <p className="muted small-text">Everyone Nearby shows only the fields you mark “everyone”, on the local network (and an explicitly configured internal directory), and switches back to Friends Only by itself. Avoid it on public or shared networks. Your location is never shown.</p>
       </div>
       <button aria-pressed={alerts} onClick={() => void api.people.nearbyAlerts(!alerts).then(setAlerts)}>Friend nearby alerts: {alerts ? 'On' : 'Off'}</button>
       {msg && <p role="status">{msg}</p>}{err && <p role="alert" className="error">{err}</p>}
-      <Radar items={(list ?? []).map((n) => ({ id: n.key, name: n.name, kind: 'Person', verified: n.verified && n.relation === 'friend' }))} onSelect={(key) => document.getElementById(`person-${key}`)?.scrollIntoView({ block: 'center' })} />
+      <div className="card stack" aria-label="Internal network directory"><b>Optional administrator LAN directory</b><p className="muted small-text">Paste the administrator’s public HTTPS configuration only after checking its certificate pin. Enabling sends your device public key and listening addresses to that trusted administrator; discovery returns rotating hints, never private chats or files. Invisible stops People advertisements. No network scanning or gateway forwarding.</p><textarea aria-label="LAN directory configuration" maxLength={20000} value={directoryText} onChange={(e) => setDirectoryText(e.target.value)} /><div className="row"><button onClick={() => act(() => Promise.resolve().then(() => api.people.directory(JSON.parse(directoryText))).then(directory), 'Internal directory enabled.')}>Enable internal directory</button><button onClick={() => act(() => api.people.directory(null).then(directory), 'Directory disabled; registration expires within 90 seconds.')}>Disable directory</button><button onClick={() => void directory()}>Check directory status</button></div><p role="status">{directoryStatus}</p><small>Your enrollment public key: {me?.key}</small><p className="muted small-text">Different routers work only when internal routing and firewall policy permit the connection. If discovery is unavailable, use a trusted profile QR. Ask the network administrator about isolated VLANs.</p></div>
+      <Radar items={(list ?? []).map((n) => ({ id: n.key, name: n.name, kind: `Person · ${n.network ?? 'Nearby'} · ${n.connection ?? 'nearby'}`, verified: n.verified && n.relation === 'friend' }))} onSelect={(key) => document.getElementById(`person-${key}`)?.scrollIntoView({ block: 'center' })} />
       <p className="muted small-text">Positions are a visual layout, not physical distances. Select a person to view their verified profile and connection actions.</p>
       <div role="list" aria-label="People nearby" className="people-list">
         {!list?.length && <p className="muted" role="status">Nobody nearby is visible to you right now. People appear here only while they choose to be visible.</p>}
@@ -56,6 +60,7 @@ function NearbyCard({ n, onChat, onError }: { n: NearbyPersonView; onChat(id: st
     <article id={`person-${n.key}`} role="listitem" className="card person" aria-label={n.name}>
       <div className="row"><Avatar k={n.key} name={n.name} /><div><b>{n.name}</b>{n.verified && <span className="chip" title="Identity checked by QR code"> ✓ verified</span>}
         <br /><small className="muted">{[p.university, p.department, p.course].filter(Boolean).join(' · ') || 'CLAN user'}{REL[rel] ? ` · ${REL[rel]}` : ''}</small></div></div>
+      <p className="muted small-text">{n.network ?? 'Nearby'} · {n.connection === 'connected' ? 'Connected (authenticated session)' : n.connection === 'reconnecting' ? 'Reconnecting' : n.connection === 'offline' || n.connection === 'failed' ? 'Offline — queued items remain pending' : 'Nearby — no persistent connection confirmed'}</p>
       {p.bio && <p className="small-text">{p.bio}</p>}
       {p.interests?.length ? <p className="muted small-text">Interests: {p.interests.join(', ')}</p> : null}
       <div className="row">

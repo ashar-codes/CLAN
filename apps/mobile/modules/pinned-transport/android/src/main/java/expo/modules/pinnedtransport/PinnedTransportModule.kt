@@ -89,6 +89,8 @@ class PinnedTransportModule : Module() {
     val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
     val tls13 = ConnectionSpec.Builder(ConnectionSpec.RESTRICTED_TLS).tlsVersions(TlsVersion.TLS_1_3).build()
     clients[id] = OkHttpClient.Builder()
+      .followRedirects(false)
+      .followSslRedirects(false)
       .sslSocketFactory(ctx.socketFactory, tm)
       .hostnameVerifier { _, _ -> true } // identity = CA + SPKI pin (or first-contact pin), enforced by `tm`
       .connectionSpecs(listOf(tls13))

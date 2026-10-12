@@ -173,3 +173,7 @@ Desktop profile concurrency: the final TEST source acquires Electron's per-userD
 ## BTC-1 background and offline delivery (2026-10-12)
 
 See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.
+
+## BTC-2A: router-independent internal paths
+
+Multicast discovery remains local to its permitted broadcast domain. Authenticated `clan-link/1`/HTTPS transports work over allowed internal routes; an opt-in pinned/enrolled LAN directory bridges the discovery gap across routed subnets using expiring opaque advertisements. It never establishes peer authority or relays payloads. Existing outbox, identity, host fencing and native background contracts remain intact. See [directory deployment and routing](BTC_2A_LAN_DIRECTORY.md) and [measured evidence](BTC_2A_RESULTS.md). Encrypted gateway forwarding and unicast DNS-SD are deferred.

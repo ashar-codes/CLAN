@@ -1,3 +1,5 @@
+import { directoryConfig, type DirectoryAdvert } from '@classroom/protocol';
+import { directoryHost, setDirectoryClassrooms } from './lan-directory.ts';
 // Nearby People, friends, private chats, direct files, voice notes and call signaling on the desktop (main process).
 // Identity: this computer's keystore-held device key (the key that proves identity when joining a CLAN). The people
 // endpoint's TLS certificate is long-lived (keystore) and vouched for by that key. Rules live in @clan/core People;
@@ -39,9 +41,14 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   await mkdir(join(o.dataDir, 'people'), { recursive: true });
   const saved = Number(await readFile(portFile, 'utf8').catch(() => '')) || undefined;
   const linkPortFile = join(o.dataDir, 'people', 'link-port'), savedLink = Number(await readFile(linkPortFile, 'utf8').catch(() => '')) || undefined;
+  const directoryFile = join(o.dataDir, 'people', 'lan-directory.json');
+  const savedDirectory = await readFile(directoryFile, 'utf8').then((v) => directoryConfig(JSON.parse(v))).catch(() => null);
   const start = (port?: number) => startPeopleRuntime({
     people: p, signer, tls, dir: join(o.dataDir, 'people'), discover: true, port, linkPort: savedLink, allowLoopback: loopback,
     endpoints: (port) => [...candidateInterfaces().filter((i) => i.private).map((i) => `${i.address}:${port}`), ...(loopback ? [`127.0.0.1:${port}`] : [])].slice(0, 3),
+    directory: savedDirectory,
+    ownClans: () => { const h = directoryHost(); if (!h) return []; const u = new URL(h.url); return [{ kind: 'clan', r: h.sid.replaceAll('-', ''), endpoints: [u.host], clan: { sid: h.sid, title: h.title.slice(0, 80), type: h.type } } satisfies DirectoryAdvert]; },
+    onClans: (items, expires) => setDirectoryClassrooms(items.filter((x) => x.clan).map((x) => ({ ...x.clan!, url: `http://${x.endpoints[0]}`, alt: x.endpoints.slice(1).map((a) => `http://${a}`), discoverySource: 'directory' })), expires),
     onLive: (e) => send('people:live', { from: e.from, body: e.body }),
     onChange: (what) => send('people:changed', { what }),
   });
@@ -87,6 +94,9 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   });
   handle('people:visibility', async (v, ms) => { const r = p.setVisibility(z.enum(['everyone', 'friends', 'invisible']).parse(v), ms === undefined ? undefined : z.number().int().parse(ms)); await rt.refreshDiscovery(); return r; });
   handle('people:nearby', () => rt.nearby());
+  handle('people:directory', async (raw) => { if (raw !== undefined) { const config = raw === null ? null : directoryConfig(raw); await writeFile(directoryFile, JSON.stringify(config), { mode: 0o600 }); rt.configureDirectory(config); } return rt.directory(); });
+  let addresses = candidateInterfaces().map((i) => i.address).sort().join(',');
+  const networkTimer = setInterval(() => { const current = candidateInterfaces().map((i) => i.address).sort().join(','); if (current !== addresses) { addresses = current; rt.networkChanged(); } }, 5000); networkTimer.unref();
   handle('people:contacts', (f) => p.contacts(z.enum(['friends', 'requests', 'blocked', 'all']).parse(f ?? 'all')));
   handle('people:contact', (k) => { const key = Key.parse(k); const x = p.contact(key); return x && { ...x, safetyNumber: safetyNumber(signer.publicKey, key) }; });
   handle('people:connectQr', async (text) => { const r = await rt.connectQr(z.string().max(2000).parse(text)); void rt.tick(); return r; });
@@ -226,7 +236,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   handle('people:deviceOffer', (action, from, key) => { const a = z.enum(['accept', 'decline']).parse(action); if (a === 'accept') p.acceptDeviceOffer(Key.parse(from), Key.parse(key)); else p.declineDeviceOffer(Key.parse(from), Key.parse(key)); void rt.tick(); });
   handle('people:armMedia', (kind) => armMedia(z.enum(['microphone', 'camera']).parse(kind)));
   handle('people:logCall', (raw) => p.logCall(z.object({ id: z.string().max(64), peerKey: Key, direction: z.enum(['in', 'out']), connectedAt: z.number().int().nullable().optional(), endedAt: z.number().int().nullable().optional(), outcome: z.string().max(40).optional() }).parse(raw)));
-  return { rt, close: () => rt.stop() };
+  return { rt, close: () => { clearInterval(networkTimer); return rt.stop(); } };
 }
 
 const MIME: Record<string, string> = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', zip: 'application/zip', mp4: 'video/mp4', mp3: 'audio/mpeg' };

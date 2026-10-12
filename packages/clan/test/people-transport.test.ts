@@ -39,7 +39,8 @@ describe('people over the network', () => {
     expect(c).toMatchObject({ key: b.key, name: 'Bilal', verified: true });
     // a QR whose pin does not match the device is refused (someone else answering at that address)
     const other = await computer('Mallory');
-    const forgedQr = b.rt.myQr().replace(`${b.rt.port}`, `${other.rt.port}`);
+    // Replace both advertised carriers: a remaining valid link is a legitimate authenticated fallback.
+    const forgedQr = b.rt.myQr().replace(`${b.rt.port}`, `${other.rt.port}`).replace(`${b.rt.linkPort}`, `${other.rt.linkPort}`);
     await expect(a.rt.connectQr(forgedQr)).rejects.toThrow();
     a.p.sendFriendRequest(b.key); await a.rt.tick();
     await wait(() => b.p.contacts('requests').length === 1);

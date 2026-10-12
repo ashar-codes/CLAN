@@ -44,6 +44,45 @@ async function device(name: string) {
 }
 
 describe('people over clan-link/1 (no TLS server, no router needed)', () => {
+  it('coalesces identical dials and rejects a handshake that completes after shutdown', async () => {
+    const a = await device('CoalesceA'), b = await device('CoalesceB');
+    const options = { expectKey: b.key, invite: b.p.inviteToken() };
+    const first = a.cm.connect(b.addr(), options), second = a.cm.connect(b.addr(), options);
+    expect(second).toBe(first); expect(await second).toBe(await first);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    a.cm.use({ name: 'delayed', handles: x => x === 'delayed:test', dial: async () => {
+      await gate; const [x,y] = bytePipe(); void b.cm.accept(y); return x;
+    } });
+    const pending = a.cm.connect('delayed:test', options);
+    a.cm.stop(); release();
+    await expect(pending).rejects.toThrow();
+    expect(a.cm.connected(b.key)).toBe(false);
+    await expect(a.cm.connect(b.addr(), options)).rejects.toThrow('stopped');
+  });
+
+  it('a network-change event wakes queued delivery without duplicates or bypassing blocking', async () => {
+    const a = await device('RoamA'), b = await device('RoamB');
+    await a.cm.connect(b.addr(), { expectKey: b.key, invite: b.p.inviteToken() });
+    const conv = a.p.inviteChat(b.key); await a.cm.tick();
+    await wait(() => b.p.conversations().length === 1); b.p.acceptChat(conv); await b.cm.tick();
+    await wait(() => a.p.conversation(conv)?.state === 'active');
+    a.p.setLinkAddrs(b.key, [b.addr()]); b.p.setLinkAddrs(a.key, ['tcp:127.0.0.1:65534']);
+    await b.listener.close();
+    a.cm.session(b.key)!.link.close('route unavailable');
+    await wait(() => !a.cm.connected(b.key));
+    const message = a.p.sendText(conv, 'survives roaming'); await a.cm.tick();
+    await new Promise(r => setTimeout(r, 100)); expect(a.p.message(message.id)?.state).not.toBe('delivered');
+    const replacement = await listenLinks({ bind: '127.0.0.1', onLink: l => void b.cm.accept(l) }); stops.push(() => replacement.close());
+    b.setAddr(`tcp:127.0.0.1:${replacement.port}`); a.p.setLinkAddrs(b.key, [b.addr()]);
+    a.cm.networkChanged();
+    await wait(() => a.p.message(message.id)?.state === 'delivered', 3000);
+    expect(b.p.page(conv).filter(m => m.id === message.id)).toHaveLength(1);
+    a.p.block(b.key); a.cm.session(b.key)?.link.close('blocked'); a.cm.networkChanged();
+    await expect(a.cm.connect(b.addr(), { expectKey: b.key })).rejects.toThrow('blocked');
+    expect(a.cm.connected(b.key)).toBe(false);
+  });
+
   it('code-based first contact, friends, chat with receipts, refusals by visibility and block', async () => {
     const a = await device('Aisha'), b = await device('Bilal'), m = await device('Mallory');
     // Friends Only: a stranger without the invite is refused before Bilal reveals anything

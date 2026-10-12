@@ -64,7 +64,7 @@ const api: DesktopApi = {
     onChanged: (cb) => listen('sync:changed', () => cb()), onData: (cb) => listen('sync:data', () => cb()),
   } as DesktopApi['sync'],
   people: {
-    nearbyAlerts: inv('people:nearbyAlerts'),
+    directory: inv('people:directory'), nearbyAlerts: inv('people:nearbyAlerts'),
     attempt: inv('people:attempt'),
     me: inv('people:me'), qrImage: inv('people:qrImage'), resetQr: inv('people:resetQr'), update: inv('people:update'), pickAvatar: inv('people:pickAvatar'), avatar: inv('people:avatar'),
     visibility: inv('people:visibility'), nearby: inv('people:nearby'), contacts: inv('people:contacts'), contact: inv('people:contact'), connectQr: inv('people:connectQr'), friend: inv('people:friend'),

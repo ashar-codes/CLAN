@@ -56,6 +56,13 @@ final class PinnedTrust: NSObject, URLSessionDataDelegate, URLSessionWebSocketDe
   }
 
 
+  // Authenticated request headers are bound to one origin/path; never forward them on a redirect.
+  func urlSession(_ session: URLSession, task: URLSessionTask,
+                  willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                  completionHandler: @escaping (URLRequest?) -> Void) {
+    completionHandler(nil)
+  }
+
   func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
     if let id = wsIds[webSocketTask.taskIdentifier] { emit("wsOpen", ["id": id]) }
   }
