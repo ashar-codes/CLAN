@@ -9,6 +9,8 @@ export type PushSource = {
   chainOf(clanId: string): unknown[] | null;
   pendingTransition(clanId: string): unknown | null;
   relinquish(clanId: string, signer: { publicKey: string; sign(bytes: Uint8Array): string }, delegation: never, ack: never): unknown;
+  ready(): Promise<void>;
+  fenceSettled(): Promise<void>;
   /** After the destination activated: the source learns the new head (becomes a standby). */
   accept?(chain: unknown, localKey: string): Promise<unknown>;
 };
@@ -20,9 +22,11 @@ export async function pushClan(o: {
   source: PushSource; clanId: string; delegation: unknown; signer: { publicKey: string; sign(bytes: Uint8Array): string };
   clan: { type: string; name: string; expiresAt: number | null }; chunkBytes?: number; onProgress?(done: number, total: number): void;
 }): Promise<{ epoch: number; writable: boolean }> {
+  await o.source.ready();
   const chain = o.source.chainOf(o.clanId);
   if (!chain) throw new Error('This CLAN has no hosting authority on this device.');
   const finish = async (record: unknown) => {
+    await o.source.fenceSettled();
     const r = await o.call('/host/push/activate', { clanId: o.clanId, chain: [...chain, record] }) as { epoch: number; writable: boolean };
     if (r.writable) await o.source.accept?.([...chain, record], o.signer.publicKey);
     return r;

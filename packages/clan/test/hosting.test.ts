@@ -87,6 +87,24 @@ async function handoff(w: World, o: { src?: Dev; srcKey?: Signer; dst?: Dev; dst
 }
 
 describe('persistent hosting authority', () => {
+  it('does not publish a handover transition when the rollback fence cannot be written', async () => {
+    const w = world();
+    try {
+      await seed(w); await w.phone.h.ready();
+      const delegation = w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
+      w.phone.h.freeze(w.clan.id, w.ownerKey.publicKey);
+      const { header } = await w.phone.h.prepareCheckpoint(w.clan.id, w.ownerKey.publicKey);
+      w.desk.h.beginStaging(w.phone.h.chainOf(w.clan.id)!, delegation, header, w.deskKey.publicKey);
+      await transfer(w.phone, w.desk, w.clan.id); await w.desk.h.completeStaging(w.clan.id);
+      const ack = w.desk.h.acknowledge(w.clan.id, w.deskKey);
+      mkdirSync(join(w.phone.storageDir, 'hosting', 'fence.json.tmp')); // a real filesystem write failure
+      const source = w.phone.h.replicationSource({ localKey: w.ownerKey.publicKey, signer: w.ownerKey });
+      await expect(source.relinquish(w.deskKey.publicKey, { clanId: w.clan.id, delegation, ack })).rejects.toThrow();
+      expect(w.phone.h.status(w.clan.id, w.ownerKey.publicKey)?.writable).toBe(false);
+      expect(w.desk.h.status(w.clan.id, w.deskKey.publicKey)?.writable).toBe(false);
+      await expect(source.offer(w.deskKey.publicKey, { clanId: w.clan.id, delegation })).rejects.toThrow();
+    } finally { w.close(); }
+  });
   it('refuses a corrupt rollback fence and never overwrites it with a lower epoch', async () => {
     const w = world();
     try {
@@ -159,7 +177,7 @@ describe('persistent hosting authority', () => {
       w.tick(5000);
       expect(() => stage(short)).toThrow('expired');
       const revoked = w.phone.h.delegate(w.clan.id, w.ownerKey, w.deskKey.publicKey, { id: randomUUID() });
-      w.desk.h.accept(chain, w.deskKey.publicKey);
+      await w.desk.h.accept(chain, w.deskKey.publicKey);
       w.desk.h.addRevocation(w.phone.h.revoke(w.clan.id, w.ownerKey, revoked.id));
       expect(() => stage(revoked)).toThrow('revoked');
       expect(() => w.desk.h.addRevocation(signHostStatement(w.deskKey, { type: 'clan-host-revocation' as const, v: 1 as const, clanId: w.clan.id, ownerKey: w.ownerKey.publicKey, delegationId: randomUUID(), revokedAt: 1 }))).toThrow('owner');

@@ -14,6 +14,10 @@ import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { sha256File } from '../../core/resources.ts';
 import type { Clans } from '../clans/index.ts';
 
+// Two adapters may share a database/storage directory during restart. Serialize the read/merge/rename by file,
+// rather than only by adapter instance, so their writes cannot append to the same temporary file concurrently.
+const fenceQueues = new Map<string, Promise<void>>();
+
 export const schema: ModuleSchema = {
   module: 'hosting', prefix: 'hosting',
   migrations: [`
@@ -131,6 +135,7 @@ export class HostAuthority {
       if (older && r.state !== 'standby') this.db.prepare("UPDATE hosting_authority SET state = 'standby', conflict = ?, updated_at = ? WHERE clan_id = ?")
         .run(JSON.stringify({ restored: `This device's hosting records were restored from an older backup (epoch ${r.epoch}; this device had reached epoch ${x.epoch}). It will not accept changes for this CLAN; its data is kept.` }), this.now(), clanId);
     }
+    await this.recordFence(); // repair a previous interrupted write before any transition can be replayed
   }
   private recordFence() {
     const rows = this.db.prepare('SELECT clan_id, epoch, state FROM hosting_authority').all() as { clan_id: string; epoch: number; state: HostState }[];
@@ -143,11 +148,19 @@ export class HostAuthority {
       const tmp = `${this.fenceFile()}.tmp`;
       await rm(tmp, { force: true });
       const fh = await open(tmp, 'a');
-      try { await fh.write(new TextEncoder().encode(JSON.stringify({ v: 1, clans }))); } finally { await fh.close(); }
+      try {
+        await fh.write(new TextEncoder().encode(JSON.stringify({ v: 1, clans })));
+        await (fh as typeof fh & { sync?: () => Promise<void> }).sync?.();
+      } finally { await fh.close(); }
       await rename(tmp, this.fenceFile());
     };
     // The database commit already happened. Keep its data, but refuse hosting until durable fencing recovers.
-    return this.fenceWrites = this.fenceWrites.then(write).then(() => { this.fenceFailure = null; }, (e) => { this.fenceFailure = e; });
+    const path = this.fenceFile();
+    const settled = (fenceQueues.get(path) ?? Promise.resolve()).then(write)
+      .then(() => { this.fenceFailure = null; }, (e) => { this.fenceFailure = e; });
+    fenceQueues.set(path, settled);
+    void settled.then(() => { if (fenceQueues.get(path) === settled) fenceQueues.delete(path); });
+    return this.fenceWrites = settled;
   }
   /** Resolves when the rollback fence file reflects every committed hosting change so far. */
   async fenceSettled() { await this.fenceWrites; if (this.fenceFailure) throw this.fenceFailure; }
@@ -547,7 +560,8 @@ export class HostAuthority {
       return r;
     };
     return {
-      offer: (callerKey: string, raw: unknown) => {
+      offer: async (callerKey: string, raw: unknown) => {
+        await this.ready();
         const b = Offer.parse(raw), r = authorize(callerKey, b.clanId, b.delegation);
         const t = this.pendingTransition(b.clanId);
         // Already handed to this caller (e.g. it crashed before activating): give it the transition again, nothing else.
@@ -559,11 +573,13 @@ export class HostAuthority {
         return { chain: this.chain(r), header: c.header, clan: { type: clan.type, name: clan.name, expiresAt: clan.expiresAt } };
       },
       blob: (callerKey: string, clanId: string, sha256: string) => offered.get(clanId) === callerKey ? this.checkpointBlob(clanId, sha256) : null,
-      relinquish: (callerKey: string, raw: unknown) => {
+      relinquish: async (callerKey: string, raw: unknown) => {
+        await this.ready();
         const b = Relinquish.parse(raw);
         authorize(callerKey, b.clanId, b.delegation);
         if (b.ack.destKey !== callerKey) throw new HostingError('forbidden', 'The acknowledgment is not the caller\'s.');
         const t = this.relinquish(b.clanId, o.signer, b.delegation, b.ack);
+        await this.fenceSettled(); // do not publish authority while its rollback fence failed to persist
         offered.delete(b.clanId);
         return { chain: this.chain(this.must(b.clanId)), transition: t };
       },
@@ -747,8 +763,13 @@ export class HostAuthority {
    * which is re-verified, materialized and imported in the same transaction that records the new epoch.
    */
   async accept(chain: unknown, localKey: string): Promise<HostStatus> {
+    await this.ready();
     const peek = this.peek(chain, localKey);
-    if (!peek) return this.status(this.learn(chain, localKey).clanId, localKey)!;
+    if (!peek) {
+      const head = this.learn(chain, localKey);
+      await this.fenceSettled();
+      return this.status(head.clanId, localKey)!;
+    }
     return this.exclusive(peek.clanId, async () => {
       const { header } = this.stagedHeader(peek.clanId);
       if (checkpointHash(header) !== peek.checkpointHash) throw new HostingError('not_staged', 'This device has not verified the checkpoint for that transition.');
@@ -756,6 +777,7 @@ export class HostAuthority {
       const blob = (sha: string) => { if (!SHA.test(sha)) throw new Error('bad blob'); return join(this.inDir(peek.clanId), sha); };
       for (const [name, rows] of sections) await this.providers.get(name)!.materialize?.(peek.clanId, rows, blob);
       const head = this.learn(chain, localKey, sections);
+      await this.fenceSettled();
       void rm(this.inDir(peek.clanId), { recursive: true, force: true });
       for (const f of this.activated) { try { f(peek.clanId); } catch { /* derived data is rebuilt again at next startup */ } }
       return this.status(head.clanId, localKey)!;
