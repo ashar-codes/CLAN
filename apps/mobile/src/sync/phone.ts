@@ -81,7 +81,7 @@ export async function linkWithCode(rawCode: string, address: string, signal?: Ab
   try {
     const { grant } = await joinWithCode({ post: fc.post, code, signal, random: getRandomBytes, sign: (b) => s.sign(b),
       device: { fp: self.fp, publicKey: self.publicKey, name: self.name, platform: self.platform, tlsCa: self.tlsCa, tlsSpki: self.tlsSpki, endpoints: [] } });
-    sync.adopt(grant);
+    sync.adopt(grant, ep);
   } finally { fc.release(); }
   void syncNow();
 }

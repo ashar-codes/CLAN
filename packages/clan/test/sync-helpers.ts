@@ -16,7 +16,7 @@ export function device(name: string, o: { storageDir?: string; db?: NonNullable<
   return { ...s, name, fp, me: user(s.app.me), key: { privateKey, pub } };
 }
 /** The link handshake exactly as the LAN client runs it (code typed by the student, proofs bound to the TLS key seen). */
-export function link(a: Dev, b: Dev, o: { code?: string; seenSpki?: string } = {}) {
+export function link(a: Dev, b: Dev, o: { code?: string; seenSpki?: string; verifiedEndpoint?: string } = {}) {
   const started = a.app.sync.startLink();
   const code = normalizeLinkCode(o.code ?? started.code)!;
   const { sessionId, nonceA } = a.app.sync.linkStart();
@@ -29,5 +29,5 @@ export function link(a: Dev, b: Dev, o: { code?: string; seenSpki?: string } = {
   a.app.sync.approveLink(sessionId, ['127.0.0.1:2']);
   const st = a.app.sync.linkStatus(sessionId, nonceB) as { status: 'approved'; proof: string; grant: unknown };
   expect(st.proof).toBe(linkProof(code, linkTranscript('approver', { sessionId, serverSpki: spki, joinerKey: b.key.pub, nonceA, nonceB })));
-  b.app.sync.adopt(st.grant);
+  b.app.sync.adopt(st.grant, o.verifiedEndpoint);
 }

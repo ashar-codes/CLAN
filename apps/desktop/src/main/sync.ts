@@ -88,7 +88,7 @@ export async function registerSync(c: ClanApp, keystore: Keystore, deviceName: (
     if (!ep) throw new Error('Couldn’t find your other device on this network. Type the address it shows.');
     const self = s.self();
     const { grant } = await joinWithCode({ base: `https://${ep}`, code, sign: (b) => signer.sign(b), device: { fp: self.fp, publicKey: self.publicKey, name: self.name, platform: self.platform, tlsCa: self.tlsCa, tlsSpki: self.tlsSpki, endpoints: endpoints() } });
-    s.adopt(grant);
+    s.adopt(grant, ep);
     await advertise(); void syncAll();
     return { ok: true };
   });
