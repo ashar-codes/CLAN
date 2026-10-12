@@ -446,6 +446,10 @@ app.whenReady().then(async () => {
     if (!win.isDestroyed()) void dialog.showMessageBox(win, { type: 'warning', title: 'CLAN restored your data', message: dbRecovered!.from ? 'Your data file was damaged, so CLAN restored its most recent automatic backup.' : 'Your data file was damaged and no healthy backup was found, so CLAN started fresh.', detail: `The damaged file was kept at:\n${dbRecovered!.keptAt}\n\nIf you use other linked devices, they will sync your study data back.` });
   }, 1000)); // let the restored window appear before its modal explanation
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+}).catch((e: unknown) => {
+  logError('startup', e);
+  dialog.showErrorBox('CLAN could not start', e instanceof Error ? e.message : 'Startup failed. Your existing identity and data have been preserved.');
+  app.quit();
 });
 
 let quitting = false;

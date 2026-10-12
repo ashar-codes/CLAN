@@ -158,10 +158,11 @@ export function encodeTransfer(file: { bytes: Uint8Array; name: string; mime: st
     if (offset >= meta.k * 2) return meta.k * 65 + offset;
     while (repairs.length <= offset) {
       let best = candidate, bestBlocks: number[] = [], score = -1;
-      const degree = Math.min(8, blocksFor(candidate, meta.k, salt).length);
+      const maxDegree = meta.k <= 128 ? MAX_DEGREE : 8;
+      const sparse = repairs.length % 8 === 0 ? Math.min(maxDegree, blocksFor(candidate, meta.k, salt).length) : null;
       for (let n = 0; n < 32; n++, candidate++) {
         const blocks = blocksFor(candidate, meta.k, salt);
-        if (blocks.length !== degree) continue; // retain sparse degree variation and bounded peeling
+        if (blocks.length > maxDegree || (sparse !== null && blocks.length !== sparse)) continue;
         const s = blocks.reduce((sum, j) => sum + 1 / (coverage[j]! ** 2), 0) / Math.sqrt(blocks.length);
         if (s > score) { score = s; best = candidate; bestBlocks = blocks; }
       }

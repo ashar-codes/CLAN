@@ -22,6 +22,11 @@ case "$T" in
 esac
 W=$(mktemp -d)
 curl -fsSL -o "$W/$A" "https://github.com/livekit/livekit/releases/download/v$V/$A"
-echo "$S  $W/$A" | shasum -a 256 -c -
+# Git Bash on Windows provides sha256sum rather than Perl's shasum.
+if command -v sha256sum >/dev/null 2>&1; then
+  echo "$S  $W/$A" | sha256sum -c -
+else
+  echo "$S  $W/$A" | shasum -a 256 -c -
+fi
 case "$A" in *.zip) unzip -q -o "$W/$A" livekit-server.exe -d "bin/$T" ;; *) tar -xzf "$W/$A" -C "bin/$T" livekit-server ;; esac
 rm -rf "$W"; echo "fetched bin/$T"

@@ -112,6 +112,8 @@ def main():
         cls = http(47499, '/state')
         adb('shell', 'settings', 'put', 'secure', 'stylus_handwriting_enabled', '0')
         adb('shell', 'pm', 'clear', PKG); adb('shell', 'am', 'start', '-n', f'{PKG}/.MainActivity'); time.sleep(4)
+        if any('send you notifications' in (n.get('text') or '') for n in nodes()):
+            tap('Allow')  # approve the real OS prompt on this disposable emulator only
         print('profile + core on the phone')
         type_('Full name', 'Sara Ahmed'); type_('Student / roll number', 'FA23-CS-007'); type_('Device name', 'Sara-Pixel'); tap('Save')
         find('Join a CLAN'); ok('encrypted core database opened; Home shows the agenda')

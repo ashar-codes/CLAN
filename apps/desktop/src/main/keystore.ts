@@ -1,7 +1,7 @@
 // Long-lived secrets (device key, teacher signing key, OPAQUE server setup), encrypted with Electron safeStorage
 // (macOS Keychain, Windows DPAPI, Linux libsecret/kwallet). Never silently stored in plaintext.
 import { app, safeStorage } from 'electron';
-import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type KeystoreStatus = {
@@ -9,7 +9,7 @@ export type KeystoreStatus = {
   secure: boolean;
   /** Explicit, development-only plaintext mode (unpackaged builds + CLASSROOM_DEV_INSECURE_KEYSTORE=1). */
   insecureDev: boolean;
-  /** Secrets that could not be decrypted and were regenerated this run (identity changed!). */
+  /** Legacy status field. Existing unreadable secrets are never regenerated automatically. */
   regenerated: string[];
   error?: string;
 };
@@ -46,10 +46,8 @@ export class Keystore {
         value = this.status.secure ? safeStorage.decryptString(raw) : raw.toString('utf8');
         if (!value) throw new Error('empty');
       } catch {
-        // Keychain item lost / app re-signed / file corrupted. Keep the old file for forensics, start a new identity.
-        renameSync(file, `${file}.unreadable-${Date.now()}`);
-        this.status.regenerated.push(name);
-        value = null;
+        this.status.error = 'CLAN could not unlock an existing identity key. Its original file is preserved. Restore Keychain access or the matching secure backup before continuing.';
+        throw new KeystoreUnavailable(this.status.error);
       }
     }
     if (value === null) {
