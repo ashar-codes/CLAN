@@ -49,6 +49,8 @@ const internalQa = app.isPackaged && (() => {
   try { return JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')).clanInternalQa === true; }
   catch { return false; }
 })();
+// Match the NSIS shortcut identity so Windows can attribute People toast notifications.
+if (process.platform === 'win32') app.setAppUserModelId(internalQa ? 'app.classroomlan.desktop.qa' : 'app.classroomlan.desktop');
 const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10) ?? (internalQa ? 'personal-beta-test' : undefined);
 if (profileArg && /^[\w-]{1,32}$/.test(profileArg)) app.setPath('userData', join(app.getPath('userData'), `profile-${profileArg}`));
 if (process.env.CLASSROOM_USER_DATA) app.setPath('userData', process.env.CLASSROOM_USER_DATA); // tests

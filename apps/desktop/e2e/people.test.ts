@@ -189,5 +189,7 @@ it('visibility: Everyone Nearby is discovered automatically; Invisible disappear
   const chatA = A.page.getByRole('region', { name: 'Chat with Bilal Ahmed' });
   await chatA.getByLabel('Message', { exact: true }).fill('Can you see this?');
   await chatA.getByLabel('Message', { exact: true }).press('Enter');
-  await chatA.locator('.msg', { hasText: 'Can you see this?' }).getByText('Not sent').waitFor({ timeout: 30_000 });
+  const refused = chatA.locator('.msg', { hasText: 'Can you see this?' });
+  await refused.locator('.msg-meta').filter({ hasText: /· Failed/ }).waitFor({ timeout: 30_000 });
+  expect(await refused.getAttribute('data-state')).toBe('failed');
 }, 180_000);

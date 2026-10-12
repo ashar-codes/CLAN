@@ -28,7 +28,13 @@ Application revision is recorded with the delivered installers. No BTC-2/Campus 
 | Native Android candidate Gradle QA arm64 build | PASS; standalone JS bundle + native modules |
 | Physical Redmi update | PASS; in-place install, existing QA signing certificate continuity |
 | Signed Mac candidate secure Keychain startup | PASS following local user approval |
-| Final-revision builds/smokes | Pending; append delivery evidence before completion |
+| Candidate native iOS simulator/device-SDK compilation | PASS; device build unsigned |
+| iOS simulator profile/note/restart XCTest | 1 PASS |
+| Quiet complete desktop E2E, PERF enabled | 40 PASS, 23 files |
+| Final full unit/integration repeat | 459 PASS, 61 files |
+| Native Mac close-window with opt-in availability | PASS; OS window hidden, renderer and People listener retained |
+| Physical Redmi Keep mode | PASS foreground service, notification 4401 and wake lock; message reception NOT TESTED |
+| Final package rebuild after Windows toast identity fix | Pending; append delivery evidence before completion |
 
 Physical foreground/background/locked message and call tests require the user to enable Keep mode and operate Xiaomi's locked phone; automated input is denied by the OS. They are NOT TESTED until observed. The user's earlier Mac↔Android audio/voice-note success predates this candidate and is not a new PASS. Windows/iPhone physical tests remain NOT TESTED.
 
@@ -47,3 +53,11 @@ Primary OS references: [Android service types](https://developer.android.com/dev
 ## Personal-device checks
 
 Enable notifications and (Android only) Keep CLAN Available. Test open/background/locked receiving, tray-hidden Mac receiving, disconnect/reconnect text/voice/files without duplicates, file acceptance, ringing/missed/later-arrived attempts, opt-in verified-friend alerts, offline mobile Create CLAN/archive/delete, real radar actions and restart persistence. Record PASS/FAIL separately. Router-free radios, hotspot/no-internet, Windows interoperability and two physical iPhones remain hardware gates. Do not treat internal package delivery as public-release approval.
+
+### Final checkpoint details
+
+The previous E2E expected the old Not sent label. It now checks the requested Failed label inside message metadata **and** data-state=failed; all five People E2Es and the complete quiet 40-test suite passed. Earlier runs retained 39 PASS/1 stale-label FAIL and 38 PASS/2 FAIL (selector and recording performance under concurrent native builds). No performance assertion was relaxed; quiet complete rerun passed both PERF tests. Gitleaks scanned 118 commits and staged repairs: zero findings.
+
+Windows toast registration explicitly matches the NSIS shortcut's QA/production AppUserModelID. Physical Windows notification presentation remains NOT TESTED. Source: [Electron platform notifications](https://www.electronjs.org/docs/latest/tutorial/notifications).
+
+The user elected to perform the remaining real-device cross-platform message/audio/notification scenarios manually. Do not claim them passed. Android service startup is observed evidence, not proof of locked message reception. The Android emulator initially refused startup because disposable native build caches left insufficient disk space; original installers and profiles were not removed.
