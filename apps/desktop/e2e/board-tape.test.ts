@@ -22,6 +22,7 @@ async function launch(env: Record<string, string> = {}, userData = mkdtempSync(j
   if (process.env.DEBUG_E2E) app.process().stderr?.on('data', (d) => process.stderr.write(`[app] ${d}`));
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
+  if (process.env.DEBUG_E2E) page.on('pageerror', (e) => process.stderr.write(`[renderer] ${e.stack}\n`));
   page.on('dialog', (d) => void d.accept()); // confirm() prompts (wall switching)
   return { app, page, userData };
 }
@@ -96,7 +97,7 @@ it('Study Group board: concurrent drawing, text/sticky/file card, rejoin restore
   expect(await B.page.getByRole('list', { name: 'Board text' }).textContent()).toContain('Deadlock: 4 conditions');
 
   // Sara leaves and joins again: the board comes back from the host
-  await B.page.getByRole('button', { name: 'Leave' }).click();
+  await B.page.getByRole('button', { name: 'Leave', exact: true }).click();
   await joinByCode(B.page, 'Sara', code);
   if (await B.page.getByText(/Waiting for the host/).isVisible()) await host.getByRole('button', { name: 'Approve', exact: true }).click();
   await B.page.getByTestId('wall-board').waitFor({ timeout: 15_000 });
@@ -163,7 +164,10 @@ it('Study Tape: session → record → markers → stop → play → jump → li
   await p.getByTestId('session-bar').getByRole('button', { name: 'End session' }).click();
   await p.getByRole('button', { name: 'Save and end' }).click();
   await expect.poll(() => ind.count(), { timeout: 15_000 }).toBe(0);
+  // The indicator disappears when stop starts; saving the final chunk and ending the session are still asynchronous.
+  await expect.poll(() => p.getByTestId('session-bar').count(), { timeout: 15_000 }).toBe(0);
   // play it from the shelf
+  await p.bringToFront();
   await p.getByRole('button', { name: 'Study', exact: true }).click();
   await p.getByRole('tablist', { name: 'Study area' }).getByRole('tab', { name: 'Study Tapes', exact: true }).click();
   await p.getByTestId('tape-case').first().click();

@@ -14,6 +14,10 @@ import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
 import { sha256File } from '../../core/resources.ts';
 import type { Clans } from '../clans/index.ts';
 
+// Two adapters may share a database/storage directory during restart. Serialize the read/merge/rename by file,
+// rather than only by adapter instance, so their writes cannot append to the same temporary file concurrently.
+const fenceQueues = new Map<string, Promise<void>>();
+
 export const schema: ModuleSchema = {
   module: 'hosting', prefix: 'hosting',
   migrations: [`
@@ -103,18 +107,35 @@ export class HostAuthority {
   private fenceFile() { return join(this.dir, 'fence.json'); }
   private loaded: Promise<void> | null = null;
   private fenceWrites: Promise<void> = Promise.resolve();
+  private fenceFailure: unknown = null;
+  private async readFence(): Promise<Record<string, { epoch: number; relinquished: boolean }>> {
+    let bytes: Uint8Array;
+    try { bytes = await readFile(this.fenceFile()); }
+    catch (e) { if ((e as { code?: string }).code === 'ENOENT') return {}; throw e; }
+    const parsed = z.object({ v: z.literal(1), clans: z.record(z.string(), z.object({
+      epoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), relinquished: z.boolean(),
+    })) }).parse(JSON.parse(new TextDecoder().decode(bytes)));
+    return parsed.clans;
+  }
   /** Await before hosting a session (desktop does so before starting a host server). Idempotent. */
-  ready() { return this.loaded ??= this.checkFence(); }
+  async ready() {
+    await (this.loaded ??= this.checkFence());
+    await this.fenceWrites;
+    if (this.fenceFailure) throw this.fenceFailure;
+  }
   private async checkFence() {
-    let f: { clans?: Record<string, { epoch: number; relinquished: boolean }> } = {};
-    try { f = JSON.parse(new TextDecoder().decode(await readFile(this.fenceFile()))); } catch { /* first run, or no fence yet */ }
-    for (const [clanId, x] of Object.entries(f.clans ?? {})) {
+    const clans = await this.readFence(); // corruption/unreadable fences must refuse hosting, never look like first run
+    // Startup may finish after this disposable/closing Node database was closed.
+    // No authority can be served from a closed database; do not access it after I/O.
+    if ((this.db as Db & { readonly isOpen?: boolean }).isOpen === false) return;
+    for (const [clanId, x] of Object.entries(clans)) {
       const r = this.row(clanId);
       if (!r || typeof x?.epoch !== 'number') continue;
       const older = r.epoch < x.epoch || (r.epoch === x.epoch && x.relinquished && (r.state === 'active' || r.state === 'frozen'));
       if (older && r.state !== 'standby') this.db.prepare("UPDATE hosting_authority SET state = 'standby', conflict = ?, updated_at = ? WHERE clan_id = ?")
         .run(JSON.stringify({ restored: `This device's hosting records were restored from an older backup (epoch ${r.epoch}; this device had reached epoch ${x.epoch}). It will not accept changes for this CLAN; its data is kept.` }), this.now(), clanId);
     }
+    await this.recordFence(); // repair a previous interrupted write before any transition can be replayed
   }
   private recordFence() {
     const rows = this.db.prepare('SELECT clan_id, epoch, state FROM hosting_authority').all() as { clan_id: string; epoch: number; state: HostState }[];
@@ -122,20 +143,27 @@ export class HostAuthority {
     const write = async () => {
       await mkdir(this.dir, { recursive: true });
       // never lower what the file already promises (a restored database must not rewrite the fence downwards)
-      let prev: Record<string, { epoch: number; relinquished: boolean }> = {};
-      try { prev = JSON.parse(new TextDecoder().decode(await readFile(this.fenceFile()))).clans ?? {}; } catch { /* none yet */ }
+      const prev = await this.readFence();
       for (const [id, p] of Object.entries(prev)) { const n = clans[id]; if (!n || p.epoch > n.epoch || (p.epoch === n.epoch && p.relinquished)) clans[id] = p; }
       const tmp = `${this.fenceFile()}.tmp`;
       await rm(tmp, { force: true });
       const fh = await open(tmp, 'a');
-      try { await fh.write(new TextEncoder().encode(JSON.stringify({ v: 1, clans }))); } finally { await fh.close(); }
+      try {
+        await fh.write(new TextEncoder().encode(JSON.stringify({ v: 1, clans })));
+        await (fh as typeof fh & { sync?: () => Promise<void> }).sync?.();
+      } finally { await fh.close(); }
       await rename(tmp, this.fenceFile());
     };
-    // Best effort: a failed write only weakens rollback detection (the database commit already happened).
-    return this.fenceWrites = this.fenceWrites.then(write, write).catch(() => {});
+    // The database commit already happened. Keep its data, but refuse hosting until durable fencing recovers.
+    const path = this.fenceFile();
+    const settled = (fenceQueues.get(path) ?? Promise.resolve()).then(write)
+      .then(() => { this.fenceFailure = null; }, (e) => { this.fenceFailure = e; });
+    fenceQueues.set(path, settled);
+    void settled.then(() => { if (fenceQueues.get(path) === settled) fenceQueues.delete(path); });
+    return this.fenceWrites = settled;
   }
   /** Resolves when the rollback fence file reflects every committed hosting change so far. */
-  fenceSettled() { return this.fenceWrites.catch(() => {}); }
+  async fenceSettled() { await this.fenceWrites; if (this.fenceFailure) throw this.fenceFailure; }
 
   /** Each owning module (and the host server) contributes one section; both ends must register the same set. */
   register(p: CheckpointProvider) {
@@ -196,6 +224,10 @@ export class HostAuthority {
    * OPAQUE-bound signing key was vouched for by the chain's current host. Returns the session's epoch.
    */
   async verifySession(o: { clanId: string; sessionId: string; teacherPublicKey: string; authority: unknown; localKey?: string }) {
+    if (o.authority === undefined) {
+      if (this.anchorOf(o.clanId) || this.chainOf(o.clanId)) throw new HostingError('not_authoritative', 'This CLAN requires hosting authority; the session omitted it.');
+      return null; // Legacy CLANs have no persistent authority to verify.
+    }
     const p = HostSessionAuthority.safeParse(o.authority);
     if (!p.success || p.data.chain[0]!.clanId !== o.clanId) throw new HostingError('invalid', 'The session sent malformed hosting authority.');
     if (!this.anchorOf(o.clanId)) this.anchorFromPairing(o.clanId, p.data.chain[0]);
@@ -528,7 +560,8 @@ export class HostAuthority {
       return r;
     };
     return {
-      offer: (callerKey: string, raw: unknown) => {
+      offer: async (callerKey: string, raw: unknown) => {
+        await this.ready();
         const b = Offer.parse(raw), r = authorize(callerKey, b.clanId, b.delegation);
         const t = this.pendingTransition(b.clanId);
         // Already handed to this caller (e.g. it crashed before activating): give it the transition again, nothing else.
@@ -540,11 +573,13 @@ export class HostAuthority {
         return { chain: this.chain(r), header: c.header, clan: { type: clan.type, name: clan.name, expiresAt: clan.expiresAt } };
       },
       blob: (callerKey: string, clanId: string, sha256: string) => offered.get(clanId) === callerKey ? this.checkpointBlob(clanId, sha256) : null,
-      relinquish: (callerKey: string, raw: unknown) => {
+      relinquish: async (callerKey: string, raw: unknown) => {
+        await this.ready();
         const b = Relinquish.parse(raw);
         authorize(callerKey, b.clanId, b.delegation);
         if (b.ack.destKey !== callerKey) throw new HostingError('forbidden', 'The acknowledgment is not the caller\'s.');
         const t = this.relinquish(b.clanId, o.signer, b.delegation, b.ack);
+        await this.fenceSettled(); // do not publish authority while its rollback fence failed to persist
         offered.delete(b.clanId);
         return { chain: this.chain(this.must(b.clanId)), transition: t };
       },
@@ -728,8 +763,13 @@ export class HostAuthority {
    * which is re-verified, materialized and imported in the same transaction that records the new epoch.
    */
   async accept(chain: unknown, localKey: string): Promise<HostStatus> {
+    await this.ready();
     const peek = this.peek(chain, localKey);
-    if (!peek) return this.status(this.learn(chain, localKey).clanId, localKey)!;
+    if (!peek) {
+      const head = this.learn(chain, localKey);
+      await this.fenceSettled();
+      return this.status(head.clanId, localKey)!;
+    }
     return this.exclusive(peek.clanId, async () => {
       const { header } = this.stagedHeader(peek.clanId);
       if (checkpointHash(header) !== peek.checkpointHash) throw new HostingError('not_staged', 'This device has not verified the checkpoint for that transition.');
@@ -737,6 +777,7 @@ export class HostAuthority {
       const blob = (sha: string) => { if (!SHA.test(sha)) throw new Error('bad blob'); return join(this.inDir(peek.clanId), sha); };
       for (const [name, rows] of sections) await this.providers.get(name)!.materialize?.(peek.clanId, rows, blob);
       const head = this.learn(chain, localKey, sections);
+      await this.fenceSettled();
       void rm(this.inDir(peek.clanId), { recursive: true, force: true });
       for (const f of this.activated) { try { f(peek.clanId); } catch { /* derived data is rebuilt again at next startup */ } }
       return this.status(head.clanId, localKey)!;

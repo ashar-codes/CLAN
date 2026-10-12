@@ -65,10 +65,16 @@ export const schema: ModuleSchema = {
     CREATE TABLE people_my_devices (key TEXT PRIMARY KEY, name TEXT NOT NULL, account TEXT NOT NULL, sig TEXT NOT NULL, at INTEGER NOT NULL);
     CREATE TABLE people_device_offers (from_key TEXT NOT NULL, key TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', at INTEGER NOT NULL, PRIMARY KEY (from_key, key));
     ALTER TABLE people_profile ADD COLUMN devices_shared TEXT;
+  `, `
+    ALTER TABLE people_profile ADD COLUMN nearby_alerts INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE people_nearby_alerts (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
   `],
 };
 
 export const PeopleChanged = defineEvent('PeopleChanged', 1, z.object({ what: z.enum(['profile', 'contacts', 'relations', 'conversations', 'messages', 'transfers', 'calls']), key: z.string().optional(), convId: z.string().optional() }));
+
+// Published only after authenticated, authorized, durable receipt; retries produce no second alert.
+export const PeopleAlert = defineEvent('PeopleAlert', 1, z.object({ id: z.uuid(), key: z.string(), kind: z.string(), convId: z.uuid().optional() }));
 
 export class PeerError extends Error { readonly code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
 export type Relation = 'none' | 'outgoing' | 'incoming' | 'friend';
@@ -76,7 +82,7 @@ export type Contact = { key: string; name: string; profile: ProfileView | null; 
 export type Conversation = { id: string; peerKey: string; peerName: string; state: 'invited_out' | 'invited_in' | 'active' | 'declined' | 'ended'; mode: 'permanent' | 'temporary'; ttlMs: number | null;
   unread: number; lastAt: number | null; lastText: string | null; friend: boolean };
 export type Message = { id: string; convId: string; seq: number; author: string; mine: boolean; kind: 'text' | 'file' | 'voice' | 'call' | 'event'; text: string | null; createdAt: number;
-  state: 'queued' | 'delivered' | 'failed' | 'received' | 'read'; expiresAt: number | null; transfer: Transfer | null };
+  state: 'queued' | 'sending' | 'delivered' | 'failed' | 'received' | 'read'; expiresAt: number | null; transfer: Transfer | null };
 export type Transfer = { id: string; direction: 'in' | 'out'; name: string; mime: string; size: number; sha256: string; retention: 'temporary' | 'permanent'; voiceMs: number | null;
   state: 'offered' | 'accepted' | 'transferring' | 'complete' | 'declined' | 'cancelled' | 'failed' | 'expired'; received: number; objectId: string | null; error: string | null; expiresAt: number | null };
 export type ProfileInput = { name?: string; university?: string; department?: string; course?: string; interests?: string[]; bio?: string; fieldVisibility?: Partial<Record<ProfileField, 'everyone' | 'friends' | 'nobody'>> };
@@ -97,6 +103,7 @@ type XferRow = { id: string; conv_id: string; msg_id: string; direction: 'in' | 
 export class People {
   private db: Db; private bus: EventBus; private store: ResourceStore; private now: () => number; private me: () => string;
   private signer: PeerSigner | null = null;
+  private activeSends = new Map<string, number>(); // transient; a restart always restores durable Pending
   private rate = new Map<string, number[]>();
   constructor(db: Db, bus: EventBus, store: ResourceStore, now = () => Date.now(), me: () => string = () => '') { this.db = db; this.bus = bus; this.store = store; this.now = now; this.me = me; }
 
@@ -451,7 +458,7 @@ export class People {
   private toMessage(m: MsgRow, c: ConvRow): Message {
     const mine = m.author === this.myKey();
     return { id: m.id, convId: m.conv_id, seq: m.seq, author: m.author, mine, kind: m.kind, text: m.text, createdAt: m.created_at, expiresAt: m.expires_at,
-      state: mine && m.state === 'delivered' && c.peer_read_at >= m.created_at ? 'read' : m.state, transfer: m.transfer_id ? this.transfer(m.transfer_id) : null };
+      state: mine && m.state === 'queued' && (this.activeSends.get(m.id) ?? 0) > this.now() ? 'sending' : mine && m.state === 'delivered' && c.peer_read_at >= m.created_at ? 'read' : m.state, transfer: m.transfer_id ? this.transfer(m.transfer_id) : null };
   }
   message(id: string) { const m = this.db.prepare('SELECT * FROM people_messages WHERE id = ?').get(id) as MsgRow | undefined; return m ? this.toMessage(m, this.conv(m.conv_id)!) : null; }
   /** Newest-last page; `before` = a seq to page backwards (reading position stays on the client). */
@@ -581,17 +588,37 @@ export class People {
     if (t.object_id) { try { this.store.collectOwned(t.object_id); } catch { /* retried at the next sweep */ } }
   }
 
+  nearbyAlerts(on?: boolean): boolean {
+    if (on !== undefined) this.db.prepare('UPDATE people_profile SET nearby_alerts = ?').run(on ? 1 : 0);
+    return !!(this.db.prepare('SELECT nearby_alerts n FROM people_profile').get() as { n: number } | undefined)?.n;
+  }
+  friendReachable(key: string) {
+    const c = this.contact(key); if (!this.nearbyAlerts() || !c?.verified || !this.isFriend(key) || this.isBlocked(key)) return;
+    const last = this.db.prepare('SELECT at FROM people_nearby_alerts WHERE key = ?').get(key) as { at: number } | undefined;
+    const global = this.db.prepare('SELECT max(at) at FROM people_nearby_alerts').get() as { at: number | null };
+    if (last && this.now() - last.at < 3_600_000 || global.at !== null && this.now() - global.at < 15 * 60_000) return;
+    this.db.prepare('INSERT INTO people_nearby_alerts (key, at) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET at = excluded.at').run(key, this.now());
+    this.bus.publish(PeopleAlert, 'people', { id: randomUUID(), key, kind: 'friend.nearby', convId: this.convWith(key)?.id });
+  }
+
   // ---------------- calls (live only) ----------------
   /** Signaling envelope for the call module; refused unless they are a friend or share an active chat. */
   callSignal(key: string, body: Extract<PeerBody, { kind: `call.${string}` }>) {
     this.assertCallable(key);
+    if (!LIVE_KINDS.has(body.kind)) throw new PeerError('invalid', 'Only fresh call signals may ring.');
     return signEnvelope(this.sgn(), { id: randomUUID(), to: key, at: this.now(), body });
+  }
+  queueCallAttempt(key: string, callId: string) {
+    this.assertCallable(key); z.uuid().parse(callId);
+    tx(this.db, () => { this.dropQueued(key, 'call.attempt'); this.queue(key, { kind: 'call.attempt', callId, expiresAt: this.now() + 24 * 3_600_000 }); });
   }
   private assertCallable(key: string) {
     const c = this.convWith(key);
     if (this.isBlocked(key) || !(this.isFriend(key) || (c && c.state === 'active'))) throw new PeerError('not_allowed', 'You can call friends and people you are chatting with.');
   }
-  logCall(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }) {
+  logCall(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }, notify = true) {
+    const previous = this.db.prepare('SELECT ended_at, peer_key, direction FROM people_calls WHERE id = ?').get(o.id) as { ended_at: number | null; peer_key: string; direction: string } | undefined;
+    if (previous && (previous.peer_key !== o.peerKey || previous.direction !== o.direction)) throw new PeerError('refused', 'Call identity does not match its history.');
     this.db.prepare(`INSERT INTO people_calls (id, peer_key, direction, started_at, connected_at, ended_at, outcome) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (id) DO UPDATE SET connected_at = coalesce(excluded.connected_at, connected_at), ended_at = coalesce(excluded.ended_at, ended_at), outcome = coalesce(excluded.outcome, outcome)`)
       .run(o.id, o.peerKey, o.direction, this.now(), o.connectedAt ?? null, o.endedAt ?? null, o.outcome ?? null);
@@ -599,11 +626,12 @@ export class People {
       const c = this.convWith(o.peerKey);
       if (c) { const row = this.db.prepare('SELECT * FROM people_calls WHERE id = ?').get(o.id) as { connected_at: number | null; started_at: number; direction: string };
         const secs = row.connected_at ? Math.round((o.endedAt - row.connected_at) / 1000) : 0;
-        this.addMessage(c.id, { id: `call-${o.id}`, author: o.direction === 'out' ? this.myKey() : o.peerKey, kind: 'call', text: row.connected_at ? `Call · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : `Missed or declined call (${o.outcome ?? 'ended'})`,
+        this.addMessage(c.id, { id: `call-${o.id}`, author: o.direction === 'out' ? this.myKey() : o.peerKey, kind: 'call', text: o.outcome === 'attempt-later' ? 'Call attempt received after reconnecting (did not ring)' : o.outcome === 'unreachable' ? 'Call attempt — recipient was unreachable' : row.connected_at ? `Call · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : `Missed or declined call (${o.outcome ?? 'ended'})`,
           createdAt: row.started_at, state: o.direction === 'out' ? 'delivered' : 'received', expiresAt: this.expiry(c, row.started_at) });
         this.changed('messages', { convId: c.id }); }
     }
     this.changed('calls', { key: o.peerKey });
+    if (notify && o.direction === 'in' && o.endedAt && !previous?.ended_at && !o.connectedAt && (o.outcome?.startsWith('missed') || o.outcome === 'attempt-later')) this.bus.publish(PeopleAlert, 'people', { id: randomUUID(), key: o.peerKey, kind: o.outcome === 'attempt-later' ? 'call.attempt' : 'call.missed', convId: this.convWith(o.peerKey)?.id });
   }
 
   // ---------------- outbox ----------------
@@ -613,6 +641,8 @@ export class People {
   }
   private queue(key: string, body: PeerBody, msgId: string | null = null) {
     if (this.isBlocked(key)) return;
+    const count = this.db.prepare('SELECT count(*) n FROM people_outbox').get() as { n: number };
+    if (count.n >= 2000) throw new PeerError('full', 'The pending delivery queue is full. Reconnect or cancel pending items first.');
     const env = signEnvelope(this.sgn(), { id: randomUUID(), to: key, at: this.now(), body });
     this.db.prepare('INSERT INTO people_outbox (id, to_key, envelope, msg_id, created_at, next_at) VALUES (?, ?, ?, ?, ?, ?)').run(env.id, key, JSON.stringify(env), msgId, this.now(), this.now());
   }
@@ -620,11 +650,25 @@ export class People {
     for (const r of this.db.prepare('SELECT id, envelope FROM people_outbox WHERE to_key = ?').all(key) as { id: string; envelope: string }[]) if ((JSON.parse(r.envelope) as PeerEnvelope).body.kind === kind) this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(r.id);
   }
   /** Due envelopes, oldest first (the transport delivers them in order per person). */
-  due(at = this.now(), limit = 100) { return (this.db.prepare('SELECT id, to_key, envelope FROM people_outbox WHERE next_at <= ? ORDER BY created_at, rowid LIMIT ?').all(at, limit) as { id: string; to_key: string; envelope: string }[]).map((r) => ({ id: r.id, to: r.to_key, envelope: JSON.parse(r.envelope) as PeerEnvelope })); }
-  queuedFor(key: string) { return (this.db.prepare('SELECT envelope FROM people_outbox WHERE to_key = ? ORDER BY created_at, rowid').all(key) as { envelope: string }[]).map((r) => JSON.parse(r.envelope) as PeerEnvelope); }
-  delivered(id: string) {
+  private pruneQueued() {
+    const at = this.now();
+    for (const [id, until] of this.activeSends) if (until <= at) this.activeSends.delete(id);
+    this.db.prepare('DELETE FROM people_outbox WHERE msg_id IN (SELECT id FROM people_messages WHERE expires_at IS NOT NULL AND expires_at <= ?)').run(at);
+    for (const row of this.db.prepare('SELECT id, envelope FROM people_outbox WHERE msg_id IS NULL').all() as { id: string; envelope: string }[]) { const e = JSON.parse(row.envelope) as PeerEnvelope; if (e.body.kind === 'call.attempt' && e.body.expiresAt <= at) this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(row.id); }
+  }
+  due(at = this.now(), limit = 100) { this.pruneQueued(); return (this.db.prepare('SELECT id, to_key, envelope FROM people_outbox WHERE next_at <= ? ORDER BY created_at, rowid LIMIT ?').all(at, limit) as { id: string; to_key: string; envelope: string }[]).map((r) => ({ id: r.id, to: r.to_key, envelope: JSON.parse(r.envelope) as PeerEnvelope })); }
+  queuedFor(key: string) { this.pruneQueued(); return (this.db.prepare('SELECT envelope FROM people_outbox WHERE to_key = ? ORDER BY created_at, rowid').all(key) as { envelope: string }[]).map((r) => JSON.parse(r.envelope) as PeerEnvelope); }
+  sending(id: string) {
     const r = this.db.prepare('SELECT msg_id FROM people_outbox WHERE id = ?').get(id) as { msg_id: string | null } | undefined;
-    if (!r) return;
+    if (!r?.msg_id) return;
+    const previous = this.activeSends.get(r.msg_id) ?? 0;
+    this.activeSends.set(r.msg_id, this.now() + 30_000);
+    if (previous <= this.now()) this.changed('messages');
+  }
+  delivered(id: string, recipient?: string) {
+    const r = this.db.prepare('SELECT msg_id, to_key FROM people_outbox WHERE id = ?').get(id) as { msg_id: string | null; to_key: string } | undefined;
+    if (!r || recipient && r.to_key !== recipient) return;
+    if (r.msg_id) this.activeSends.delete(r.msg_id);
     tx(this.db, () => {
       this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(id);
       if (r.msg_id) this.db.prepare("UPDATE people_messages SET state = 'delivered' WHERE id = ? AND state IN ('queued','failed')").run(r.msg_id);
@@ -635,6 +679,7 @@ export class People {
   deliveryFailed(id: string, error: string, final = false) {
     const r = this.db.prepare('SELECT tries, msg_id FROM people_outbox WHERE id = ?').get(id) as { tries: number; msg_id: string | null } | undefined;
     if (!r) return;
+    if (r.msg_id) this.activeSends.delete(r.msg_id);
     if (final) {
       tx(this.db, () => { this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(id); if (r.msg_id) this.db.prepare("UPDATE people_messages SET state = 'failed' WHERE id = ?").run(r.msg_id); });
     } else this.db.prepare('UPDATE people_outbox SET tries = tries + 1, next_at = ?, last_error = ? WHERE id = ?').run(this.now() + Math.min(5 * 60_000, 2_000 * 2 ** Math.min(r.tries, 8)), error.slice(0, 200), id);
@@ -665,6 +710,9 @@ export class People {
     if (LIVE_KINDS.has(e.body.kind)) {
       if (Math.abs(at - e.at) > LIVE_MAX_AGE_MS) throw new PeerError('stale', 'Expired call signal.');
       this.assertCallable(e.from);
+      if (this.db.prepare('SELECT 1 FROM people_seen WHERE id = ?').get(e.id)) return { kind: e.body.kind };
+      this.db.prepare('INSERT INTO people_seen (id, at) VALUES (?, ?)').run(e.id, at);
+      if (e.body.kind === 'call.invite') this.bus.publish(PeopleAlert, 'people', { id: e.id, key: e.from, kind: e.body.kind, convId: this.convWith(e.from)?.id });
       return { kind: e.body.kind, live: e };
     }
     if (e.at < at - REPLAY_WINDOW_MS || e.at > at + REPLAY_WINDOW_MS) throw new PeerError('stale', 'Message too old.');
@@ -672,11 +720,18 @@ export class People {
     const rel = this.rel(e.from), friend = rel?.state === 'friend', c = this.convWith(e.from), body = e.body;
     const unsolicited = body.kind === 'friend.request' || (body.kind === 'chat.invite' && !friend && c?.state !== 'active');
     if (unsolicited) this.limit(e.from);
-    let download: string | undefined;
+    let download: string | undefined, alertAttempt = false;
     tx(this.db, () => {
       this.db.prepare('INSERT INTO people_seen (id, at) VALUES (?, ?)').run(e.id, at);
       this.touch(e.from);
       switch (body.kind) {
+        case 'call.attempt':
+          this.assertCallable(e.from);
+          if (body.expiresAt <= at || body.expiresAt > e.at + 24 * 3_600_000) throw new PeerError('stale', 'Expired call attempt.');
+          const previousCall = this.db.prepare('SELECT peer_key FROM people_calls WHERE id = ?').get(body.callId) as { peer_key: string } | undefined;
+          if (previousCall) { if (previousCall.peer_key !== e.from) throw new PeerError('refused', 'Call history belongs to another person.'); break; }
+          this.logCall({ id: body.callId, peerKey: e.from, direction: 'in', endedAt: at, outcome: 'attempt-later' }, false); alertAttempt = true;
+          break;
         case 'friend.request':
           if (rel?.state === 'friend') { this.queue(e.from, { kind: 'friend.accept' }); break; }
           if (rel?.state === 'outgoing') { this.setRel(e.from, 'friend'); this.queue(e.from, { kind: 'friend.accept' }); this.ensureConversation(e.from, 'active', 'permanent', null); break; }
@@ -752,6 +807,7 @@ export class People {
         }
       }
     });
+    if (alertAttempt || ['msg.text', 'file.offer', 'file.done', 'friend.request', 'chat.invite'].includes(e.body.kind)) this.bus.publish(PeopleAlert, 'people', { id: e.id, key: e.from, kind: e.body.kind, convId: this.convWith(e.from)?.id });
     if (e.body.kind.startsWith('friend.')) this.wake(e.from);
     return { kind: e.body.kind, download };
   }
@@ -765,6 +821,7 @@ export class People {
   // ---------------- retention ----------------
   /** Deletes expired temporary messages and their files on this device (call about once a minute and at start). */
   async sweep(at = this.now()) {
+    this.pruneQueued();
     const expired = this.db.prepare('SELECT id, conv_id, transfer_id FROM people_messages WHERE expires_at IS NOT NULL AND expires_at <= ?').all(at) as { id: string; conv_id: string; transfer_id: string | null }[];
     for (const m of expired) if (m.transfer_id) await this.dropTransferBytes(m.transfer_id, 'expired');
     if (expired.length) tx(this.db, () => {

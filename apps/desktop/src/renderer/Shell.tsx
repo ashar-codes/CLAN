@@ -15,7 +15,6 @@ import { Me } from './world/Me.tsx';
 import { NearbyPeople } from './world/people/NearbyPeople.tsx';
 import { Chats } from './world/people/Chats.tsx';
 import { Friends } from './world/people/Friends.tsx';
-import { CallProvider } from './world/people/Call.tsx';
 import { usePeople } from './world/people/common.tsx';
 import { QuickCapture } from './world/QuickCapture.tsx';
 import { useAI } from './world/ai/ctx.tsx';
@@ -36,6 +35,7 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
   const ai = useAI();
   const [chatId, setChatId] = useState<string | null>(null);
   const openChat = (id: string) => { setChatId(id); setTab('chats'); };
+  useEffect(() => api.people.onOpen((id) => { if (id) openChat(id); else setTab('friends'); }), []);
   const [convs] = usePeople(() => api.people.conversations());
   const unread = convs?.reduce((n, c) => n + c.unread + (c.state === 'invited_in' ? 1 : 0), 0) ?? 0;
   const [reqs] = usePeople(() => api.people.contacts('requests'));
@@ -88,7 +88,6 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
 
   return (
     <Ctx.Provider value={study}>
-    <CallProvider>
     <div className={`shell ${focus ? 'is-focus' : ''}`}>
       <header className="shell-top">
         <span className="brand-sm">CLAN</span>
@@ -112,7 +111,6 @@ export function Shell({ onCreate, onJoin, onRehost }: { onCreate(type?: ClanType
       <QuickCapture onDone={(m, g) => { setToast(m); reloadHome(); if (g) go(g); }} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>
-    </CallProvider>
     </Ctx.Provider>
   );
 }

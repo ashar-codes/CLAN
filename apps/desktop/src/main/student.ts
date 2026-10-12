@@ -248,7 +248,9 @@ export class StudentFiles {
         onSources: (src) => { this.cache.set(key, { ...this.cache.get(key), sources: src }); },
         onProgress: (p) => {
           for (const s of p.sources ?? []) if (s === 'teacher') teacher = true; else peers.add(s);
-          this.set(job, { state: p.state, bytes: p.bytes, resumedFrom: p.resumedFrom || undefined, via: via(teacher, peers.size) });
+          // Acquisition can finish before its completion record and signed source
+          // summary are persisted. Expose Downloaded only from the final update below.
+          this.set(job, { state: p.state === 'completed' ? 'verifying' : p.state, bytes: p.bytes, resumedFrom: p.resumedFrom || undefined, via: via(teacher, peers.size) });
         },
       });
       if (out.manifest) this.cache.set(key, { ...this.cache.get(key), manifest: out.manifest });

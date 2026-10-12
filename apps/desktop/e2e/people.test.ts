@@ -19,6 +19,7 @@ async function launch(profile: string, device: string): Promise<{ app: ElectronA
   });
   apps.set(profile, app);
   const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
+  if (process.env.DEBUG_E2E) page.on('pageerror', (e) => process.stderr.write(`[renderer] ${e.stack}\n`));
   await page.evaluate((n) => (window as unknown as { classroom: { saveProfile(p: object): Promise<unknown> } }).classroom.saveProfile({ fullName: n, rollNo: 'FA23-001', deviceName: n }), device);
   return { app, page };
 }
@@ -97,12 +98,16 @@ it('permanent chat: delivery, read receipts, file with consent and verification,
   await chatB.getByLabel('File notes.txt').getByText(/Verified/).waitFor({ timeout: 20_000 }); // the receiver's signed receipt reached the sender
 
   // B records a voice note from the (fake) microphone, listens back, sends; A accepts and plays it
+  await B.app.evaluate(({ app, BrowserWindow }) => { app.focus({ steal: true }); BrowserWindow.getAllWindows()[0]?.focus(); });
+  await B.page.bringToFront();
   await chatB.getByRole('button', { name: 'Record a voice message' }).click();
   await chatB.getByText(/0:0[1-9]/).waitFor({ timeout: 10_000 });
   await chatB.getByRole('button', { name: 'Stop' }).click();
   await chatB.getByLabel('Listen before sending').waitFor();
   await chatB.getByRole('button', { name: 'Send voice' }).click();
   const voiceA = chatA.getByLabel('Voice message', { exact: true }).last();
+  await A.app.evaluate(({ app, BrowserWindow }) => { app.focus({ steal: true }); BrowserWindow.getAllWindows()[0]?.focus(); });
+  await A.page.bringToFront();
   // voice notes inside an accepted chat download by themselves (≤ 10 MB, verified like any file)
   await voiceA.getByRole('button', { name: 'Play' }).click({ timeout: 30_000 });
   await voiceA.getByRole('button', { name: 'Pause' }).waitFor();
@@ -184,5 +189,7 @@ it('visibility: Everyone Nearby is discovered automatically; Invisible disappear
   const chatA = A.page.getByRole('region', { name: 'Chat with Bilal Ahmed' });
   await chatA.getByLabel('Message', { exact: true }).fill('Can you see this?');
   await chatA.getByLabel('Message', { exact: true }).press('Enter');
-  await chatA.locator('.msg', { hasText: 'Can you see this?' }).getByText('Not sent').waitFor({ timeout: 30_000 });
+  const refused = chatA.locator('.msg', { hasText: 'Can you see this?' });
+  await refused.locator('.msg-meta').filter({ hasText: /· Failed/ }).waitFor({ timeout: 30_000 });
+  expect(await refused.getAttribute('data-state')).toBe('failed');
 }, 180_000);

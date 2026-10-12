@@ -33,6 +33,16 @@ const sync = (a: Dev, b: Dev) => { clock.t += 1000; return a.app.sync.syncWith(w
 const pair = () => { const a = device('MacBook'), b = device('iPhone'); link(a, b); return { a, b }; };
 
 describe('linking', () => {
+  it('retains the authenticated contact address when advertised interfaces differ, still using the linked identity', async () => {
+    const a = device('MacBook'), b = device('iPhone');
+    try {
+      link(a, b, { verifiedEndpoint: '10.0.2.2:47300' });
+      expect(b.app.sync.devices().find((d) => d.fp === a.fp)?.endpoints[0]).toBe('10.0.2.2:47300');
+      a.app.notes.create(a.me, { title: 'After interface change', body: 'Still authenticated' });
+      await sync(b, a);
+      expect(b.app.notes.mine(b.me).some((n) => n.title === 'After interface change')).toBe(true);
+    } finally { a.db.close(); b.db.close(); }
+  });
   it('needs the right short-lived code bound to the TLS key the joiner saw, then explicit approval', () => {
     const a = device('MacBook'), b = device('iPhone');
     expect(() => link(a, b, { code: 'CLAN-2222-2222-2222' })).toThrow(/not right/);

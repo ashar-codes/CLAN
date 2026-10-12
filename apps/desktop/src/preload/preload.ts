@@ -64,6 +64,8 @@ const api: DesktopApi = {
     onChanged: (cb) => listen('sync:changed', () => cb()), onData: (cb) => listen('sync:data', () => cb()),
   } as DesktopApi['sync'],
   people: {
+    nearbyAlerts: inv('people:nearbyAlerts'),
+    attempt: inv('people:attempt'),
     me: inv('people:me'), qrImage: inv('people:qrImage'), resetQr: inv('people:resetQr'), update: inv('people:update'), pickAvatar: inv('people:pickAvatar'), avatar: inv('people:avatar'),
     visibility: inv('people:visibility'), nearby: inv('people:nearby'), contacts: inv('people:contacts'), contact: inv('people:contact'), connectQr: inv('people:connectQr'), friend: inv('people:friend'),
     conversations: inv('people:conversations'), invite: inv('people:invite'), chat: inv('people:chat'), page: inv('people:page'), send: inv('people:send'), retry: inv('people:retry'),
@@ -74,7 +76,7 @@ const api: DesktopApi = {
     deviceOffers: inv('people:deviceOffers'), deviceOffer: inv('people:deviceOffer'),
     opticalStart: inv('people:opticalStart'), opticalFrames: inv('people:opticalFrames'), opticalStop: inv('people:opticalStop'), opticalReceipt: inv('people:opticalReceipt'),
     opticalAck: inv('people:opticalAck'), opticalSave: inv('people:opticalSave'), opticalInbox: inv('people:opticalInbox'), signal: inv('people:signal'), logCall: inv('people:logCall'),
-    onChanged: (cb) => listen('people:changed', cb), onLive: (cb) => listen('people:live', cb),
+    onOpen: (cb) => listen('people:open', cb), onChanged: (cb) => listen('people:changed', cb), onLive: (cb) => listen('people:live', cb),
   } as DesktopApi['people'],
   hosting: {
     status: inv('hosting:status'), enable: inv('hosting:enable'), request: inv('hosting:request'), decline: inv('hosting:decline'), revoke: inv('hosting:revoke'), handover: inv('hosting:handover'),

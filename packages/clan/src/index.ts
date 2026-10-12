@@ -111,7 +111,9 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   // Direct local edits to CLAN-owned data follow the same fence as the host server.
   for (const m of [chat, whiteboard, files]) m.guardHostWrites((clanId) => hosting.localWriteBlocked(clanId));
   clans.setCleanupGuard((clanId) => hosting.cleanupBlocked(clanId));
-  void hosting.ready(); // rollback fence check (hosts await it again before serving) // member links and adopted classroom files of the imported CLAN
+  // Retain the rejected readiness promise: hosts must await it before serving. Background initialization
+  // must not crash unrelated personal data use when a corrupt fence correctly refuses hosting.
+  void hosting.ready().catch(() => {});
 
   /** Internal lifecycle step. Requires durable authorized intent; filesystem/server cleanup still must succeed
    * before completeCleanup. It deliberately never deletes private study rows, signing identities or other CLANs. */
@@ -161,7 +163,7 @@ export { AGENTS } from './modules/ai/index.ts';
 export type { Board, BoardOwner } from './modules/whiteboard/index.ts';
 export type { Tape, TapeEvent, TapeEventKind } from './modules/recordings/index.ts';
 export { PersonalSync, SyncAuthError, contentHash, verifyEd25519, linkProof, fpOf, SMALL_FILE, type SyncSettings, type DeviceView, type ConflictView, type SelfDevice } from './modules/sync/index.ts';
-export { People, PeerError, PeopleChanged, type Contact, type Conversation, type Message as PeopleMessage, type Transfer as PeopleTransfer } from './modules/people/index.ts';
+export { People, PeerError, PeopleChanged, PeopleAlert, type Contact, type Conversation, type Message as PeopleMessage, type Transfer as PeopleTransfer } from './modules/people/index.ts';
 export { ConnectionManager, LinkSession, probeAnonymously, type LinkFiles, type LinkTransport, type LinkState } from './modules/people/link.ts';
 export { HostAuthority, HostingError, CLAN_TABLES, classifyTable, type HostState, type HostStatus } from './modules/hosting/index.ts';
 export { clock as tapeClock } from './modules/recordings/index.ts';

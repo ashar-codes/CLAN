@@ -18,6 +18,24 @@ function tap(edit?: (dir: 'ab' | 'ba', chunk: Uint8Array, i: number) => Uint8Arr
 }
 
 describe('clan-link/1', () => {
+  it('closes an unauthenticated peer flooding handshake frames before disclosing identity', async () => {
+    const [a, b] = bytePipe(), me = signer();
+    const p = linkRespond(b, { signer: me, accept: () => true });
+    const bytes = frame(te.encode(JSON.stringify({ v: 'clan-link/1', e: b64u.encode(new Uint8Array(32).fill(5)), n: b64u.encode(new Uint8Array(16)) })));
+    const burst = new Uint8Array(bytes.length * 100);
+    for (let i = 0; i < 100; i++) burst.set(bytes, i * bytes.length);
+    a.send(burst);
+    await expect(p).rejects.toMatchObject({ code: 'too_large' });
+  });
+
+  it('bounds authenticated messages received before a consumer subscribes', async () => {
+    const [a, b] = bytePipe();
+    const [i, r] = await Promise.all([linkInitiate(a, { signer: signer() }), linkRespond(b, { signer: signer(), accept: () => true })]);
+    const closed = new Promise<string | undefined>((res) => r.onClose(res));
+    for (let n = 0; n < 100; n++) i.send(te.encode('unconsumed'));
+    expect(await closed).toMatch(/pending/);
+    expect(r.closed).toBe(true);
+  });
   it('authenticates both sides, encrypts both directions, and hides identities from an observer', async () => {
     const A = signer(), B = signer(), t = tap();
     const [ia, rb] = await Promise.all([linkInitiate(t.a, { signer: A, expectKey: B.publicKey }), linkRespond(t.b, { signer: B, accept: () => true })]);

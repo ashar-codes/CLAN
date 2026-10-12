@@ -18,6 +18,7 @@ import type { Capabilities, Conn, Joined, OwnProfile, PastClass, StartedClassroo
 import { StudentFiles } from './student.ts';
 import { registerClan } from './clan.ts';
 import { registerChat } from './chat.ts';
+import { backgroundWindow } from './background.ts';
 import { registerStudy } from './study.ts';
 import { registerSync } from './sync.ts';
 import { registerHosting } from './hosting.ts';
@@ -44,9 +45,28 @@ const joinError = (e: unknown) => {
 // Storage identity first (before anything reads userData or touches safeStorage); the user-visible name is set after ready.
 app.setName(LEGACY_STORAGE_NAME);
 // `--profile=name` gives a separate data dir so one machine can run teacher + students during development.
-const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10);
+const internalQa = app.isPackaged && (() => {
+  try { return JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')).clanInternalQa === true; }
+  catch { return false; }
+})();
+// Match the NSIS shortcut identity so Windows can attribute People toast notifications.
+if (process.platform === 'win32') app.setAppUserModelId(internalQa ? 'app.classroomlan.desktop.qa' : 'app.classroomlan.desktop');
+const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10) ?? (internalQa ? 'personal-beta-test' : undefined);
 if (profileArg && /^[\w-]{1,32}$/.test(profileArg)) app.setPath('userData', join(app.getPath('userData'), `profile-${profileArg}`));
 if (process.env.CLASSROOM_USER_DATA) app.setPath('userData', process.env.CLASSROOM_USER_DATA); // tests
+
+// A profile owns one identity and rollback fence. Different profiles can run together; the same profile cannot.
+const pendingIntakeUrls: string[] = [];
+const ownsProfile = app.requestSingleInstanceLock();
+if (!ownsProfile) app.quit();
+else app.on('second-instance', (_event, argv) => {
+  for (const arg of argv.slice(0, 32)) if (arg.startsWith('clan://') && arg.length <= 16_384) {
+    if (chatHooks) void chatHooks.intake(arg);
+    else if (pendingIntakeUrls.length < 32) pendingIntakeUrls.push(arg);
+  }
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
+});
 
 let server: RunningServer | null = null;
 let keystore: Keystore;
@@ -390,8 +410,10 @@ let chatHooks: ReturnType<typeof registerChat>;
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200, height: 800, minWidth: 720, minHeight: 540, title: PRODUCT_NAME,
-    webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
+    // Calls, recording and presenting must continue when another window is in front.
+    webPreferences: { preload: join(here, '../preload/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
   });
+  backgroundWindow(win);
   // Links (Saved, chat) open in the system browser; the app window itself never navigates or opens pages.
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (url !== win.webContents.getURL()) e.preventDefault(); });
@@ -402,7 +424,8 @@ function createWindow() {
 }
 
 registerMediaScheme(); // privileged scheme must be declared before ready
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (!ownsProfile) return;
   keystore = new Keystore(); // initialise OS key storage under the legacy storage identity…
   app.setName(PRODUCT_NAME); // …then present as CLAN
   trust = new Trust(keystore, app.getPath('userData'));
@@ -425,6 +448,7 @@ app.whenReady().then(() => {
   const aiCreds = new Credentials();
   clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName, providerFactory(aiCreds));
   chatHooks = registerChat({ clan, server: () => server, trust, files: studentFiles });
+  for (const url of pendingIntakeUrls.splice(0)) void chatHooks.intake(url);
   registerStudy(clan);
   registerAI(clan, aiCreds);
   registerBoards(clan);
@@ -434,7 +458,7 @@ app.whenReady().then(() => {
   const syncReady = registerSync(clan, keystore, () => loadProfile().deviceName);
   syncReady.then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
   // Nearby People, friends, private chats, direct files/voice notes and call signaling (Phase 14.3 A+B).
-  void registerPeople(clan, { keystore, trust, dataDir: app.getPath('userData'), displayName: () => loadProfile().fullName })
+  await registerPeople(clan, { keystore, trust, dataDir: app.getPath('userData'), displayName: () => loadProfile().fullName })
     .then((pp) => app.on('will-quit', () => void pp.close()), (e) => logError('people', e));
   registerHosting(clan, { sync: syncReady, liveClanId: () => (server && !server.classroom.info().ended ? server.classroom.clan.id ?? null : null) });
   // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).
@@ -445,6 +469,10 @@ app.whenReady().then(() => {
     if (!win.isDestroyed()) void dialog.showMessageBox(win, { type: 'warning', title: 'CLAN restored your data', message: dbRecovered!.from ? 'Your data file was damaged, so CLAN restored its most recent automatic backup.' : 'Your data file was damaged and no healthy backup was found, so CLAN started fresh.', detail: `The damaged file was kept at:\n${dbRecovered!.keptAt}\n\nIf you use other linked devices, they will sync your study data back.` });
   }, 1000)); // let the restored window appear before its modal explanation
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+}).catch((e: unknown) => {
+  logError('startup', e);
+  dialog.showErrorBox('CLAN could not start', e instanceof Error ? e.message : 'Startup failed. Your existing identity and data have been preserved.');
+  app.quit();
 });
 
 let quitting = false;

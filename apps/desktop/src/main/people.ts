@@ -2,7 +2,7 @@
 // Identity: this computer's keystore-held device key (the key that proves identity when joining a CLAN). The people
 // endpoint's TLS certificate is long-lived (keystore) and vouched for by that key. Rules live in @clan/core People;
 // transport in people-runtime.ts; WebRTC media runs in the renderer with signaling relayed here (signed, live-only).
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, Notification, dialog, ipcMain, shell } from 'electron';
 import { constants } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import type { ClanApp } from '@clan/core';
-import { PeopleChanged } from '@clan/core';
+import { PeopleChanged, PeopleAlert } from '@clan/core';
 import { candidateInterfaces, createClassroomTls, logError } from '@classroom/server';
 import { IMAGE_PREVIEW_BYTES, TEXT_PREVIEW_BYTES, previewImageMime, previewKind, type FilePreview } from '@classroom/client';
 import { newEd25519, nodeSigner, sha256File } from '@classroom/client/node';
@@ -49,6 +49,12 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   if (rt.port !== saved) await writeFile(portFile, String(rt.port));
   if (rt.linkPort !== savedLink) await writeFile(linkPortFile, String(rt.linkPort));
   c.bus.subscribe('desktop.people', PeopleChanged, (e) => send('people:changed', e.payload));
+  c.bus.subscribe('desktop.people.alert', PeopleAlert, (e) => {
+    const x = e.payload, w = BrowserWindow.getAllWindows()[0], prefs = c.notifications.prefs({ kind: 'user', userId: c.me });
+    if (!prefs.direct || x.kind.startsWith('file.') && !prefs.files || w?.isFocused() || !Notification.isSupported()) return;
+    const n = new Notification({ title: 'CLAN', body: x.kind === 'friend.nearby' ? 'A verified friend is reachable nearby.' : x.kind === 'call.attempt' ? 'Call attempt received after reconnecting (did not ring).' : x.kind === 'call.missed' ? 'Missed CLAN call.' : x.kind === 'call.invite' ? 'Incoming call. Open CLAN to answer.' : x.kind === 'friend.request' ? 'New friend request.' : x.kind === 'file.offer' ? 'New file or voice note offer.' : x.kind === 'file.done' ? 'Transfer complete.' : 'New message or chat invitation.' });
+    n.on('click', () => { const win = BrowserWindow.getAllWindows()[0]; if (win) { win.show(); win.focus(); win.webContents.send('people:open', x.convId ?? null); } }); n.show();
+  });
   // this computer is one of the account's devices (after Me › My Devices linking); friends hear about the others
   const devices = () => { try { const acc = c.sync.account(); if (!acc) return; p.announceDevice(acc.accountId, `${p.myProfile().name}’s ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer'}`); if (p.shareDeviceLinks()) void rt.tick(); } catch (e) { logError('people', e); } };
   devices();
@@ -160,6 +166,8 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     const err = await shell.openPath(f.path); if (err) throw new Error(err);
   });
   // ---- calls: the renderer owns the WebRTC connection; signaling is signed and sent live here ----
+  handle('people:nearbyAlerts', (on) => p.nearbyAlerts(z.boolean().optional().parse(on)));
+  handle('people:attempt', (k, id) => { p.queueCallAttempt(Key.parse(k), Id.parse(id)); void rt.tick(); });
   handle('people:signal', async (k, body) => {
     const key = Key.parse(k), b = z.object({ kind: z.string() }).passthrough().parse(body) as PeerBody;
     if (!b.kind.startsWith('call.')) throw new Error('Not a call signal.');

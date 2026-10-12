@@ -2,12 +2,16 @@
   <!-- Wi-Fi Direct / Wi-Fi Aware / local-only hotspot on Android 13+ (never used to derive location). -->
   <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
   <!-- "Stay available during an active session": user-visible foreground service. -->
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
   <uses-feature android:name="android.hardware.wifi.aware" android:required="false" />
   <application>
-    <service android:name="expo.modules.peerlink.PeerLinkService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+    <service android:name="expo.modules.peerlink.PeerLinkService" android:exported="false" android:foregroundServiceType="connectedDevice|microphone" />
   </application>
 </manifest>

@@ -2,6 +2,11 @@
 
 Requirements: Node ≥ 24, pnpm 11. Runtime needs no internet; installing dependencies does.
 
+**Native QA update (2026-10-12):** [Current evidence and artifacts](LOCAL_QA_PHASE_14_3.md)
+supersede historical build claims below. Release is **BLOCKED**. For an embedded, standalone Android build
+without using the beta key, run `apps/mobile/scripts/android-qa.sh`; its `qa` variant uses debug signing and
+does not install automatically. It cannot update a beta APK signed with the existing upload identity.
+
 ## Desktop
 * `pnpm build:desktop` — Vite builds main, preload (CJS, sandboxed) and renderer into `apps/desktop/dist`.
 * `pnpm --filter @classroom/desktop dist:dir` — unpacked app (verified on macOS arm64: `release/mac-arm64/CLAN.app`, E2E passes against it).
@@ -13,7 +18,7 @@ Requirements: Node ≥ 24, pnpm 11. Runtime needs no internet; installing depend
 ## Mobile (Expo development build — not Expo Go, react-native-zeroconf is native)
 * Android: Android SDK + JDK 17, then `pnpm --filter @classroom/mobile android` (or `build:android`).
 * iOS: Xcode on macOS, then `pnpm --filter @classroom/mobile ios`.
-* On the current build machine the Android SDK + JDK 17 are installed (Android builds run); Xcode 26.6 and CocoaPods 1.17.0 are installed. iOS 26.5 platform support/runtime is still missing; native compilation is blocked.
+* The local QA Mac has Android SDK 36 + JDK 17, Xcode 26.6, CocoaPods 1.17.0 and iOS 26.5 SDK/runtime. Real Gradle QA and unsigned iOS simulator compilation passed; iOS simulator boot stalled in OS migration, so runtime validation remains incomplete.
 
 ## Beta release builds (v0.1.0, all from macOS arm64)
 Prerequisites built once (git-ignored binaries; packaging **fails** if one is missing — `apps/desktop/build/require-helpers.cjs`):
@@ -70,3 +75,11 @@ Later Oct 11 recheck: iOS 26.5 platform/runtime installation now completed; Xcod
 and an iPhone 17 simulator (`/tmp/clan-142-ios-destinations2.log`). This resolves the earlier destination block.
 The compile rerun is pending adequate free storage (about 3–4 GB remaining); user asked to free at least 15 GB.
 Do not delete personal data, signing keys or existing profiles to make space. No native compile PASS or IPA yet.
+
+## Side-by-side internal TEST candidates
+
+Use Node 24 and the frozen pnpm lockfile. `pnpm build:desktop`, then in apps/desktop run `pnpm exec electron-builder --config electron-builder.test.yml --mac dmg --arm64 --publish never`. This creates CLAN TEST with an isolated default profile; it does not use a Developer ID or notarization. Windows native CI uses the same configuration and performs an actual NSIS install/startup smoke check. See .github/workflows/windows-test-build.yml.
+
+Android: `pnpm build:android` is the ordinary build; for the isolated standalone debug-signed TEST variant run apps/mobile/scripts/android-qa.sh with Node 24, JDK 17 and SDK 36. When rebuilding after changes in workspace packages, force Gradle's JS bundling task (or use --rerun-tasks) so the embedded bundle cannot remain stale. Do not use the beta key without verified secure backup. The .qa APK installs beside the beta and cannot update a differently signed package.
+
+iOS: apps/mobile/scripts/ios-build.sh uses a separate build directory and ad-hoc simulator signing for Keychain access. --device-compile only compiles the device SDK without provisioning. An iPhone installation requires signing both CLAN and CLANShare, a supported Team, the configured App Group and Hotspot Configuration capability. A simulator .app is not an IPA. Read Installable Files/Documentation/IPHONE_XCODE_INSTALL.md in the local delivery for the two-device workflow. Never clear a production identity or remove entitlements to force a signed build.

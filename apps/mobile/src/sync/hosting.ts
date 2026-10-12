@@ -38,11 +38,17 @@ export async function handToComputer(clanId: string, computerFp: string, acknowl
     clan: { type: clan.type, name: clan.name, expiresAt: clan.expiresAt }, chunkBytes: 2 * 1024 * 1024, onProgress });
 }
 
-/** A new CLAN owned by this phone and hosted by the chosen computer from the start. */
-export async function createHostedClan(o: { type: ClanType; name: string; expiresAt?: number; computerFp: string }, onProgress?: (done: number, total: number) => void) {
+/** Offline ownership record; this is not a phone-hosted network session. */
+export async function createOwnedClan(o: { type: ClanType; name: string; expiresAt?: number }) {
   const c = phoneClan(), s = await hostingSigner();
   const clan = c.clans.create({ type: o.type, name: o.name, createdBy: c.me, expiresAt: o.expiresAt });
   c.hosting.establish(clan.id, c.me, s);
+  return clan;
+}
+
+/** A new CLAN owned by this phone and hosted by the chosen computer from the start. */
+export async function createHostedClan(o: { type: ClanType; name: string; expiresAt?: number; computerFp: string }, onProgress?: (done: number, total: number) => void) {
+  const clan = await createOwnedClan(o);
   await handToComputer(clan.id, o.computerFp, [], onProgress);
   return clan;
 }

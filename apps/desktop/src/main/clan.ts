@@ -57,7 +57,7 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
     c.clans.recordJoined({ id: a.clanId ?? a.sessionId, type: a.type, name: a.name, hostDeviceId: keyFingerprint(a.hostKey), hostName: a.hostName ?? `${a.name} host`, expiresAt: a.expiresAt, me: c.me, sessionId: a.sessionId });
     // Persistent-hosting CLAN: anchor the owner from this authenticated session (first binding wins, never replaced) and
     // check that this session is run by the CLAN's current authorized host.
-    if (a.authority !== undefined && a.clanId) await c.hosting.verifySession({ clanId: a.clanId, sessionId: a.sessionId, teacherPublicKey: a.hostKey, authority: a.authority });
+    await c.hosting.verifySession({ clanId: a.clanId ?? a.sessionId, sessionId: a.sessionId, teacherPublicKey: a.hostKey, authority: a.authority });
     if (a.type === 'CLASSROOM') c.courses.linkClassrooms(me); // a joined Classroom gets its linked Course right away
   });
   handle('clan:detail', (id) => {

@@ -529,8 +529,13 @@ export class PersonalSync {
     return { status: 'pending' as const };
   }
   /** Joiner, after verifying the approver's proof: joins the account. This device's own data moves to the account. */
-  adopt(raw: unknown) {
+  adopt(raw: unknown, verifiedEndpoint?: string) {
     const g = LinkGrant.parse(raw), me = this.selfFp();
+    if (verifiedEndpoint !== undefined) {
+      const [host, port, extra] = verifiedEndpoint.split(':');
+      z.ipv4().parse(host);
+      if (extra !== undefined || !/^\d{1,5}$/.test(port ?? '') || Number(port) < 1 || Number(port) > 65535) throw new Error('Invalid verified link endpoint.');
+    }
     const mine = g.devices.find((d) => d.fp === me);
     if (!mine) throw new Error('The grant does not include this device.');
     const trusted: DeviceEntry[] = [];
@@ -541,7 +546,9 @@ export class PersonalSync {
       this.db.prepare('INSERT INTO sync_account (one, account_id, discovery_secret, created_at) VALUES (1, ?, ?, ?)').run(g.accountId, g.discoverySecret, this.now());
       this.db.prepare('DELETE FROM sync_devices').run(); this.db.prepare('DELETE FROM sync_meta').run(); // versions start fresh in the account
       for (const d of trusted) this.putDevice(d);
-      this.setEndpoints(g.approver.fp, g.approver.endpoints);
+      // The authenticated contact address may differ from the peer's advertised LAN address (NAT/emulator,
+      // VPN or an interface change). Keep it after verifying the grant; subsequent requests still pin TLS.
+      this.setEndpoints(g.approver.fp, [...new Set([...(verifiedEndpoint ? [verifiedEndpoint] : []), ...g.approver.endpoints])]);
     });
     return { accountId: g.accountId, accountName: g.accountName };
   }

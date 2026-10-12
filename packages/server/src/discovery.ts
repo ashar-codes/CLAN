@@ -20,7 +20,18 @@ export function advertise(o: { host: string; port: number; sid: string; title: s
   const txt: Advertisement = { v: '1', sid: o.sid, title: o.title, type: o.type, a: o.host };
   const svc = bonjour.publish({ name: `CLAN ${o.sid.slice(0, 8)}`, type: SERVICE_TYPE, port: o.port, txt, disableIPv6: true });
   const ready = new Promise<void>((r) => { svc.once('up', () => { dlog('advertise ready', o.sid); r(); }); svc.once('error', () => r()); setTimeout(r, 5000).unref(); });
-  const stop = () => new Promise<void>((resolve) => bonjour.unpublishAll(() => { bonjour.destroy(); dlog('advertise stop', o.sid); resolve(); }));
+  let stopping: Promise<void> | null = null;
+  const stop = () => stopping ??= new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true; clearTimeout(deadline);
+      bonjour.destroy(); dlog('advertise stop', o.sid); resolve();
+    };
+    // A removed network interface can prevent the multicast goodbye callback. Shutdown still
+    // must close the sockets and the host; stale discovery never grants an authenticated session.
+    const deadline = setTimeout(finish, 1500);
+    try { bonjour.unpublishAll(finish); } catch { finish(); }
+  });
   return Object.assign(stop, { ready });
 }
 

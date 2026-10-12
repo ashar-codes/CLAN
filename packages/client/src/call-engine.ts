@@ -25,6 +25,7 @@ export type CallDeps = {
   /** Open the microphone (asking the OS where needed). Throw a readable error if denied or missing. */
   microphone(): Promise<Stream>;
   signal(peerKey: string, body: Record<string, unknown>): Promise<boolean>;
+  attempt?(peerKey: string, callId: string): Promise<void>;
   log(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }): void;
   nameOf(key: string): Promise<string | null>;
   onRemote?(stream: Stream | null): void;
@@ -111,7 +112,7 @@ export class CallEngine {
       await this.gathered(pc);
       if (this.now()?.id !== id) return;
       this.d.log({ id, peerKey, direction: 'out' });
-      if (!await this.d.signal(peerKey, { kind: 'call.invite', callId: id, sdp: pc.localDescription!.sdp })) return this.finish(`${peerName} is not reachable right now.`, 'unreachable');
+      if (!await this.d.signal(peerKey, { kind: 'call.invite', callId: id, sdp: pc.localDescription!.sdp })) { await this.d.attempt?.(peerKey, id); return this.finish(`${peerName} is not reachable. A call attempt will arrive when they reconnect.`, 'unreachable'); }
       invited = true;
       this.set({ note: 'Ringing…' });
       this.after(RING_MS, () => { if (this.cur?.id === id && this.cur.phase === 'calling') this.finish('No answer.', 'no answer', 'call.end', 'timeout'); });

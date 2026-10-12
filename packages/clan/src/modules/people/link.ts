@@ -46,7 +46,7 @@ export class LinkSession {
   constructor(p: People, link: SecureLink, files: LinkFiles, hooks: LinkSession['hooks'], invite: string | null = null, inflight = new Set<string>()) {
     this.invite = invite; this.downloads = inflight;
     this.p = p; this.link = link; this.files = files; this.hooks = hooks; this.peerKey = link.peerKey; this.startedAt = Date.now();
-    link.onMessage((m) => { this.lastHeard = Date.now(); void this.handle(m); });
+    link.onMessage((m) => { this.lastHeard = Date.now(); void this.handle(m).catch(() => link.close('Peer request failed.')); });
     link.onClose(() => { clearInterval(this.pinger); for (const w of this.waits.values()) { clearTimeout(w.t); w.rej(new Error('The connection closed.')); } this.waits.clear(); });
     this.pinger = setInterval(() => { if (Date.now() - this.lastHeard > DEAD_MS) link.close('No answer.'); else this.post({ t: 'ping' }); }, PING_MS);
     (this.pinger as { unref?(): void }).unref?.();
@@ -78,6 +78,7 @@ export class LinkSession {
         for (let round = 0; round < 20 && this.open; round++) {
           const due = this.p.due(Number.MAX_SAFE_INTEGER, 1000).filter((d) => d.to === this.peerKey).slice(0, 50);
           if (!due.length) break;
+          for (const d of due) this.p.sending(d.id);
           const r = await this.ask({ t: 'env', envelopes: due.map((d) => d.envelope) });
           const results = Array.isArray(r.results) ? r.results as { ok?: boolean; error?: string; final?: boolean }[] : [];
           due.forEach((d, i) => { const x = results[i]; if (x?.ok) this.p.delivered(d.id); else this.p.deliveryFailed(d.id, x?.error ?? 'refused', x?.final ?? true); });
@@ -112,13 +113,21 @@ export class LinkSession {
       let have = await this.files.size(part).catch(() => 0);
       if (have > size) { await this.files.remove(part); have = 0; }
       while (have < size && this.open) {
-        const r = await this.ask({ t: 'get', transferId: id, offset: have, length: Math.min(RANGE, size - have) });
+        const length = Math.min(RANGE, size - have);
+        const r = await this.ask({ t: 'get', transferId: id, offset: have, length });
         if (r.t === 'err') { if (r.code === 'not_found') this.p.failDownload(id, 'The sender no longer offers this file.'); return; }
-        const chunks = Array.isArray(r.chunks) ? r.chunks as string[] : [];
+        if (r.t !== 'data' || r.offset !== have || !Array.isArray(r.chunks) || !r.chunks.length || r.chunks.length > RANGE / CHUNK) throw new Error('Unexpected file data.');
+        const chunks: Uint8Array[] = [];
         let got = 0;
         if (!this.open) break; // never write a reply that arrived on a link already given up
-        for (const c of chunks) { const b = b64u.decode(c); got += b.length; await this.files.append(part, b); }
-        if (!got || r.offset !== have) throw new Error('Unexpected file data.');
+        // Validate the whole reply before touching the resumable part file. An authenticated sender can still lie.
+        for (const c of r.chunks) {
+          if (typeof c !== 'string' || c.length > Math.ceil(CHUNK * 4 / 3) || !/^[A-Za-z0-9_-]+$/.test(c)) throw new Error('Unexpected file data.');
+          const b = b64u.decode(c); got += b.length;
+          if (!b.length || b.length > CHUNK || got > length) throw new Error('Unexpected file data.');
+          chunks.push(b);
+        }
+        for (const b of chunks) await this.files.append(part, b);
         have += got;
         this.p.progress(id, have);
         this.hooks.onChange?.('transfers');

@@ -87,9 +87,10 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
   }
 
   // ---- outbox ----
+  let stopped = false;
   let ticking: Promise<void> | null = null;
   const inflight = new Set<string>(), avatarTried = new Set<string>();
-  const tick = (): Promise<void> => ticking ??= (async () => {
+  const tick = (): Promise<void> => stopped ? Promise.resolve() : ticking ??= (async () => {
     await null; // never settle synchronously (see LinkSession.flush)
     try {
       const byPeer = new Map<string, ReturnType<People['due']>>();
@@ -101,6 +102,7 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
         let done = false;
         for (const ep of r.endpoints) {
           try {
+            for (const d of items) p.sending(d.id);
             const res = await call(ep, r.tls, key, 'POST', '/peer/inbox', JSON.stringify({ envelopes: items.map((d) => d.envelope), intro: intro(key) })) as { results: { ok: boolean; error?: string; final?: boolean }[] };
             items.forEach((d, i) => { const x = res.results[i]; if (x?.ok) p.delivered(d.id); else p.deliveryFailed(d.id, x?.error ?? 'refused', x?.final ?? true); });
             done = true; break;
@@ -168,22 +170,25 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
   const open = new Map<string, WebSocketLike>(), retryAt = new Map<string, number>();
   function sockets() {
     for (const c of p.contacts('all')) {
+      if (stopped || p.isBlocked(c.key)) continue;
       const r = p.route(c.key);
       if (!r?.tls || !r.endpoints[0] || open.has(c.key) || (retryAt.get(c.key) ?? 0) > now()) continue;
       if (!(c.relation !== 'none' || p.conversations().some((x) => x.peerKey === c.key && x.state !== 'declined'))) continue;
       const ws = tFor(r.tls).openWebSocket(`wss://${r.endpoints[0]}/peer/ws`);
       open.set(c.key, ws);
-      ws.onopen = () => ws.send(JSON.stringify(peerSocketAuth(o.signer, c.key, env.nonce(), now())));
+      ws.onopen = () => { if (!stopped && open.get(c.key) === ws) { ws.send(JSON.stringify(peerSocketAuth(o.signer, c.key, env.nonce(), now()))); p.wake(c.key); void tick(); } };
       ws.onmessage = (ev) => {
+        if (stopped || open.get(c.key) !== ws) return;
         let m: { t?: string; id?: string; envelope?: unknown };
         try { m = JSON.parse(String(ev.data)); } catch { return; }
         if (m.t !== 'env') return;
+        let accepted = true;
         try { const res = p.receive(m.envelope, c.key); if (res.live) o.onLive?.(res.live); else changed(res.kind); }
-        catch { /* refused or invalid: acknowledged so the computer stops resending it */ }
-        ws.send(JSON.stringify({ t: 'ack', id: m.id }));
+        catch { accepted = false; } // an authenticated refusal is not delivery
+        ws.send(JSON.stringify({ t: 'ack', id: m.id, ok: accepted }));
         void tick();
       };
-      ws.onclose = () => { open.delete(c.key); retryAt.set(c.key, now() + 15_000); changed('presence'); };
+      ws.onclose = () => { if (open.get(c.key) !== ws) return; open.delete(c.key); retryAt.set(c.key, now() + 15_000); changed('presence'); };
       ws.onerror = () => {};
     }
   }
@@ -195,7 +200,8 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
     if (o.links?.connected(env.to)) return o.links.sendLive(env);
     const r = p.route(env.to);
     if (r?.tls && r.endpoints[0]) {
-      const res = await call(r.endpoints[0], r.tls, env.to, 'POST', '/peer/inbox', JSON.stringify({ envelopes: [env], intro: intro(env.to) })) as { results: { ok: boolean; error?: string }[] };
+      let res: { results: { ok: boolean; error?: string }[] };
+      try { res = await call(r.endpoints[0], r.tls, env.to, 'POST', '/peer/inbox', JSON.stringify({ envelopes: [env], intro: intro(env.to) })) as { results: { ok: boolean; error?: string }[] }; } catch (e) { if (e instanceof PeerCallError && e.status >= 400 && e.status < 500) throw e; return false; }
       if (!res.results[0]?.ok) throw new Error(res.results[0]?.error ?? 'The other person did not accept the call.');
       return true;
     }
@@ -204,7 +210,8 @@ export function startPhonePeople(o: { people: People; signer: Signer; env: Phone
   return {
     connectQr, tick, sendLive,
     connected: (key: string) => open.get(key)?.readyState === 1,
-    stop() { clearInterval(timer); for (const ws of open.values()) ws.close(); open.clear(); },
+    reconnect() { if (stopped) return; for (const ws of open.values()) ws.close(); open.clear(); retryAt.clear(); for (const c of p.contacts('all')) if (!p.isBlocked(c.key)) p.wake(c.key); void tick(); },
+    stop() { stopped = true; clearInterval(timer); for (const ws of open.values()) ws.close(); open.clear(); },
   };
 }
 export type PhonePeople = ReturnType<typeof startPhonePeople>;

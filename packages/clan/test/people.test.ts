@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { newEd25519, nodeSigner } from '@classroom/client/node';
 import { signEnvelope, type PeerEnvelope } from '@classroom/protocol';
+import { PeopleAlert } from '@clan/core';
 import { setup } from './helpers.ts';
 
 function person(name: string, clock: { t: number }) {
@@ -274,4 +275,66 @@ describe("people: a friend's other devices", () => {
     const env = signEnvelope(m.signer, { id: randomUUID(), to: f.key, at: clock.t, body: { kind: 'device.links', account: 'x', devices: [] } });
     expect(() => f.p.receive(env, m.key)).toThrow(/friends/);
   });
+});
+
+
+describe('BTC-1 authenticated availability and offline delivery', () => {
+  const friends = (a: P, b: P) => { meet(a, b); a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a); flush(a, b); };
+  it('alerts once for accepted content and live invitations, never for replay, forgery or blocked input', () => {
+    const clock = { t: 1_000_000 }, a = person('A', clock), b = person('B', clock); friends(a, b);
+    const alerts: string[] = []; b.app.bus.subscribe('test.alerts', PeopleAlert, (e) => alerts.push(e.payload.kind));
+    const conv = a.p.conversations()[0]!.id; a.p.sendText(conv, 'queued');
+    const env = a.p.due()[0]!.envelope;
+    b.p.receive(env, a.key); b.p.receive(env, a.key);
+    expect(alerts).toEqual(['msg.text']);
+    expect(() => b.p.receive({ ...env, body: { ...env.body, text: 'forged' } }, a.key)).toThrow();
+    const invite = a.p.callSignal(b.key, { kind: 'call.invite', callId: randomUUID(), sdp: 'v=0' });
+    expect(b.p.receive(invite, a.key).live).toBeDefined(); expect(b.p.receive(invite, a.key).live).toBeUndefined();
+    expect(alerts).toEqual(['msg.text', 'call.invite']);
+    b.p.block(a.key); expect(() => b.p.receive(a.p.callSignal(b.key, { kind: 'call.invite', callId: randomUUID(), sdp: 'v=0' }), a.key)).toThrow();
+    expect(alerts).toHaveLength(2);
+  });
+  it('only the intended recipient may acknowledge an outgoing message', () => {
+    const clock = { t: 1_000_000 }, a = person('A', clock), b = person('B', clock), impostor = person('C', clock); friends(a, b);
+    const conv = a.p.conversations()[0]!.id, msg = a.p.sendText(conv, 'keep pending'), row = a.p.due()[0]!;
+    a.p.sending(row.id); expect(a.p.message(msg.id)?.state).toBe('sending');
+    a.p.delivered(row.id, impostor.key); expect(a.p.message(msg.id)?.state).toBe('sending'); expect(a.p.due()).toHaveLength(1);
+    a.p.deliveryFailed(row.id, 'temporary disconnect'); expect(a.p.message(msg.id)?.state).toBe('queued'); a.p.wake(b.key);
+    const restarted = setup({ db: a.db, storageDir: a.storageDir, now: () => clock.t }).app.people; restarted.setSigner(a.signer); a.p.sending(row.id); expect(restarted.message(msg.id)?.state).toBe('queued');
+    b.p.receive(row.envelope, a.key); a.p.delivered(row.id, b.key); expect(a.p.message(msg.id)?.state).toBe('delivered');
+  });
+  it('expired temporary text and attachments never leave the offline outbox', async () => {
+    const clock = { t: 1_000_000 }, a = person('A', clock), b = person('B', clock); meet(a, b);
+    a.p.inviteChat(b.key, 'temporary', 86_400_000); flush(a, b); b.p.acceptChat(b.p.conversations()[0]!.id); flush(b, a);
+    const conv = a.p.conversations()[0]!.id; a.p.sendText(conv, 'expires offline');
+    const path = join(a.storageDir, 'offline.txt'); writeFileSync(path, 'durable'); await a.p.offerFile(conv, path, { name: 'offline.txt', mime: 'text/plain' });
+    expect(a.p.due()).toHaveLength(2); clock.t += 86_400_001;
+    expect(a.p.due()).toHaveLength(0); expect(a.p.queuedFor(b.key)).toHaveLength(0); await a.p.sweep(); expect(a.p.page(conv)).toHaveLength(0);
+  });
+  it('queues only bounded signed call intent; reconnect creates history without ringing, with replay/block/expiry checks', () => {
+    const clock = { t: 1_000_000 }, a = person('A', clock), b = person('B', clock); friends(a, b);
+    const id = randomUUID(); a.p.queueCallAttempt(b.key, id); a.p.queueCallAttempt(b.key, id);
+    expect(a.p.due()).toHaveLength(1); const env = a.p.due()[0]!.envelope;
+    expect(env.body).toEqual({ kind: 'call.attempt', callId: id, expiresAt: clock.t + 86_400_000 });
+    clock.t += 60_001; const alerts: string[] = []; b.app.bus.subscribe('attempt.alert', PeopleAlert, (e) => alerts.push(e.payload.kind));
+    expect(b.p.receive(env, a.key).live).toBeUndefined(); b.p.receive(env, a.key);
+    expect(b.p.page(b.p.conversations()[0]!.id).at(-1)?.text).toContain('did not ring'); expect(alerts).toEqual(['call.attempt']);
+    clock.t += 86_400_000; expect(a.p.due()).toHaveLength(0);
+    expect(() => b.p.receive({ ...env, id: randomUUID() }, a.key)).toThrow();
+    b.p.block(a.key); expect(() => b.p.receive(env, a.key)).toThrow();
+  });
+});
+
+
+it('Nearby alerts are opt-in, for verified friends only, and persistently rate-limited', () => {
+  const clock = { t: 1_000_000 }, a = person('A', clock), b = person('B', clock); meet(a, b);
+  a.p.sendFriendRequest(b.key); flush(a, b); b.p.acceptFriend(a.key); flush(b, a); flush(a, b);
+  const alerts: string[] = []; a.app.bus.subscribe('nearby.test', PeopleAlert, (e) => alerts.push(e.payload.kind));
+  a.p.friendReachable(b.key); expect(alerts).toEqual([]);
+  a.p.nearbyAlerts(true); a.p.friendReachable(b.key); expect(alerts).toEqual([]);
+  a.p.markVerified(b.key); a.p.friendReachable(b.key); a.p.friendReachable(b.key); expect(alerts).toEqual(['friend.nearby']);
+  const restarted = setup({ db: a.db, storageDir: a.storageDir, now: () => clock.t }).app.people; restarted.setSigner(a.signer);
+  expect(restarted.nearbyAlerts()).toBe(true); restarted.friendReachable(b.key);
+  clock.t += 3_600_001; a.p.friendReachable(b.key); expect(alerts).toEqual(['friend.nearby', 'friend.nearby']);
+  a.p.block(b.key); clock.t += 3_600_001; a.p.friendReachable(b.key); expect(alerts).toHaveLength(2);
 });

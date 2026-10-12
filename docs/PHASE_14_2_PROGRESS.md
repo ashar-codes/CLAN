@@ -434,3 +434,12 @@ dev-insecure keystore, disposable profiles): **25 PASS / 6 FAIL / 2 skipped**; t
 untouched baseline `4b12b2f` in this container (screen sharing ×3: no SFU binary; Astra world/canvas: Linux software
 GPU; board-tape: duplicate "Leave" locator on Linux), so they are environment-specific, not regressions — they passed on
 macOS before. New `e2e/hosting.test.ts` PASS. Android emulator, iOS, Windows and physical devices NOT RUN.
+
+
+## Local native QA — 2026-10-12
+
+See [the native QA/security and artifact record](LOCAL_QA_PHASE_14_3.md) and [draft PR #4](https://github.com/ashar-codes/CLAN/pull/4). Application repairs were built from `fa5bfc7d25b9b1ef56ef1e1b2749fc76e2c288c9`; **release remains BLOCKED**. Internal TEST/UNVERIFIED DMG/APK and an unsigned simulator app exist; Windows, physical-device and release-signing gates remain open. Full test failures and skips are retained in the record.
+
+## Handover stabilization during internal TEST delivery — 2026-10-12
+
+At application checkpoint `6f7d946cc46f19805d6bc423e56c7d6642d87410`, rollback-fence corruption and write failure refuse authority activation/replay, and outgoing handover acknowledgements await durable fencing. Shared adapters serialize the same fence file. The hosting/fencing subset passes 26 regressions, including an actual write failure. Physical phone→computer, computer→computer, revocation, interrupted rollback and simultaneous old-host restart remain NOT TESTED on real devices. Public release remains BLOCKED; see LOCAL_QA_PHASE_14_3.md and DEVICE_TESTING_GUIDE.md.

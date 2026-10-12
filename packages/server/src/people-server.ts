@@ -31,7 +31,8 @@ export type PeopleHost = {
   incomingChunk?(transferId: string, peerKey: string, offset: number, bytes: Uint8Array): Promise<{ have: number }>;
   /** Envelopes waiting for a phone that is connected right now; `sent(id)` once written to its socket. */
   queuedFor(key: string): { id: string; envelope: PeerEnvelope }[];
-  sent(id: string): void;
+  sent(id: string, recipient: string): void;
+  refused?(id: string, recipient: string): void;
   onPhone?(key: string, connected: boolean): void;
 };
 export type PeopleServerOptions = { host: PeopleHost; tls: { certPem: string; keyPem: string; spkiSha256: string }; port?: number; bind?: string; now?: () => number };
@@ -155,7 +156,7 @@ export async function startPeopleServer(o: PeopleServerOptions) {
           return flush();
         } catch { return socket.close(4401, 'not accepted'); }
       }
-      if (m.t === 'ack' && typeof m.id === 'string') o.host.sent(m.id);
+      if (m.t === 'ack' && typeof m.id === 'string') { if (m.ok === false) o.host.refused?.(m.id, key); else o.host.sent(m.id, key); }
       else if (m.t === 'pull') flush();
     });
     socket.on('close', () => { clearTimeout(timer); if (key) { phones.get(key)?.delete(socket); if (!phones.get(key)?.size) { phones.delete(key); o.host.onPhone?.(key, false); } } });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ClassroomConnection, leaveClanSession, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
+import { ClassroomConnection, SessionGate, leaveClanSession, pairAndJoin, reconnect, TransferError, type Candidate, type DeviceSigner, type PairedJoin, type Quality } from '@classroom/client';
 import { clanLabels, decodeDirectQr, shortFingerprint, StudentProfile, type DirectPackage, type ClassroomInfo, type ClientMessage, type MemberStatus, type PresentationView, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import { ClassContent } from './ClassContent';
 import { pauseSession } from './transfers';
@@ -12,6 +12,9 @@ import { keyFingerprint } from '@classroom/protocol';
 import { migrateOldPhoneData } from './core/migrate';
 import { setupPhoneSync, startSyncSchedule } from './sync/phone';
 import { bump, ThemeRoot } from './ui/kit';
+import { onPeopleNotification } from './people/notifications';
+import { PeopleScreen } from './screens/People';
+import { PhoneCallProvider } from './people/Call';
 import { Shell } from './Shell';
 import { PresentationCard } from './media/Watch';
 import { IntakeScreen, useIncomingShare } from './share/Intake';
@@ -38,9 +41,12 @@ export default function App() {
   const [editing, setEditing] = useState(false);
   const [joined, setJoined] = useState<PairedJoin | null>(null);
   const [ready, setReady] = useState<string | null>(null);
+  const [notice, setNotice] = useState(false);
+  useEffect(() => onPeopleNotification(() => { if (joined) setNotice(true); }), [joined]);
   const [share, clearShare] = useIncomingShare();
 
-  useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); }); }, []);
+  useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); })
+    .catch((e) => setReady(`CLAN could not open its secure identity: ${(e as Error).message}`)); }, []);
   // CLAN core (encrypted database) opens once the profile exists; then personal sync runs while the app is in front.
   useEffect(() => {
     if (!profile?.fullName || editing) return;
@@ -51,16 +57,16 @@ export default function App() {
       c.sync.onApplied(() => bump());
       stop = startSyncSchedule();
       setReady('ok');
-    }, (e) => setReady(`CLAN could not open its data: ${(e as Error).message}`));
+    }).catch((e) => setReady(`CLAN could not open its data: ${(e as Error).message}`));
     return () => stop();
   }, [profile?.fullName, editing]);
-  if (!profile) return null;
+  if (!profile) return ready ? <SafeAreaProvider><SafeAreaView style={[s.fill, { backgroundColor: c.bg, padding: 24 }]}><Text style={{ color: c.text }} accessibilityRole="alert">{ready}</Text></SafeAreaView></SafeAreaProvider> : null;
 
   return (
     <SafeAreaProvider><SafeAreaView style={[s.fill, { backgroundColor: c.bg }]} edges={['top', 'bottom', 'left', 'right']}>
       <OpaqueBridgeHost />
       <KeyboardAvoidingView style={s.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ThemeRoot>
+        <ThemeRoot><PhoneCallProvider>
         {editing ? (
           <ProfileForm c={c} initial={profile} onSaved={(p) => { setProfile(p); setEditing(false); }} />
         ) : joined ? (
@@ -68,7 +74,8 @@ export default function App() {
         ) : ready === 'ok' ? (
           <Shell onEditProfile={() => setEditing(true)} intake={share ? <IntakeScreen share={share} onDone={clearShare} /> : undefined} join={<JoinScreen c={c} profile={profile as StudentProfile} onJoined={setJoined} onEdit={() => setEditing(true)} />} />
         ) : ready ? <Text style={{ color: c.danger, padding: 20 }}>{ready}</Text> : <ActivityIndicator style={{ marginTop: 80 }} size="large" />}
-        </ThemeRoot>
+        {notice && joined && ready === 'ok' && <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: c.bg }}><Pressable onPress={() => setNotice(false)} accessibilityRole="button"><Text style={{ color: c.text, padding: 16 }}>Return to CLAN</Text></Pressable><PeopleScreen onJoin={() => Alert.alert('Already in a CLAN', 'Return to your current CLAN and leave it before joining another.')} /></View>}
+        </PhoneCallProvider></ThemeRoot>
       </KeyboardAvoidingView>
     </SafeAreaView></SafeAreaProvider>
   );
@@ -183,14 +190,12 @@ function RoomHeader({ c, title, host, files, type }: { c: C; title: string; host
 }
 
 /** This phone's core learns which CLAN it joined (as the desktop does); a Classroom gets its linked Course. */
-function recordJoined(j: PairedJoin, info: ClassroomInfo) {
-  try {
+async function recordJoined(j: PairedJoin, info: ClassroomInfo) {
     const c = phoneClan();
     c.clans.recordJoined({ id: info.clanId ?? info.sessionId, type: info.clanType, name: info.title, hostDeviceId: keyFingerprint(j.binding.teacherPublicKey), hostName: info.hostName ?? `${info.title} host`, expiresAt: info.expiresAt ?? null, me: c.me, sessionId: info.sessionId });
     // Persistent-hosting CLAN: anchor the owner from this authenticated session and check its host (see desktop clan:joined).
-    if (info.authority && info.clanId) void c.hosting.verifySession({ clanId: info.clanId, sessionId: info.sessionId, teacherPublicKey: j.binding.teacherPublicKey, authority: info.authority }).catch(() => {});
+    await c.hosting.verifySession({ clanId: info.clanId ?? info.sessionId, sessionId: info.sessionId, teacherPublicKey: j.binding.teacherPublicKey, authority: info.authority });
     if (info.clanType === 'CLASSROOM') c.courses.linkClassrooms(meP());
-  } catch { /* the class works without it */ }
 }
 
 function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLeave(): void }) {
@@ -204,34 +209,43 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
   const [wasUp, setWasUp] = useState(false); // "Reconnecting…" only after the connection has been up once
   useEffect(() => { if (quality !== 'disconnected') setWasUp(true); }, [quality]);
   const [closed, setClosed] = useState(false);
+  const [hostFailure, setHostFailure] = useState(''), [hostConfirmed, setHostConfirmed] = useState(false);
   const [resources, setResources] = useState<ResourceView[]>([]);
   const [assignments, setAssignments] = useState<StudentAssignmentView[]>([]);
   const [pushed, setPushed] = useState<string | null>(null);
   const [presenting, setPresenting] = useState<PresentationView | null>(null);
   const [people, setPeople] = useState<{ name: string; handle: string; host: boolean }[]>([]);
   const ref = useRef<ClassroomConnection | null>(null);
+  const gateRef = useRef<SessionGate | null>(null);
   const chatConn = useMemo(() => ({ url: joined.url, token: joined.token, sessionId: joined.classroom.sessionId, classTitle: joined.classroom.title, transport: joined.transport as PinnedNativeTransport, teacherPublicKey: joined.binding.teacherPublicKey }), [joined]);
-  const chat = useMobileChat(chatConn, joined.classroom.clanId ?? joined.classroom.sessionId, useCallback((m: ClientMessage) => ref.current?.send(m), []));
+  const chat = useMobileChat(chatConn, joined.classroom.clanId ?? joined.classroom.sessionId, useCallback((m: ClientMessage) => { if (gateRef.current?.confirmed) ref.current?.send(m); }, []));
   const chatRef = useRef(chat);
   chatRef.current = chat;
   const boardRef = useRef<ReturnType<typeof useMobileBoard> | null>(null);
   useEffect(() => {
-    const conn = new ClassroomConnection(joined.url, joined.token, {
-      onMessage: (m) => {
+    setHostConfirmed(false);
+    const gate = new SessionGate({
+      verify: async (hello) => { if (hello.status === 'approved') await recordJoined(joined, hello.classroom); },
+      failed: () => { setHostConfirmed(false); setHostFailure('This session could not be verified as run by the CLAN’s current host. Leave and contact the owner.'); ref.current?.close(); pauseSession(joined.classroom.sessionId); },
+      message: (m) => {
         if (m.t.startsWith('wb.')) return boardRef.current?.onServer(m as never);
         if (m.t === 'hello') boardRef.current?.connected();
         chatRef.current.onServer(m);
         if (m.t === 'hands') { setHandSupported(true); setHandRaised(m.mine); setHandError(''); }
         if (m.t === 'error' && ['rate_limited', 'forbidden'].includes(m.code)) setHandError(m.message);
         if (m.t === 'members') setPeople(m.members);
-        if (m.t === 'hello') { setInfo(m.classroom); if (m.status) setStatus(m.status); recordJoined(joined, m.classroom); }
+        if (m.t === 'hello') { setHostConfirmed(true); setInfo(m.classroom); if (m.status) setStatus(m.status); }
         if (m.t === 'class.state') setInfo(m.classroom);
-        if (m.t === 'member.status') setStatus(m.status);
+        if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') setHostConfirmed(true); }
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
         if (m.t === 'assignments') { setAssignments(m.assignments as StudentAssignmentView[]); try { phoneClan().assignments.seen(meP(), joined.classroom.clanId ?? joined.classroom.sessionId, m.assignments); } catch { /* projection only; never blocks the class */ } }
         if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
         if (m.t === 'presentation') setPresenting(m.state);
       },
+    });
+    gateRef.current = gate;
+    const conn = new ClassroomConnection(joined.url, joined.token, {
+      onMessage: (m) => { void gate.push(m); },
       onQuality: setQuality,
       onClosed: (reason) => {
         // Token expired: prove the device key again over the pinned channel (no code), once.
@@ -242,9 +256,9 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
       },
     }, 5000, joined.transport);
     ref.current = conn;
-    return () => conn.close();
+    return () => { gate.stop(); conn.close(); };
   }, [joined]);
-  const send = useCallback((m: ClientMessage) => ref.current?.send(m), []);
+  const send = useCallback((m: ClientMessage) => { if (gateRef.current?.confirmed) ref.current?.send(m); }, []);
   const board = useMobileBoard(send, joined.memberId);
   boardRef.current = board;
   const [device, setDevice] = useState<DeviceSigner>();
@@ -253,8 +267,8 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
     transport: joined.transport as PinnedNativeTransport, teacherPublicKey: joined.binding.teacherPublicKey, peerAssist: info.peerAssist, device }), [joined, info.peerAssist, device]);
 
   const L = clanLabels(info.clanType);
-  const over = info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
-    : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
+  const over = hostFailure || (info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
+    : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '');
 
   return (
     <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
@@ -262,6 +276,8 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
       <Text style={{ color: c.muted }}>{L.type}</Text>
       {over ? (
         <><Text style={{ color: c.text, fontSize: 17 }}>{over}</Text><Button c={c} primary label="OK" onPress={onLeave} /></>
+      ) : !hostConfirmed ? (
+        <><ActivityIndicator /><Text style={{ color: c.text }}>Checking the CLAN host…</Text><Button c={c} label="Leave" onPress={onLeave} /></>
       ) : status === 'pending' ? (
         <><ActivityIndicator size="large" /><Text style={{ color: c.text, fontSize: 17, textAlign: 'center' }}>Waiting for the {L.host.toLowerCase()} to let you in…</Text><Button c={c} label="Cancel" onPress={onLeave} /></>
       ) : (

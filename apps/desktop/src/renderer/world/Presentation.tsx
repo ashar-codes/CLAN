@@ -19,23 +19,36 @@ export function usePresentation(o: { baseUrl: string; bearer: string; sessionId:
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const transport = useRef<MediaTransport | null>(null);
+  const connecting = useRef<Promise<MediaTransport> | null>(null);
+  const mounted = useRef(true);
   const stream = useRef<MediaStream | null>(null);
   const pending = useRef<{ profile: ScreenProfile } | null>(null);
   const presenting = !!live && live.presenter === o.me;
 
   const token = useCallback(() => api.mediaToken({ url: o.baseUrl, token: o.bearer, sessionId: o.sessionId }), [o.baseUrl, o.bearer, o.sessionId]);
 
-  const ensureConnected = useCallback(async (fresh = false) => {
-    if (transport.current && !fresh) return transport.current;
-    await transport.current?.disconnect().catch(() => {});
-    setMediaState('connecting');
-    const t = await loadTransport();
-    t.onScreen((v) => setView(v));
-    t.onState((s) => setMediaState(s === 'connected' ? 'connected' : s === 'reconnecting' ? 'reconnecting' : 'idle'));
-    await t.connect({ url: `${o.baseUrl.replace(/^https/, 'wss')}/media`, token: (await token()).token });
-    transport.current = t;
-    setMediaState('connected');
-    return t;
+  const ensureConnected = useCallback(function connect(fresh = false): Promise<MediaTransport> {
+    // The viewer effect and presenter effect can run in the same render. Two SFU
+    // connections with one participant identity evict each other and freeze the track.
+    if (connecting.current) return fresh ? connecting.current.then(() => connect(true)) : connecting.current;
+    if (transport.current && !fresh) return Promise.resolve(transport.current);
+    const round = (async () => {
+      await transport.current?.disconnect().catch(() => {});
+      setMediaState('connecting');
+      const t = await loadTransport();
+      t.onScreen((v) => setView(v));
+      t.onState((s) => setMediaState(s === 'connected' ? 'connected' : s === 'reconnecting' ? 'reconnecting' : 'idle'));
+      try {
+        await t.connect({ url: `${o.baseUrl.replace(/^https/, 'wss')}/media`, token: (await token()).token });
+        if (!mounted.current) throw new Error('Presentation closed.');
+        transport.current = t;
+        setMediaState('connected');
+        return t;
+      } catch (e) { await t.disconnect().catch(() => {}); throw e; }
+    })();
+    const pending = round.finally(() => { if (connecting.current === pending) connecting.current = null; });
+    connecting.current = pending;
+    return pending;
   }, [o.baseUrl, token]);
 
   const stopLocal = useCallback(async () => {
@@ -69,7 +82,7 @@ export function usePresentation(o: { baseUrl: string; bearer: string; sessionId:
     return () => clearTimeout(t);
   }, [mediaState, live?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => () => { stream.current?.getTracks().forEach((t) => t.stop()); void transport.current?.disconnect(); }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; stream.current?.getTracks().forEach((t) => t.stop()); void transport.current?.disconnect(); }; }, []);
 
   const capture = async (src: Src | 'test-screen' | 'test-window', audio: boolean): Promise<MediaStream> => {
     if (typeof src === 'string') return (await import('./media/testPattern.ts')).testPatternStream(src === 'test-screen' ? 'screen' : 'window');

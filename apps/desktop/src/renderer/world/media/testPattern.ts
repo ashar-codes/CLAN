@@ -10,9 +10,12 @@ export function testPatternStream(variant: 'screen' | 'window', size: { w: numbe
     g.fillStyle = '#fffbf3'; g.font = 'bold 44px sans-serif'; g.fillText(`${variant.toUpperCase()} TEST PATTERN · frame ${f}`, 40, 80); g.fillText(new Date().toISOString().slice(11, 23), 40, size.h - 70);
     f++;
   };
-  draw();
-  const t = setInterval(draw, Math.round(1000 / fps));
+  // Advertise the source frame rate as well as requesting every newly drawn frame.
   const stream = c.captureStream(fps);
+  const track = stream.getVideoTracks()[0]! as CanvasCaptureMediaStreamTrack;
+  const frame = () => { draw(); track.requestFrame(); };
+  frame();
+  const t = setInterval(frame, Math.round(1000 / fps));
   stream.getVideoTracks()[0]!.addEventListener('ended', () => clearInterval(t));
   return stream;
 }

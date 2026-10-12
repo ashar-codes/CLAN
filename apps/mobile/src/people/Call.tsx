@@ -3,8 +3,8 @@
 // STUN/TURN. The microphone opens only when this person starts or answers a call. While CLAN is in the background an
 // incoming call raises a local notification (only possible while the app is still running — see Nearby availability).
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AppState, PermissionsAndroid, Platform, Text, View } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import { PermissionsAndroid, Platform, Text, View } from 'react-native';
+import { PeerLink } from '../../modules/peer-link';
 import { mediaDevices, RTCPeerConnection } from '@livekit/react-native-webrtc';
 import { AudioSession } from '@livekit/react-native';
 import { CallEngine, type CallPhase, type CallView, type PeerLike } from '@classroom/client/call';
@@ -32,22 +32,23 @@ export function PhoneCallProvider({ children }: { children: ReactNode }) {
   const engine = useRef<CallEngine | null>(null);
   engine.current ??= new CallEngine({
     createPeer: () => new RTCPeerConnection({ iceServers: [] }) as unknown as PeerLike,
-    microphone: async () => { await AudioSession.startAudioSession().catch(() => {}); return (await microphone()) as never; },
+    microphone: async () => { await AudioSession.startAudioSession().catch(() => {}); const mic = await microphone(); if (Platform.OS === 'android') PeerLink?.availabilityMicrophone?.(true); return mic as never; },
+    attempt: async (key, id) => { phoneClan().people.queueCallAttempt(key, id); void (await phonePeople()).tick(); },
     signal: async (key, body) => { const p = phoneClan().people; return (await phonePeople()).sendLive(p.callSignal(key, body as never)); },
     log: (o) => { try { phoneClan().people.logCall(o); } catch { /* not fatal */ } },
     nameOf: async (k) => phoneClan().people.contact(k)?.name ?? null,
-    onRemote: (s) => { if (!s) void AudioSession.stopAudioSession().catch(() => {}); }, // remote audio plays by itself
+    onRemote: (s) => { if (!s) { if (Platform.OS === 'android') PeerLink?.availabilityMicrophone?.(false); void AudioSession.stopAudioSession().catch(() => {}); } }, // remote audio plays by itself
     uuid,
   });
   const e = engine.current;
   const [call, setCall] = useState<CallView | null>(null);
   useEffect(() => e.subscribe(setCall), [e]);
+  useEffect(() => () => { if (e.active) e.hangup(); if (Platform.OS === 'android') PeerLink?.ring?.(false); }, [e]);
+  useEffect(() => { if (Platform.OS !== 'android') return; PeerLink?.ring?.(call?.phase === 'ringing'); return () => PeerLink?.ring?.(false); }, [call?.phase]);
   useEffect(() => onPeopleLive((env) => {
     const b = env.body as unknown as Record<string, unknown> & { kind: string; callId: string };
     e.onSignal(env.from, b);
-    if (b.kind === 'call.invite' && AppState.currentState !== 'active') {
-      void Notifications.scheduleNotificationAsync({ content: { title: 'Incoming CLAN call', body: `${phoneClan().people.contact(env.from)?.name ?? 'Someone'} is calling. Open CLAN to answer.` }, trigger: null }).catch(() => {});
-    }
+
   }), [e]);
   const [, tick] = useState(0);
   useEffect(() => { if (call?.phase !== 'connected') return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [call?.phase]);

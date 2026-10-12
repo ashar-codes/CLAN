@@ -6,9 +6,12 @@ import type { NearbyPersonView, PeopleContact } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import { errText, Avatar, Initials, REL, usePeople } from './common.tsx';
 import { ChatInvite } from './Chats.tsx';
+import { Radar } from '../Radar.tsx';
 import { OpticalTransfer } from './Optical.tsx';
 
 export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
+  const [alerts, setAlerts] = useState(false);
+  useEffect(() => { void api.people.nearbyAlerts().then(setAlerts); }, []);
   const [list] = usePeople(() => api.people.nearby());
   const [me, reloadMe] = usePeople(() => api.people.me());
   const [msg, setMsg] = useState(''), [err, setErr] = useState('');
@@ -30,7 +33,10 @@ export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
         </div>
         <p className="muted small-text">Everyone Nearby shows only the fields you mark “everyone”, on this Wi-Fi only, and switches back to Friends Only by itself. Avoid it on public or shared networks. Your location is never shown.</p>
       </div>
+      <button aria-pressed={alerts} onClick={() => void api.people.nearbyAlerts(!alerts).then(setAlerts)}>Friend nearby alerts: {alerts ? 'On' : 'Off'}</button>
       {msg && <p role="status">{msg}</p>}{err && <p role="alert" className="error">{err}</p>}
+      <Radar items={(list ?? []).map((n) => ({ id: n.key, name: n.name, kind: 'Person', verified: n.verified && n.relation === 'friend' }))} onSelect={(key) => document.getElementById(`person-${key}`)?.scrollIntoView({ block: 'center' })} />
+      <p className="muted small-text">Positions are a visual layout, not physical distances. Select a person to view their verified profile and connection actions.</p>
       <div role="list" aria-label="People nearby" className="people-list">
         {!list?.length && <p className="muted" role="status">Nobody nearby is visible to you right now. People appear here only while they choose to be visible.</p>}
         {list?.map((n) => <NearbyCard key={n.key} n={n} onChat={onChat} onError={setErr} />)}
@@ -47,7 +53,7 @@ function NearbyCard({ n, onChat, onError }: { n: NearbyPersonView; onChat(id: st
   const p = n.profile, rel = n.relation;
   const run = (f: () => Promise<unknown>) => void f().catch((e) => onError(errText(e)));
   return (
-    <article role="listitem" className="card person" aria-label={n.name}>
+    <article id={`person-${n.key}`} role="listitem" className="card person" aria-label={n.name}>
       <div className="row"><Avatar k={n.key} name={n.name} /><div><b>{n.name}</b>{n.verified && <span className="chip" title="Identity checked by QR code"> ✓ verified</span>}
         <br /><small className="muted">{[p.university, p.department, p.course].filter(Boolean).join(' · ') || 'CLAN user'}{REL[rel] ? ` · ${REL[rel]}` : ''}</small></div></div>
       {p.bio && <p className="small-text">{p.bio}</p>}

@@ -313,6 +313,8 @@ export type NearbyPersonView = { key: string; name: string; profile: import('@cl
 export type MyPeopleProfile = { key: string; fingerprint: string; qr: string; port: number; profile: { name: string; fields: Record<string, unknown>; fieldVisibility: Record<string, 'everyone' | 'friends' | 'nobody'>;
   visibility: 'everyone' | 'friends' | 'invisible'; everyoneUntil: number | null; avatar: { sha256: string; size: number; mime: string; objectId: string } | null; updatedAt: number } };
 export type PeopleApi = {
+  nearbyAlerts(on?: boolean): Promise<boolean>;
+  attempt(key: string, callId: string): Promise<void>;
   me(): Promise<MyPeopleProfile>; qrImage(intent?: 'profile' | 'friend' | 'chat'): Promise<string>; resetQr(): Promise<MyPeopleProfile>;
   update(p: Record<string, unknown>): Promise<unknown>; pickAvatar(): Promise<unknown>; avatar(key: 'me' | string): Promise<string | null>;
   visibility(v: 'everyone' | 'friends' | 'invisible', ms?: number): Promise<string>;
@@ -341,6 +343,7 @@ export type PeopleApi = {
   armMedia(kind: 'microphone' | 'camera'): Promise<void>;
   signal(key: string, body: Record<string, unknown>): Promise<boolean>; logCall(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }): Promise<void>;
   onChanged(cb: (e: { what: string; convId?: string; key?: string }) => void): () => void;
+  onOpen(cb: (convId: string | null) => void): () => void;
   onLive(cb: (e: { from: string; body: Record<string, unknown> & { kind: string; callId: string } }) => void): () => void;
 };
 

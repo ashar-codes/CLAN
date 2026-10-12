@@ -154,3 +154,22 @@ scans. Public mode says plainly that anyone filming the screen can read the file
 4. A device's people identity is never asserted by another device; friends must opt in per device.
 5. All network input (adverts, QR text, frames, envelopes, chunks, pictures) is size-bounded and schema-checked; file
    writes go only to app-owned part files named by transfer id; names from peers are sanitised.
+
+## Local stabilization, 2026-10-12
+
+Personal transport ticks coalesce concurrent callers into a following round and await queued authenticated link writes before returning delivery state. Verified manual linking endpoints remain preferred after adoption, so a changed advertised LAN address cannot discard the authenticated route.
+
+Screen subscribers disable visibility-based adaptive suspension for transformed 3D walls, explicitly enable/disable attached tracks, and serialize connection setup. Simulcast, authentication and ICE policy remain enabled. The deterministic E2E publisher advertises a positive frame rate.
+
+Rollback fences are strict versioned records. Only ENOENT means no previous fence; corrupt or inaccessible fences refuse hosting. Per-file serialization covers multiple adapters. Source relinquish, destination acceptance and activation/replay wait for fence persistence. Write errors remain latched and prevent acknowledgement. Node flushes the fence file before rename; Expo's shim lacks fsync, so mobile sudden-power-loss durability is not certified.
+
+Unreadable existing desktop identity files are preserved and startup refuses to replace them. Internal packaged desktop builds use CLAN TEST / app.classroomlan.desktop.qa and a separate default personal-beta-test profile. Android's .qa variant uses debug signing and a separate application ID. These are internal candidates, with physical networking and OS background behavior pending.
+
+Windows installer firewall rules derive their names and executable path from the packaged product. TEST install/uninstall cannot delete beta rules. Native Windows CI seeds beta-rule sentinels and verifies both preservation and local-subnet, program-scoped TEST rules.
+
+Desktop profile concurrency: the final TEST source acquires Electron's per-userData process lock before keystore/database initialization. Duplicate launches forward bounded capture URLs through the existing strict intake parser; they do not open a second writer. Independent QA profiles retain separate locks. This complements per-file fence write serialization.
+
+
+## BTC-1 background and offline delivery (2026-10-12)
+
+See [BTC_1.md](BTC_1.md) for the root causes, opt-in foreground/tray availability, authenticated durable delivery, bounded call intent, notifications, real-discovery radar and mobile ownership. This is an internal TEST candidate; hardware and public-release gates remain open. Preserve OS-protected keys and existing profiles.

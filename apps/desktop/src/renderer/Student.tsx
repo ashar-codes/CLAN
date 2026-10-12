@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ClassroomConnection, type Candidate, type Quality } from '@classroom/client';
+import { ClassroomConnection, SessionGate, type Candidate, type Quality } from '@classroom/client';
 import { clanLabels, shortFingerprint, type ClanCapability, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
 import type { Joined, OwnProfile } from '../shared.ts';
 import { StudentAssignments, StudentFiles as FilesCard } from './Files.tsx';
@@ -121,6 +121,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [handRaised, setHandRaised] = useState(false), [handError, setHandError] = useState('');
   /** Persistent hosting: this host paused/handed over, or its session failed the CLAN's host check. */
   const [hostWarning, setHostWarning] = useState('');
+  const [hostConfirmed, setHostConfirmed] = useState(false), [hostFailure, setHostFailure] = useState('');
   const [leaving, setLeaving] = useState(false), [leaveError, setLeaveError] = useState('');
   const [teacherWarn, setTeacherWarn] = useState(joined.teacherTrust === 'changed');
   const [resources, setResources] = useState<ResourceView[]>([]);
@@ -134,10 +135,12 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
   const revoked = useRef<string[]>([]);
   const connRef = useRef<ClassroomConnection | null>(null);
-  const chat = useChat({ role: 'member', conn: { url: session.url, token: session.token, sessionId: session.classroom.sessionId }, clanId: info.clanId ?? info.sessionId, send: (m) => connRef.current?.send(m) });
+  const gateRef = useRef<SessionGate | null>(null);
+  const gatedSend = (m: ClientMessage) => { if (gateRef.current?.confirmed) connRef.current?.send(m); };
+  const chat = useChat({ role: 'member', conn: { url: session.url, token: session.token, sessionId: session.classroom.sessionId }, clanId: info.clanId ?? info.sessionId, send: gatedSend });
   const chatRef = useRef(chat);
   chatRef.current = chat;
-  const board = useBoard({ kind: 'live', send: (m) => connRef.current?.send(m) }, chat.me ?? session.memberId);
+  const board = useBoard({ kind: 'live', send: gatedSend }, chat.me ?? session.memberId);
   const boardRef = useRef(board);
   boardRef.current = board;
   const [dm, setDm] = useState<{ handle: string; n: number } | null>(null);
@@ -147,13 +150,19 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
 
   useEffect(() => {
     let retried = false;
-    // Renderer WSS: Chromium accepts only the PAKE-pinned certificate (main-process verify proc).
-    const c = new ClassroomConnection(session.url, session.token, {
-      onMessage: (m) => {
+    setHostConfirmed(false);
+    const gate = new SessionGate({
+      verify: async (hello) => {
+        if (hello.status !== 'approved') return;
+        const i = hello.classroom;
+        await api.clan.joined({ sessionId: i.sessionId, clanId: i.clanId, type: i.clanType, name: i.title, hostKey: joined.teacherPublicKey, expiresAt: i.expiresAt, hostName: i.hostName, authority: i.authority });
+      },
+      failed: () => { setHostConfirmed(false); setHostFailure('This session could not be verified as run by the CLAN’s current host. Leave and contact the owner.'); connRef.current?.close(); },
+      message: (m) => {
         if (m.t.startsWith('wb.')) return boardRef.current.onServer(m as never);
         chatRef.current.onServer(m);
         if (m.t === 'hello') boardRef.current.connected();
-        if (m.t === 'hello') { setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
+        if (m.t === 'hello') { setHostConfirmed(true); setInfo(m.classroom); setCan(m.capabilities); if (m.status) setStatus(m.status); }
         if (m.t === 'hands') { setHandSupported(true); setHandRaised(m.mine); setHandError(''); }
         if (m.t === 'error' && m.code === 'rate_limited') setHandError(m.message);
         if (m.t === 'error' && m.code === 'host_unavailable') setHostWarning(`${m.message} Your messages and files were not sent; they can be sent again once the CLAN's current host is available.`);
@@ -163,13 +172,18 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
         if (m.t === 'error' && ['busy', 'forbidden', 'media_unavailable', 'not_presenting', 'whiteboard'].includes(m.code)) void presRef.current?.refused(m.message);
         if (m.t === 'peer.probe') void api.peerProbe(m.targets).then((r) => connRef.current?.send({ t: 'peer.probeResult', probeId: m.probeId, ...r })).catch(() => {});
         if (m.t === 'class.state') { setInfo(m.classroom); if (m.capabilities) setCan(m.capabilities); }
-        if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: [] }); } // register the peer server as soon as we're in
+        if (m.t === 'member.status') { setStatus(m.status); if (m.status === 'approved') { setHostConfirmed(true); void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: [] }); } } // register only after the host is verified
         if (m.t === 'resources') setResources(m.resources as ResourceView[]);
         if (m.t === 'assignments') { setAssignments(m.assignments as StudentAssignmentView[]); void api.study.assignmentsSeen(infoRef.current.clanId ?? infoRef.current.sessionId, m.assignments).catch(() => {}); } // offline projection for Today / Course
         if (m.t === 'resource.push' || m.t === 'resource.seed') setPushed(m.resourceId);
         if (m.t === 'peer.revoked') { revoked.current = [...revoked.current, ...m.fingerprints]; void api.peerState(connOf(), { peerAssist: infoRef.current.peerAssist, revoked: m.fingerprints }); }
         if (m.t === 'hello' || m.t === 'class.state') { infoRef.current = m.classroom; void api.peerState(connOf(), { peerAssist: m.classroom.peerAssist, revoked: [] }); }
       },
+    });
+    gateRef.current = gate;
+    // Renderer WSS: Chromium accepts only the PAKE-pinned certificate (main-process verify proc).
+    const c = new ClassroomConnection(session.url, session.token, {
+      onMessage: (m) => { void gate.push(m); },
       onQuality: (q) => { setQuality(q); setOfflineSince((t) => (q === 'disconnected' ? t ?? Date.now() : null)); },
       onClosed: (reason) => {
         // Token expired (idle/absolute lifetime): prove the device key again for a fresh one, once.
@@ -180,25 +194,22 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       },
     });
     connRef.current = c;
-    return () => c.close();
+    return () => { gate.stop(); c.close(); };
   }, [session]);
   const infoRef = useRef(joined.classroom);
   const connOf = () => ({ url: session.url, token: session.token, sessionId: session.classroom.sessionId, classTitle: session.classroom.title });
-  const send = useCallback((m: ClientMessage) => connRef.current?.send(m), []);
+  const send = useCallback((m: ClientMessage) => { if (gateRef.current?.confirmed) connRef.current?.send(m); }, []);
   const conn = useMemo(() => ({ url: session.url, token: session.token, sessionId: session.classroom.sessionId, classTitle: session.classroom.title }), [session]);
 
-  // Approved: this device now holds a canonical membership in that CLAN (profile and identity are not copied).
-  useEffect(() => {
-    if (status === 'approved') void api.clan.joined({ sessionId: info.sessionId, clanId: info.clanId, type: info.clanType, name: info.title, hostKey: joined.teacherPublicKey, expiresAt: info.expiresAt, hostName: info.hostName, authority: info.authority }).catch((e: Error) => { if (info.authority) setHostWarning(`This session could not be confirmed as run by the CLAN's current host: ${e.message.replace(/^Error invoking remote method '[^']+': (\w+: )?/, '')} Do not share anything here until the owner confirms.`); });
-  }, [status, info.sessionId, info.clanId, info.clanType, info.title, info.expiresAt, joined.teacherPublicKey]);
   const L = clanLabels(info.clanType);
-  const pres = usePresentation({ baseUrl: session.url, bearer: session.token, sessionId: info.sessionId, msg: presMsg, send: (m) => connRef.current?.send(m), me: session.memberId });
+  const pres = usePresentation({ baseUrl: session.url, bearer: session.token, sessionId: info.sessionId, msg: presMsg, send, me: session.memberId });
   presRef.current = pres;
   const boardNode = board.view?.wall === 'WHITEBOARD' && !pres.live ? <WallBoard board={board} resources={resources} title={`${info.title} board`} /> : undefined;
 
   const over = info.ended ? `The ${L.session} has ended.` : status === 'rejected' ? `The ${L.host.toLowerCase()} declined your request.` : status === 'removed' ? `You were removed from this ${L.session}.`
     : status === 'blocked' ? `This device was blocked from this ${L.session}.` : closed ? 'Your session expired. Join again with the code.' : '';
   if (over && !leaving) return <main className="center narrow"><h2>{info.title}</h2><p>{over}</p><button className="primary" onClick={onLeave}>OK</button></main>;
+  if (hostFailure || !hostConfirmed) return <main className="center narrow"><h2>{info.title}</h2><p role={hostFailure ? 'alert' : 'status'}>{hostFailure || 'Checking the CLAN host…'}</p><button onClick={onLeave}>Leave</button></main>;
 
   const banner = teacherWarn && (
     <div className="warning-banner" role="alert">
