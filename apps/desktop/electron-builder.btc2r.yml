@@ -1,0 +1,14 @@
+# Isolated BTC-2R.1 TEST identity. Existing production/TEST installs are untouched.
+extends: ./electron-builder.yml
+appId: app.classroomlan.desktop.btc2r
+productName: CLAN BTC2R QA
+directories:
+  output: release-btc2r
+extraMetadata:
+  version: 0.1.0-btc2r1
+  clanInternalQa: true
+  clanQaProfile: btc2r1-test
+  clanQaAppId: app.classroomlan.desktop.btc2r
+mac:
+  identity: '-'
+  target: [dmg]

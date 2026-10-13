@@ -5,7 +5,7 @@
 import UIKit
 import UniformTypeIdentifiers
 
-private let group = "group.app.classroomlan.student"
+private let group = Bundle.main.object(forInfoDictionaryKey: "CLANShareGroup") as? String ?? "group.app.classroomlan.student"
 private let maxBytes: Int64 = 200 * 1024 * 1024
 
 final class ShareViewController: UIViewController {

@@ -1,0 +1,17 @@
+// Standalone debug-signed QA package, never the protected beta signing identity.
+gradle.beforeProject { project ->
+  project.plugins.withId('com.android.application') {
+    project.androidComponents.finalizeDsl { android ->
+      def sha = System.getenv('CLAN_SOURCE_SHA')
+      if (sha == null || !(sha ==~ /[0-9a-f]{40}/)) throw new GradleException('Set the frozen CLAN_SOURCE_SHA')
+      android.buildTypes.getByName('qa').applicationIdSuffix = '.btc2r'
+      android.buildTypes.getByName('qa').resValue 'string', 'app_name', 'CLAN BTC2R QA'
+      android.defaultConfig.versionName = '0.1.1-btc2r1'
+      android.defaultConfig.versionCode = 3
+      def assets = new File(project.buildDir, 'generated/btc2r-assets')
+      assets.mkdirs()
+      new File(assets, 'clan-build.json').text = groovy.json.JsonOutput.toJson([sourceCommit:sha, status:'TEST / UNVERIFIED', applicationId:'app.classroomlan.student.btc2r'])
+      android.sourceSets.main.assets.srcDir assets
+    }
+  }
+}

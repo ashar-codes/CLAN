@@ -14,6 +14,7 @@ import { leaveClanSession, pairAndJoin, reconnect, type Candidate } from '@class
 import { newEd25519, nodeSigner, pinnedTransport } from '@classroom/client/node';
 import { backupDb, logError, openDbSafely, purgeStoppedSessions } from '@classroom/server';
 import { Keystore } from './keystore.ts';
+import { qaProfile } from './qa-profile.ts';
 import { Trust } from './trust.ts';
 import { candidateInterfaces, openDb, startClassroomServer, type RunningServer } from '@classroom/server';
 import { browse, dlog } from '@classroom/server/discovery';
@@ -48,13 +49,11 @@ const joinError = (e: unknown) => {
 // Storage identity first (before anything reads userData or touches safeStorage); the user-visible name is set after ready.
 app.setName(LEGACY_STORAGE_NAME);
 // `--profile=name` gives a separate data dir so one machine can run teacher + students during development.
-const internalQa = app.isPackaged && (() => {
-  try { return JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')).clanInternalQa === true; }
-  catch { return false; }
-})();
+const packageQa = app.isPackaged ? qaProfile(JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8'))) : undefined;
+const internalQa = !!packageQa;
 // Match the NSIS shortcut identity so Windows can attribute People toast notifications.
-if (process.platform === 'win32') app.setAppUserModelId(internalQa ? 'app.classroomlan.desktop.qa' : 'app.classroomlan.desktop');
-const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10) ?? (internalQa ? 'personal-beta-test' : undefined);
+if (process.platform === 'win32') app.setAppUserModelId(packageQa?.appId ?? 'app.classroomlan.desktop');
+const profileArg = process.argv.find((a) => a.startsWith('--profile='))?.slice(10) ?? packageQa?.profile;
 if (profileArg && /^[\w-]{1,32}$/.test(profileArg)) app.setPath('userData', join(app.getPath('userData'), `profile-${profileArg}`));
 if (process.env.CLASSROOM_USER_DATA) app.setPath('userData', process.env.CLASSROOM_USER_DATA); // tests
 
