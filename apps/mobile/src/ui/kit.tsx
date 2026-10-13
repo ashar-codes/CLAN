@@ -38,7 +38,7 @@ export function Screen({ children }: { children: ReactNode }) {
     void AccessibilityInfo.isReduceMotionEnabled().then((reduced) => { if (!mounted || reduced) return; opacity.setValue(.7); Animated.timing(opacity, { toValue: 1, duration: MOTION.base, useNativeDriver: true }).start(); });
     return () => { mounted = false; stop(); sub.remove(); };
   }, [opacity]);
-  return <Animated.View style={{ flex: 1, opacity }}><ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 96 }} keyboardShouldPersistTaps="handled">{children}</ScrollView></Animated.View>;
+  return <Animated.View style={{ flex: 1, opacity }}><ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 96 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets={Platform.OS==='ios'} keyboardDismissMode={Platform.OS==='ios'?'interactive':'on-drag'}>{children}</ScrollView></Animated.View>;
 }
 export const H1 = ({ children }: { children: ReactNode }) => { const c = useC(); return <Text accessibilityRole="header" style={{ color: c.text, fontSize: 26, fontWeight: '800' }}>{children}</Text>; };
 export const H2 = ({ children }: { children: ReactNode }) => { const c = useC(); return <Text accessibilityRole="header" style={{ color: c.text, fontSize: 17, fontWeight: '700' }}>{children}</Text>; };

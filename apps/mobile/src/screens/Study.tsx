@@ -35,6 +35,7 @@ function CoursePick({ value, onChange }: { value: string | null; onChange(v: str
 
 function Courses() {
   const c = useC();
+  const [search,setSearch]=useState('');
   const [archived,setArchived]=useState(false),[editing,setEditing]=useState<string|null>(null),[topicEdit,setTopicEdit]=useState<{id:string;title:string}|null>(null),[lectureEdit,setLectureEdit]=useState<{id:string;title:string}|null>(null),[lectureTitle,setLectureTitle]=useState('');
   const courses = useData(() => phoneClan().courses.list(me(),archived)) ?? [];
   const [open, setOpen] = useState<string | null>(null), [name, setName] = useState(''), [code, setCode] = useState(''), [topic, setTopic] = useState(''), [err, setErr] = useState<string | null>(null);
@@ -46,7 +47,14 @@ function Courses() {
       {lectureEdit&&<Editor title="Edit lecture" initial={{title:lectureEdit.title}} labels={{title:'Lecture title'}} onSave={v=>phoneClan().courses.setLecture(me(),lectureEdit.id,{title:v.title!})} onClose={()=>setLectureEdit(null)}/>}
       {topicEdit && <Editor title="Edit topic" initial={{title:topicEdit.title}} labels={{title:'Topic title'}} onSave={v=>{phoneClan().courses.renameTopic(me(),topicEdit.id,v.title!);setErr(act(()=>{}));}} onClose={()=>setTopicEdit(null)}/>}
 
-      {courses.map((x) => (
+      <Card title="New course">
+        <Field label="Course name" value={name} onChange={setName} placeholder="Operating Systems" />
+        <Field label="Course code" value={code} onChange={setCode} placeholder="CS-330" autoCapitalize="characters" />
+        <Btn primary label="Add course" disabled={!name.trim()} onPress={() => { const e=act(() => phoneClan().courses.create(me(), { name, code }));setErr(e);if(!e){setName('');setCode('');} }} />
+        <Err msg={err} />
+      </Card>
+      <Field label="Search courses" value={search} onChange={setSearch} placeholder="Name, code or instructor"/>
+      {courses.filter(x=>!search.trim()||[x.name,x.code,x.instructor].some(v=>v.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))).map((x) => (
         <Card key={x.id} title={`${x.code ? `${x.code} · ` : ''}${x.name}`} tone="study">
           <Muted>{archived ? 'Archived course' : readiness(phoneClan().courses.topics(me(), x.id).map((t) => t.state))?.label ?? 'No topics yet'}</Muted>
           <Row>{archived?<Btn small label="Restore" a11y={`Restore ${x.name}`} onPress={()=>setErr(act(()=>phoneClan().courses.restore(me(),x.id)))}/>:<><Btn small label="Edit" a11y={`Edit ${x.name}`} onPress={()=>setEditing(x.id)}/><Btn small label="Archive" a11y={`Archive ${x.name}`} onPress={()=>{setErr(act(()=>phoneClan().courses.archive(me(),x.id)));setOpen(null);}}/></>}<Btn small danger label="Delete course" a11y={`Delete course ${x.name}`} onPress={()=>confirmRemove(x.name,'Removes this course, topics and course references from your linked devices. Independent Notes, Tasks, Exams, files and CLAN ownership remain.',()=>{phoneClan().courses.remove(me(),x.id);setOpen(null);},setErr)}/></Row>
@@ -67,12 +75,7 @@ function Courses() {
           )}
         </Card>
       ))}
-      <Card title="New course">
-        <Field label="Course name" value={name} onChange={setName} placeholder="Operating Systems" />
-        <Field label="Course code" value={code} onChange={setCode} placeholder="CS-330" autoCapitalize="characters" />
-        <Btn primary label="Add course" disabled={!name.trim()} onPress={() => { const e=act(() => phoneClan().courses.create(me(), { name, code }));setErr(e);if(!e){setName('');setCode('');} }} />
-        <Err msg={err} />
-      </Card>
+
     </>
   );
 }

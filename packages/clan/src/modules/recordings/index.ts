@@ -140,6 +140,7 @@ export class Recordings {
     return (this.db.prepare(`SELECT * FROM rec_tapes WHERE owner_id = ? ${o.courseId ? 'AND course_id = ?' : ''} ${o.lectureId ? 'AND lecture_id = ?' : ''} ORDER BY started_at DESC LIMIT ?`)
       .all(...[userOf(p), ...(o.courseId ? [o.courseId] : []), ...(o.lectureId ? [o.lectureId] : []), o.limit ?? 100]) as Raw[]).map(toTape);
   }
+  fileReferences(owner: string): string[] { return (this.db.prepare('SELECT ref_id id FROM rec_tapes WHERE owner_id=? AND ref_id IS NOT NULL UNION SELECT e.ref_id id FROM rec_events e JOIN rec_tapes t ON t.id=e.tape_id WHERE t.owner_id=? AND e.ref_id IS NOT NULL').all(owner,owner) as {id:string}[]).map(r=>r.id); }
   hasFileReference(id: string) {return !!this.db.prepare('SELECT 1 FROM rec_tapes WHERE ref_id=? UNION ALL SELECT 1 FROM rec_events WHERE ref_id=? LIMIT 1').get(id,id);}
   /** Deletes the tape and its timeline; the media/screenshot refs are removed from Personal Space (bytes freed when unreferenced). */
   remove(p: Principal, id: string) {

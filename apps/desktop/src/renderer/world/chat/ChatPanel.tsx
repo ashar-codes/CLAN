@@ -24,7 +24,7 @@ export default function ChatPanel({ chat, role, people, clanName, canSendFiles, 
   const group = chat.threads.find((t) => t.kind === 'group');
   const active = chat.threads.find((t) => t.id === chat.active) ?? null;
   useEffect(() => { if (!chat.active && group) void chat.open(group.id); }, [group?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (request) void chat.openDirect(request.handle).catch(() => {}); }, [request?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (request) void chat.openDirect(request.handle).catch(() => {}); }, [request?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const others = people.filter((p) => p.handle && p.handle !== chat.me);
   const reachable = role === 'host' || others.length ? others : chat.host ? [{ handle: chat.host, name: 'Host', host: true, connected: true }] : [];
 
@@ -61,27 +61,30 @@ function Conversation({ t, chat, role, clanName, canSendFiles, conn }: { t: Chat
   const [saved, setSaved] = useState<SavedItem[] | null>(null);
   const log = useRef<HTMLDivElement>(null);
   const following = useRef(true);
-  const anchor = useRef<{ id: string; offset: number } | null>(null);
+  const anchor = useRef<{ id: string; offset: number; first: string | undefined } | null>(null);
   const [away, setAway] = useState(false);
   const target = { id: t.id };
   const latest = () => { following.current = true; setAway(false); if (log.current) log.current.scrollTop = log.current.scrollHeight; };
   useLayoutEffect(() => {
     const el = log.current; if (!el) return;
-    if (anchor.current) {
+    if (anchor.current && list[0]?.id !== anchor.current.first) {
       const item = [...el.querySelectorAll<HTMLElement>('[data-chat-id]')].find((x) => x.dataset.chatId === anchor.current!.id);
       if (item) el.scrollTop += item.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current.offset;
       anchor.current = null;
+    } else if (anchor.current) {
+      // An empty/failed page clears the anchor only after its state commit.
+      if (!chat.loadingEarlier[t.id]) anchor.current = null;
     } else if (following.current) el.scrollTop = el.scrollHeight;
-  }, [list, mine.length]);
+  }, [list, mine.length, chat.loadingEarlier[t.id]]);
   const earlier = async () => {
     const el = log.current; if (!el || chat.loadingEarlier[t.id]) return;
     const top = el.getBoundingClientRect().top;
     const item = [...el.querySelectorAll<HTMLElement>('[data-chat-id]')].find((x) => x.getBoundingClientRect().bottom > top);
-    if (item) anchor.current = { id: item.dataset.chatId!, offset: item.getBoundingClientRect().top - top };
+    if (item) anchor.current = { id: item.dataset.chatId!, offset: item.getBoundingClientRect().top - top, first: list[0]?.id };
     following.current = false;
     await chat.loadEarlier(t.id);
-    // Clear a failed/empty request's anchor too; never shift a later unrelated update.
-    requestAnimationFrame(() => { anchor.current = null; });
+    // Anchor lifetime follows the React pagination commit, not a frame callback
+    // that can run before React paints on a loaded or slower Windows renderer.
   };
   const typers = (chat.typing[t.id] ?? []).map((x) => x.name.split(' ')[0]);
 

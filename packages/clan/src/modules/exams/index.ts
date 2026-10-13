@@ -84,7 +84,7 @@ export class Exams {
 
   fileReferences(owner: string): string[] { return (this.db.prepare("SELECT r.entity_id id FROM exams_refs r JOIN exams_exams e ON e.id=r.exam_id WHERE e.owner_id=? AND r.module='files'").all(owner) as {id:string}[]).map(r=>r.id); }
   hasFileReference(id: string) { return !!this.db.prepare("SELECT 1 FROM exams_refs WHERE module='files' AND entity_id=? LIMIT 1").get(id); }
-  remove(p: Principal, id: string) { const owner=this.owner(p); this.must(p,id); tx(this.db,()=>{this.db.prepare('DELETE FROM exams_refs WHERE exam_id = ?').run(id);this.db.prepare('DELETE FROM exams_topics WHERE exam_id = ?').run(id);this.db.prepare('DELETE FROM exams_exams WHERE id = ? AND owner_id = ?').run(id,owner);}); }
+  remove(p: Principal, id: string) { const owner=this.owner(p); const item=this.must(p,id); tx(this.db,()=>{this.db.prepare('DELETE FROM exams_refs WHERE exam_id = ?').run(id);this.db.prepare('DELETE FROM exams_topics WHERE exam_id = ?').run(id);this.db.prepare('DELETE FROM exams_exams WHERE id = ? AND owner_id = ?').run(id,owner);this.bus.publish(ExamChanged,'exams',{examId:id,ownerId:owner,status:item.status});}); }
 
   list(p: Principal, o: { courseId?: string; upcoming?: boolean; from?: number; to?: number } = {}): Exam[] {
     if (p.kind === 'agent' && !p.scopes.includes('exams:read')) return [];

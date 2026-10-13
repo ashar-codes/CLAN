@@ -83,7 +83,7 @@ export class Tasks {
 
   fileReferences(owner: string): string[] { return (this.db.prepare("SELECT r.entity_id id FROM tasks_refs r JOIN tasks_tasks e ON e.id=r.task_id WHERE e.owner_id=? AND r.module='files'").all(owner) as {id:string}[]).map(r=>r.id); }
   hasFileReference(id: string) { return !!this.db.prepare("SELECT 1 FROM tasks_refs WHERE module='files' AND entity_id=? LIMIT 1").get(id); }
-  remove(p: Principal, id: string) { const owner=this.owner(p); this.must(p,id); tx(this.db,()=>{this.db.prepare('DELETE FROM tasks_refs WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_checklist WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_tasks WHERE id = ? AND owner_id = ?').run(id,owner);}); }
+  remove(p: Principal, id: string) { const owner=this.owner(p); const item=this.must(p,id); tx(this.db,()=>{this.db.prepare('DELETE FROM tasks_refs WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_checklist WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_tasks WHERE id = ? AND owner_id = ?').run(id,owner);this.bus.publish(TaskChanged,'tasks',{taskId:id,ownerId:owner,status:item.status});}); }
 
   /** Open tasks (or all) — by course, or due before a time. Indexed, bounded. */
   list(p: Principal, o: { courseId?: string; open?: boolean; dueBefore?: number; limit?: number } = {}): Task[] {

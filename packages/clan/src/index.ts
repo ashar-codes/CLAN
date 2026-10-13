@@ -124,7 +124,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
     const intent = clans.cleanup(clanId);
     if (!intent || intent.userId !== me) throw new Error('Authorized cleanup intent is required.');
     return tx(db, () => {
-      const candidates = files.forgetClan(clanId, { ownerId: me, refIds: [...courses.fileReferences(me), ...timetable.fileReferences(me), ...tasks.fileReferences(me), ...exams.fileReferences(me)] });
+      const candidates = files.forgetClan(clanId, { ownerId: me, refIds: [...courses.fileReferences(me), ...timetable.fileReferences(me), ...tasks.fileReferences(me), ...exams.fileReferences(me), ...recordings.fileReferences(me)] });
       clans.recordCleanupObjects(clanId, candidates);
       notes.forgetClan(clanId); saved.forgetClan(clanId);
       notifications.forgetThreads(chat.forgetClan(clanId));

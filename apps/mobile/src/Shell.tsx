@@ -1,4 +1,3 @@
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import { directorySettings } from './people/directory';
 // The phone shell: Home · Study · Inbox · Diary · Me, a bottom bar with large targets, and the CLAN room look
 // (wall, wood, the student's CLANmate). Joining a live CLAN opens the existing pinned-TLS join flow.
@@ -24,7 +23,7 @@ type Tab = 'home' | 'study' | 'people' | 'inbox' | 'diary' | 'me';
 const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study', '✎'], ['people', 'People', '☻'], ['inbox', 'Inbox', '⇣'], ['diary', 'Diary', '❦'], ['me', 'Me', '☺']];
 
 export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEditProfile(): void; intake?: ReactNode }) {
-  const c = useC(),insets=useSafeAreaInsets();
+  const c = useC();
   const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false), [hosting, setHosting] = useState(false);
   useEffect(() => onPeopleNotification(() => { setTab('people'); setJoining(false); setDevices(false); setHosting(false); }), []);
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
@@ -46,7 +45,7 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1 }}>{body}</View>
       {!intake && (
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface,paddingBottom:insets.bottom }}>
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface }}>
           {TABS.map(([t, l, ic]) => (
             <Pressable key={t} accessibilityRole="tab" accessibilityLabel={t === 'inbox' && inboxCount ? `${l}, ${inboxCount} items` : t === 'people' && peopleCount ? `${l}, ${peopleCount} new` : l} accessibilityState={{ selected: tab === t }}
               onPress={() => { setTab(t); setJoining(false); setDevices(false); setHosting(false); }} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' }}>

@@ -12,6 +12,7 @@ Emulator, not a physical device: real-hardware Wi-Fi, BLE, camera and performanc
 import json, os, re, subprocess, sys, time, urllib.request, xml.etree.ElementTree as ET
 
 ADB = os.path.expanduser(os.environ.get('ADB', '~/Library/Android/sdk/platform-tools/adb'))
+SCROLL_X = os.environ.get('CLAN_QA_SCROLL_X', '24')
 PKG = os.environ.get('CLAN_QA_ANDROID_PACKAGE', 'app.classroomlan.student.qa')
 ACTIVITY = f'{PKG}/app.classroomlan.student.MainActivity'  # namespace stays unchanged in the QA package variant
 HOST_IP = os.environ.get('HOST_IP') or subprocess.run(['ipconfig', 'getifaddr', 'en0'], capture_output=True, text=True).stdout.strip()
@@ -27,31 +28,48 @@ def nodes():
         time.sleep(1)
     return []
 def center(n): b = list(map(int, re.findall(r'\d+', n.get('bounds')))); return (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
+def viewport(current=None):
+    dimensions = re.findall(r'(\d+)x(\d+)', adb('shell', 'wm', 'size').decode())
+    assert dimensions, 'cannot determine emulator viewport'
+    height = int(dimensions[-1][1])
+    current = nodes() if current is None else current
+    # Measure the actual fixed navigation boundary; scaled screens and safe areas vary.
+    tabs = [list(map(int, re.findall(r'\d+', n.get('bounds', '')))) for n in current if n.get('class') == 'android.view.View' and n.get('clickable') == 'true' and (n.get('content-desc', '').split(',')[0] in ('Home', 'Study', 'People', 'Inbox', 'Diary', 'Me'))]
+    bottoms = [b[1] for b in tabs if len(b) == 4 and b[1] > height / 2]
+    scrolls = [list(map(int, re.findall(r'\d+', n.get('bounds', '')))) for n in current if n.get('class') == 'android.widget.ScrollView']
+    visible = [b for b in scrolls if len(b) == 4 and b[3] > b[1]]
+    area = max(visible, key=lambda b: (b[2]-b[0])*(b[3]-b[1]), default=None)
+    return (area[1] if area else int(height * .045)), min(bottoms + ([area[3]] if area else []), default=int(height * .89))
+
 def find(label, edit=False, tries=14, scroll=True, clickable=False):
     for i in range(tries):
-        for n in reversed(nodes()):  # innermost matching control, not an entire clickable dialog/container
+        current = nodes()
+        parents = {child: parent for parent in current for child in parent}
+        for n in reversed(current):  # innermost matching control, not an entire clickable dialog/container
             if edit and n.get('class') != 'android.widget.EditText': continue
             if clickable and n.get('clickable') != 'true': continue
             for target in n.iter('node') if clickable else [n]:
                 for k in ('content-desc', 'text', 'resource-id'):
                     v = target.get(k) or ''
-                    if v == label or (label.startswith('~') and label[1:] in v): return center(n)
-        if scroll and i % 2: adb('shell', 'input', 'swipe', '24', *(('1700', '24', '900') if i < tries // 2 else ('700', '24', '1900')), '300')  # at the edge: a board canvas would take the swipe  # down, then back up
+                    if v == label or (label.startswith('~') and label[1:] in v):
+                        x, y = center(n); parent = parents.get(n); clipped = False
+                        while parent is not None:
+                            if 'ScrollView' in parent.get('class', ''):
+                                b = list(map(int, re.findall(r'\d+', parent.get('bounds', ''))))
+                                if len(b) != 4 or not (b[0] < x < b[2] and b[1] < y < b[3]): clipped = True; break
+                            parent = parents.get(parent)
+                        if not clipped: return x, y
+        if scroll and i % 2:
+            top, bottom = viewport(current)
+            start, end = (bottom - 80, int((top + bottom) * .5)) if i < tries // 2 else (int((top + bottom) * .5), bottom - 80)
+            adb('shell', 'input', 'swipe', SCROLL_X, str(start), SCROLL_X, str(end), '300')  # at the edge: a board canvas would take the swipe  # down, then back up
         time.sleep(0.6)
     raise AssertionError(f'not on screen: {label}')
 def tap(label):
-    # Accessibility can report a scrolled child's bounds under the fixed bottom tabs.
-    # Derive the safe area from this emulator, rather than assuming a 2340px display.
-    dimensions = re.findall(r'(\d+)x(\d+)', adb('shell', 'wm', 'size').decode())
-    assert dimensions, 'cannot determine emulator viewport'
-    height = int(dimensions[-1][1]); top, bottom = int(height * .045), int(height * .89)
-    for _ in range(12):
-        x, y = find(label, clickable=True)
-        if top < y < bottom or label in ('Home', 'Study', 'People', 'Inbox', 'Diary', 'Me'):
-            adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.7); return
-        start, end = (int(height * .4), int(height * .75)) if y <= top else (int(height * .8), int(height * .4))
-        adb('shell', 'input', 'swipe', '24', str(start), '24', str(end), '300'); time.sleep(0.4)
-    raise AssertionError(f'button is obscured by system/tab bars: {label}')
+    # find measures the target and its scroll ancestors in one accessibility snapshot.
+    # Hidden children must never be tapped through fixed Study tabs or bottom navigation.
+    x, y = find(label, clickable=True)
+    adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.7)
 def open_chat():
     # Approval mounts chat asynchronously and can show an OS notification prompt after joining.
     # Observe each actual window instead of tapping stale room coordinates through that prompt.

@@ -31,19 +31,26 @@ describe('device-local CLAN lifecycle', () => {
       const course = c.courses.create(p, { name: 'Personal course' });
       c.courses.link(p, course.id, { module: 'files', entityId: courseFile.refId });
       c.courses.archive(p, course.id); // archived personal courses also retain their files
+      const tapeFile = await c.files.add(p, file(storageDir, 'frame.png', 'protected recording frame'), 'frame.png', scope);
+      const tape = c.recordings.start(p, { title: 'Private tape', source: 'screen', partPath: storageDir + '/disposable.part' });
+      c.recordings.mark(p, tape.id, { kind: 'screenshot', atMs: 0, refId: tapeFile.refId });
+      c.recordings.fail(p, tape.id, 'Disposable fixture');
       const ownBoard = c.whiteboard.create(p, { kind: 'personal', id: c.me }, 'Private board');
       const clanBoard = c.whiteboard.boardFor(clan.id, 'Shared board');
       const thread = c.chat.groupThread(clan.id); c.chat.setMe(clan.id, 'mine');
       c.chat.post({ id: 'cleanup-message', threadId: thread.id, author: 'peer', authorName: 'Peer', body: 'Remove this chat' });
       expect(() => c.purgeClanProjection(clan.id)).toThrow('intent');
       c.clans.requestCleanup(clan.id, c.me, 'delete');
-      expect(c.purgeClanProjection(clan.id).sort()).toEqual([shared.objectId, courseFile.objectId].sort());
-      expect(c.purgeClanProjection(clan.id)).toHaveLength(2); // journal survives idempotent retry
+      expect(c.purgeClanProjection(clan.id).sort()).toEqual([shared.objectId, courseFile.objectId, tapeFile.objectId].sort());
+      expect(c.purgeClanProjection(clan.id)).toHaveLength(3); // journal survives idempotent retry
       expect(c.clans.cleanup(clan.id)?.completedAt).toBeNull(); // bytes/server cleanup is still required
       expect(c.notes.get(p, note.id)).toMatchObject({ body: 'Keep this body', sharedWith: [other.id] });
       expect(c.saved.get(p, saved.id)?.sharedWith).toEqual([]);
       expect(c.files.get(p, courseFile.refId)).toMatchObject({ scope: { kind: 'personal', ownerId: c.me }, name: 'course.txt' });
       expect(await c.store.verify(courseFile.objectId)).toBe(true);
+      expect(c.files.get(p, tapeFile.refId)?.scope).toEqual({ kind: 'personal', ownerId: c.me });
+      expect(await c.store.verify(tapeFile.objectId)).toBe(true);
+      expect(c.recordings.events(p, tape.id)[0]?.refId).toBe(tapeFile.refId);
       expect(c.files.list(p, { kind: 'clan', clanId: other.id })).toHaveLength(1);
       expect(c.chat.thread(thread.id)).toBeNull();
       expect(() => c.chat.setMe(clan.id, 'late')).toThrow('awaiting cleanup');
@@ -54,7 +61,7 @@ describe('device-local CLAN lifecycle', () => {
       expect(db.prepare('SELECT 1 FROM wb_boards WHERE id = ?').get(clanBoard.id)).toBeUndefined();
       expect(db.prepare('SELECT 1 FROM wb_boards WHERE id = ?').get(ownBoard.id)).toBeDefined();
       const reopened = setup({ db, storageDir }).app;
-      expect(reopened.clans.cleanupObjects(clan.id)).toHaveLength(2);
+      expect(reopened.clans.cleanupObjects(clan.id)).toHaveLength(3);
       expect(reopened.clans.isActiveMember(clan.id, c.me)).toBe(false);
     } finally { db.close(); }
   });
