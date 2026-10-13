@@ -171,7 +171,9 @@ describe('direct conversations and privacy', () => {
     const id = randomUUID(), payload = { id, t: 'chat.send', thread: { kind: 'group' }, body: 'sent while flaky' };
     dev.app.chat.queue('clan-x', payload);
     dev.db.close();
-    const again = setup({ db: openDb(join(dir, 'member.db')) });
+    const reopenedDb = openDb(join(dir, 'member.db'));
+    hostDbs.push(reopenedDb); // Close before temp cleanup: Windows refuses removal of an open SQLite file.
+    const again = setup({ db: reopenedDb });
     expect(again.app.chat.outbox('clan-x')).toEqual([payload]);
     // First attempt reaches the host but the connection dies before the ack; the retry gets the same seq.
     sock(a).send(payload); sock(a).close();

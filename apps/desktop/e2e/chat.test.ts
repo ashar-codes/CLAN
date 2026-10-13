@@ -200,7 +200,9 @@ it('chat scroll stays put while reading, jumps to latest, and preserves the visi
   await expect.poll(() => log(again.page).getByTestId('chat-message').count()).toBe(59);
   const same = log(again.page).getByTestId('chat-message').filter({ has: again.page.getByText('history 09', { exact: true }) });
   expect(await same.getAttribute('aria-label')).toBe(label);
-  expect(Math.abs((await same.boundingBox())!.y - y)).toBeLessThan(3);
+  const shift = (await same.boundingBox())!.y - y;
+  if (Math.abs(shift) >= 3) console.error('Pagination geometry', JSON.stringify({beforeY:y,shift,...await log(again.page).evaluate(el=>({top:el.getBoundingClientRect().top,scrollTop:el.scrollTop,height:el.clientHeight,total:el.scrollHeight,count:el.querySelectorAll('[data-chat-id]').length,fonts:document.fonts.status,focused:document.activeElement?.tagName}))}));
+  expect(Math.abs(shift)).toBeLessThan(3);
   for (const width of [1440, 1024, 390, 360]) {
     await again.page.setViewportSize({ width, height: 844 });
     expect(await log(again.page).evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight > 100)).toBe(true);
