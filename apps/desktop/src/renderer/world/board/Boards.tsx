@@ -2,6 +2,7 @@
 // on this device as editable operations (export makes a PNG/PDF copy).
 import { lazy, Suspense, useCallback, useState } from 'react';
 import type { Board, BoardOwner } from '../../../shared.ts';
+import {ContentEditor} from '../ContentEditor.tsx';
 import { api } from '../../App.tsx';
 import { errText, useLoad } from '../useLoad.ts';
 const BoardView = lazy(() => import('./BoardView.tsx').then((m) => ({ default: m.BoardView })));
@@ -9,9 +10,13 @@ import { useBoard } from './useBoard.ts';
 
 export function Boards({ owner, boardId }: { owner: { kind: Exclude<BoardOwner['kind'], 'clan'>; id: string }; boardId?: string }) {
   const [boards, reload] = useLoad<Board[]>(useCallback(() => api.board.list(owner), [owner.kind, owner.id])); // eslint-disable-line react-hooks/exhaustive-deps
+  const [archived,reloadArchived]=useLoad<Board[]>(useCallback(()=>api.board.archived(owner),[owner.kind,owner.id]));
+  const [editing,setEditing]=useState<Board|null>(null);
+  const [busy,setBusy]=useState(false);
   const [open, setOpen] = useState<string | null>(boardId ?? null);
   const [title, setTitle] = useState('');
   const [err, setErr] = useState('');
+  const change=async(f:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setErr('');try{await f();reload();reloadArchived();}catch(e){setErr(errText(e));}finally{setBusy(false);}};
   const cur = boards?.find((b) => b.id === open);
   if (open && cur) return <div className="stack"><button className="link back" onClick={() => { setOpen(null); reload(); }}>← Boards</button><LocalBoard board={cur} /></div>;
   return (
@@ -20,6 +25,8 @@ export function Boards({ owner, boardId }: { owner: { kind: Exclude<BoardOwner['
         {boards?.map((b) => <button key={b.id} className="card deck board-card" onClick={() => setOpen(b.id)} data-testid="board-card"><span className="board-thumb" aria-hidden /><b>{b.title}</b><small className="muted">{new Date(b.updatedAt).toLocaleDateString()}</small></button>)}
         {boards?.length === 0 && <p className="muted">No boards yet.</p>}
       </div>
+      {editing&&<ContentEditor title="Rename board" initial={{title:editing.title}} fields={[{key:'title',label:'Board title',required:true}]} save={async v=>{await api.board.rename(editing.id,v.title!);reload();}} close={()=>setEditing(null)}/>}
+      <details className="card"><summary>Manage boards</summary>{boards?.map(b=><div className="row" key={b.id}><b>{b.title}</b><button disabled={busy} onClick={()=>setEditing(b)}>Rename</button><button disabled={busy} onClick={()=>void change(()=>api.board.remove(b.id))}>Archive</button><button disabled={busy} onClick={()=>{if(confirm(`Delete board “${b.title}”? Removes the board and drawing history from linked devices. Linked Notes and independent files remain.`))void change(()=>api.board.discard(b.id));}}>Delete</button></div>)}{archived?.map(b=><div className="row" key={b.id}><b>{b.title} · Archived</b><button disabled={busy} onClick={()=>void change(()=>api.board.restore(b.id))}>Restore</button><button disabled={busy} onClick={()=>{if(confirm(`Delete archived board “${b.title}”? Removes its drawing history. Linked content remains.`))void change(()=>api.board.discard(b.id));}}>Delete</button></div>)}</details>{err&&<p className="error" role="alert">{err}</p>}
       <form className="row card" onSubmit={async (e) => { e.preventDefault(); setErr(''); try { const b = await api.board.create(owner, title || 'Board'); setTitle(''); reload(); setOpen(b.id); } catch (x) { setErr(errText(x)); } }}>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="New board" aria-label="Board name" maxLength={120} />
         <button className="primary">New board</button>{err && <span className="error small-text">{err}</span>}

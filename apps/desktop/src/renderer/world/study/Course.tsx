@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import { RESOURCE_KIND_LABEL, RESOURCE_KINDS } from '@classroom/protocol';
 import type { CourseDetail, CourseLink, ResourceKind } from '../../../shared.ts';
+import {ContentEditor} from '../ContentEditor.tsx';
 import { api } from '../../App.tsx';
 import { errText, useLoad } from '../useLoad.ts';
 import { Confidence, day, fromLocal, useStudy, when } from './common.tsx';
@@ -106,7 +107,7 @@ function Topics({ d, run }: { d: CourseDetail; run(f: () => Promise<unknown>): P
             <Confidence state={t.state} label={t.title} onChange={(s) => void run(() => api.study.setConfidence(t.id, s))} />
             <button className="small" aria-label={`Move ${t.title} up`} disabled={i === 0} onClick={() => void run(() => api.study.moveTopic(t.id, i - 1))}>↑</button>
             <button className="small" aria-label={`Move ${t.title} down`} disabled={i === d.topics.length - 1} onClick={() => void run(() => api.study.moveTopic(t.id, i + 1))}>↓</button>
-            <button className="small danger" aria-label={`Remove ${t.title}`} onClick={() => void run(() => api.study.removeTopic(t.id))}>✕</button>
+            <button className="small danger" aria-label={`Remove ${t.title}`} onClick={() => {if(confirm(`Delete topic “${t.title}”? Underlying notes/files remain; topic placements are removed.`))void run(() => api.study.removeTopic(t.id));}}>✕</button>
           </li>
         ))}
       </ol>
@@ -119,13 +120,15 @@ function Topics({ d, run }: { d: CourseDetail; run(f: () => Promise<unknown>): P
 }
 
 function Lectures({ d, run, onPrepare, tapes, onTape }: { d: CourseDetail; run(f: () => Promise<unknown>): Promise<void>; onPrepare(l: CourseDetail['lectures'][number]): void; tapes: CourseDetail['tapes']; onTape(): void }) {
-  const [o, setO] = useState({ title: '', at: '', topicIds: [] as string[] });
+  const [o, setO] = useState({ title: '', at: '', topicIds: [] as string[] }),[editing,setEditing]=useState<CourseDetail['lectures'][number]|null>(null);
   return (
     <>
+      {editing&&<ContentEditor title="Edit lecture" initial={{title:editing.title}} fields={[{key:'title',label:'Lecture title',required:true}]} save={async v=>{await api.study.setLecture(editing.id,{title:v.title!});void run(async()=>{});}} close={()=>setEditing(null)}/>}
       {d.lectures.map((l) => (
         <div key={l.id} className="line" data-testid="lecture">
           <span className="grow"><b>{l.title}</b> <small className="muted">{l.at ? when(l.at) : 'no date'}{l.topicIds.length ? ` · ${l.topicIds.map((t) => d.topics.find((x) => x.id === t)?.title).filter(Boolean).join(', ')}` : ''}{l.sessionId ? ' · linked to a class session' : ''}</small></span>
           {tapes.filter((t) => t.lectureId === l.id).map((t) => <button key={t.id} className="chip chip-btn" onClick={onTape} title={t.title}>📼 Study Tape</button>)}
+          <button className="small" onClick={()=>setEditing(l)}>Rename lecture</button><button className="small danger" onClick={()=>{if(confirm(`Delete lecture “${l.title}”? Course references move to course/topic level; independent tapes and classroom sessions remain.`))void run(()=>api.study.removeLecture(l.id));}}>Delete lecture</button>
           <button className="small ai-link" onClick={() => onPrepare(l)}>Prepare</button>
           <select value={l.status} aria-label={`Status of ${l.title}`} onChange={(e) => void run(() => api.study.setLecture(l.id, { status: e.target.value as 'planned' }))}><option value="planned">Planned</option><option value="held">Held</option><option value="cancelled">Cancelled</option></select>
         </div>

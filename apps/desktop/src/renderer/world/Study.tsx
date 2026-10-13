@@ -1,3 +1,4 @@
+import {Management} from './study/Management.tsx';
 import {TimetablePanel} from './study/Timetable.tsx';
 // Study: Knowledge Campus (your Courses), course spaces, Semester Board, tasks, the Exam Command Center, flashcards,
 // notes and personal history. Everything here is real Study Engine data; nothing is estimated.
@@ -37,6 +38,7 @@ const TABS: [StudyTab, string][] = [['timetable','Timetable'], ['campus', 'Campu
 export function Study({ experience }: { experience: Experience }) {
   const { target, go } = useStudy();
   const tab = target.tab;
+  const [revision,setRevision]=useState(0);
   return (
     <div className="stack">
       <header className="page-head">
@@ -45,6 +47,8 @@ export function Study({ experience }: { experience: Experience }) {
           {TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => go({ tab: t })}>{l}</button>)}
         </div>
       </header>
+      <Management key={tab} tab={tab} onChanged={()=>setRevision(x=>x+1)}/>
+      <div className="stack" key={revision}>
       {tab === 'timetable' && <TimetablePanel/>}
       {tab === 'campus' && (target.courseId ? <CourseSpace id={target.courseId} onBack={() => go({ tab: 'campus' })} /> : <Campus experience={experience} />)}
       {tab === 'board' && <Board />}
@@ -55,6 +59,7 @@ export function Study({ experience }: { experience: Experience }) {
       {tab === 'tapes' && <Tapes tapeId={target.tapeId} at={target.tapeAt} />}
       {tab === 'boards' && <Boards boardId={target.boardId} owner={{ kind: 'personal', id: 'me' }} />}
       {tab === 'history' && <History />}
+      </div>
     </div>
   );
 }

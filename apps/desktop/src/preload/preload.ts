@@ -18,7 +18,7 @@ const api: DesktopApi = {
     notes: inv('notes:mine'), createNote: inv('notes:create'), updateNote: inv('notes:update'), removeNote: inv('notes:remove'), shareNote: inv('notes:share'),
     collections: inv('saved:collections'), savedItems: inv('saved:items'), save: inv('saved:add'), createCollection: inv('saved:collection'),
     moveSaved: inv('saved:move'), shareSaved: inv('saved:share'),
-    diaryDay: inv('diary:day'), writeDiary: inv('diary:write'), diaryRecent: inv('diary:recent'),
+    removeDiary: inv('diary:remove'), removePersonalFile: inv('clan:removePersonalFile'), updateSaved: inv('saved:update'), removeSaved: inv('saved:remove'), renameCollection: inv('saved:renameCollection'), removeCollection: inv('saved:removeCollection'), diaryDay: inv('diary:day'), writeDiary: inv('diary:write'), diaryRecent: inv('diary:recent'),
     remind: inv('reminders:create'), search: inv('search'),
     rename: inv('me:rename'), privacy: inv('privacy:get'), setAiDiary: inv('privacy:aiDiary'),
   } as DesktopApi['clan'],
@@ -39,9 +39,10 @@ const api: DesktopApi = {
     onAdded: (cb) => listen('capture:added', () => cb()),
   } as DesktopApi['capture'],
   study: {
+    archivedCourses: inv('study:archivedCourses'), restoreCourse: inv('study:restoreCourse'), removeCourse: inv('study:removeCourse'), removeTask: inv('tasks:remove'), removeExam: inv('exams:remove'), renameDeck: inv('cards:renameDeck'), removeDeck: inv('cards:removeDeck'), recentSessions: inv('session:recent'), updateSession: inv('session:update'), removeSession: inv('session:remove'), updateReminder: inv('reminders:update'),
     courses: inv('study:courses'), createCourse: inv('study:createCourse'), updateCourse: inv('study:updateCourse'), archiveCourse: inv('study:archiveCourse'), linkClassrooms: inv('study:linkClassrooms'),
     course: inv('study:course'), addTopic: inv('study:addTopic'), renameTopic: inv('study:renameTopic'), moveTopic: inv('study:moveTopic'), removeTopic: inv('study:removeTopic'), setConfidence: inv('study:confidence'),
-    addLecture: inv('study:addLecture'), setLecture: inv('study:setLecture'), link: inv('study:link'), unlink: inv('study:unlink'), classify: inv('study:classify'), importFiles: inv('study:importFiles'), linkable: inv('study:linkable'),
+    addLecture: inv('study:addLecture'), setLecture: inv('study:setLecture'), removeLecture: inv('study:removeLecture'), link: inv('study:link'), unlink: inv('study:unlink'), classify: inv('study:classify'), importFiles: inv('study:importFiles'), linkable: inv('study:linkable'),
     tasks: inv('tasks:list'), createTask: inv('tasks:create'), updateTask: inv('tasks:update'), taskStatus: inv('tasks:status'), checkItem: inv('tasks:check'), addItem: inv('tasks:addItem'), attachToTask: inv('tasks:attach'),
     exams: inv('exams:list'), createExam: inv('exams:create'), updateExam: inv('exams:update'), examStatus: inv('exams:status'), attachToExam: inv('exams:attach'), examCenter: inv('exams:center'),
     remind: inv('reminders:create'), reminderDone: inv('reminders:done'), dismiss: inv('reminders:dismiss'), snooze: inv('reminders:snooze'), removeReminder: inv('reminders:remove'), reminders: inv('reminders:upcoming'),
@@ -84,7 +85,7 @@ const api: DesktopApi = {
     onProgress: (cb) => listen('hosting:progress', cb), onChanged: (cb) => listen('hosting:changed', cb),
   } as DesktopApi['hosting'],
   board: {
-    list: inv('board:list'), create: inv('board:create'), read: inv('board:read'), edit: inv('board:edit'), rename: inv('board:rename'), remove: inv('board:remove'), export: inv('board:export'),
+    archived: inv('board:archived'), restore: inv('board:restore'), discard: inv('board:discard'), list: inv('board:list'), create: inv('board:create'), read: inv('board:read'), edit: inv('board:edit'), rename: inv('board:rename'), remove: inv('board:remove'), export: inv('board:export'),
   } as DesktopApi['board'],
   rec: {
     check: inv('rec:check'), start: inv('rec:start'), chunk: inv('rec:chunk'), stop: inv('rec:stop'), active: inv('rec:active'), mark: inv('rec:mark'), screenshot: inv('rec:screenshot'),

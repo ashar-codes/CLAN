@@ -77,6 +77,8 @@ function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
   if (loadErr) return <div className="stack"><button className="link back" onClick={onBack}>← Exams</button><p className="error">{loadErr}</p></div>;
   if (!c) return null;
   const { exam } = c;
+  if(!c.course)return <section className="card stack"><button onClick={onBack}>← Exams</button><h2>{exam.name}</h2><p>{when(exam.at)} · {exam.location}</p><p>{exam.notes}</p><p className="muted">The linked course is no longer available. Manage this retained exam from the Exams management menu.</p></section>;
+  const course=c.course;
   const ref = (l: Center['notes'][number]) => <div key={l.id} className="line"><span>{l.title}{l.provenance ? <small className="muted"> · shared by {l.provenance.sharedBy ?? 'a member'} in {l.provenance.clan}</small> : null}</span><span className="muted small-text">{l.missing ? 'no longer available' : ''}</span></div>;
   const topicRow = (t: Topic) => <div key={t.id} className="line"><span>{t.title}</span><Confidence state={t.state} label={t.title} onChange={(s) => void run(() => api.study.setConfidence(t.id, s))} /></div>;
   return (
@@ -87,9 +89,10 @@ function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
           <b className="c-num">{exam.status !== 'upcoming' ? '—' : c.countdown.past ? '0' : c.countdown.days >= 1 ? c.countdown.days : c.countdown.label}</b>
           <small>{exam.status !== 'upcoming' ? exam.status : c.countdown.past ? 'started' : c.countdown.days >= 1 ? (c.countdown.days === 1 ? `day ${c.countdown.hours} h` : 'days') : 'left'}</small>
         </span>
-        <div className="grow"><span className="eyebrow">Exam Command Center · {c.course.name}</span><h2 className="title world">{exam.name}</h2><span className="muted">{when(exam.at)}{exam.location ? ` · ${exam.location}` : ''}</span></div>
+        <div className="grow"><span className="eyebrow">Exam Command Center · {course.name}</span><h2 className="title world">{exam.name}</h2><span className="muted">{when(exam.at)}{exam.location ? ` · ${exam.location}` : ''}</span></div>
         {exam.status === 'upcoming' && <button className="ai-link" onClick={() => ai.open({ mode: 'coach', title: `Exam Coach · ${exam.name}`, examId: exam.id })}>Exam Coach</button>}
-        {exam.status === 'upcoming' && <button className="primary" onClick={() => start({ courseId: c.course.id, goal: `Prepare ${exam.name}`, focus: true })}>Start study session</button>}
+        {!!course.archivedAt&&<p className="muted">Course archived or removed; this independent exam remains available.</p>}
+        {exam.status === 'upcoming' && <button disabled={!!course.archivedAt} className="primary" onClick={() => start({ courseId: course.id, goal: `Prepare ${exam.name}`, focus: true })}>Start study session</button>}
       </div>
       {err && <p className="error small-text" role="alert">{err}</p>}
 
@@ -111,7 +114,7 @@ function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
         <section className="card panel-body"><span className="eyebrow">Flashcards</span>
           <b data-testid="cards-due">{c.dueCards} card{c.dueCards === 1 ? '' : 's'} due</b>
           {c.decks.map((d) => <button key={d.id} className="line link-row" onClick={() => go({ tab: 'cards', deckId: d.id })}><span>{d.name}</span><span className="muted c-num">{d.due} due</span></button>)}
-          <button className="small" onClick={() => void run(() => api.study.createDeck({ name: `${exam.name} cards`, courseId: c.course.id, examId: exam.id }))}>New deck for this exam</button>
+          <button className="small" disabled={!!course.archivedAt} onClick={() => void run(() => api.study.createDeck({ name: `${exam.name} cards`, courseId: course.id, examId: exam.id }))}>New deck for this exam</button>
         </section>
         <section className="card panel-body"><span className="eyebrow">Open tasks</span>{c.tasks.map((t) => <div key={t.id} className="line"><span>{t.title}</span><span className="muted small-text">{t.dueAt ? day(t.dueAt) : ''}</span></div>)}{!c.tasks.length && <p className="muted small-text">None.</p>}</section>
         <section className="card panel-body"><span className="eyebrow">Study sessions</span>{c.sessions.map((s) => <div key={s.id} className="line"><span>{s.goal || 'Study session'}</span><span className="muted c-num">{day(s.startedAt!)} · {Math.round((s.endedAt! - s.startedAt!) / 60_000)} min</span></div>)}{!c.sessions.length && <p className="muted small-text">None yet.</p>}
@@ -138,7 +141,7 @@ function CommandCenter({ id, onBack }: { id: string; onBack(): void }) {
 }
 
 function ScopeEditor({ c, run }: { c: Center; run(f: () => Promise<unknown>): Promise<void> }) {
-  const [course] = useLoad(useCallback(() => api.study.course(c.course.id), [c.course.id]));
+  const [course] = useLoad(useCallback(() => c.course&&!c.course.archivedAt?api.study.course(c.course.id):Promise.resolve(null), [c.course?.id,c.course?.archivedAt]));
   const [open, setOpen] = useState(false);
   if (!course?.topics.length) return null;
   const scope = new Set(c.exam.topicIds);

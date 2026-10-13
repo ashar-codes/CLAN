@@ -1,13 +1,14 @@
 // Inbox and Saved on the phone, over core's Capture / Saved / Files modules. Capturing works offline and is always
 // private; an item goes to a Saved collection, a Course or a CLAN only when the student picks that destination.
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, View, Linking } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { parseIntake } from '@classroom/protocol';
-import type { CaptureTarget, InboxItem } from '@clan/core';
+import type { CaptureTarget, InboxItem, SavedItem } from '@clan/core';
 import { phoneClan, me } from '../core/clan';
 import { MAX_INTAKE_BYTES } from '../share/items';
+import {Editor,confirmRemove} from '../ui/Editor';
 import { act, bump, Btn, Card, Choice, Err, Field, H1, Muted, Row, Screen, useC, useData } from '../ui/kit';
 
 
@@ -31,6 +32,8 @@ export async function captureFile(uri: string, name: string, mime: string | unde
 
 export function InboxScreen() {
   const c = useC();
+  const [editing,setEditing]=useState<SavedItem|null>(null),[collectionEdit,setCollectionEdit]=useState<{id:string|null;name:string}|null>(null);
+  const files=useData(()=>phoneClan().files.list(me(),{kind:'personal',ownerId:phoneClan().me}))??[];
   const inbox = useData(() => phoneClan().capture.inbox(me())) ?? [];
   const cols = useData(() => phoneClan().saved.collections(me())) ?? [];
   const [draft, setDraft] = useState(''), [err, setErr] = useState<string | null>(null), [filing, setFiling] = useState<InboxItem | null>(null), [col, setCol] = useState<string | null>(null);
@@ -63,6 +66,9 @@ export function InboxScreen() {
   return (
     <Screen>
       <H1>Inbox</H1>
+      {editing&&<Editor title="Edit saved link" initial={{title:editing.title,note:editing.note}} labels={{title:'Title',note:'Note'}} multiline={['note']} read={()=>{const s=phoneClan().saved.get(me(),editing.id);if(!s)throw Error('This link was deleted; your draft is kept.');return {title:s.title,note:s.note};}} onSave={v=>phoneClan().saved.update(me(),editing.id,v)} onClose={()=>setEditing(null)}/>}
+      {collectionEdit&&<Editor title={collectionEdit.id?'Rename collection':'New collection'} initial={{name:collectionEdit.name}} labels={{name:'Collection name'}} onSave={v=>{if(collectionEdit.id)phoneClan().saved.renameCollection(me(),collectionEdit.id,v.name!);else{const id=phoneClan().saved.createCollection(me(),v.name!);setCol(id);}}} onClose={()=>setCollectionEdit(null)}/>}
+
       <Card title="Capture" tone="warn">
         <Field label="Text or link" value={draft} onChange={setDraft} placeholder="Paste a link or jot a thought" />
         <Row><Btn primary label="Save to Inbox" disabled={!draft.trim()} onPress={() => void add()} /><Btn label="Photo" a11y="Take a photo" onPress={() => void photo(true)} /><Btn label="Gallery" a11y="Pick a photo" onPress={() => void photo(false)} /><Btn label="File" a11y="Pick a file" onPress={() => void file()} /></Row>
@@ -77,16 +83,19 @@ export function InboxScreen() {
           {filing?.id === it.id ? (
             <View style={{ gap: 6 }}>
               <Muted>File into…</Muted>
-              {destinations().filter((d) => d.modules.includes(it.module)).map((d) => <Btn key={d.key} small label={d.label} onPress={() => { setErr(act(() => phoneClan().capture.file(me(), it.id, d.to))); setFiling(null); }} />)}
-              <Row><Btn small label="Done (keep where it is)" onPress={() => { setErr(act(() => phoneClan().capture.file(me(), it.id, { kind: 'done' }))); setFiling(null); }} /><Btn small label="Cancel" onPress={() => setFiling(null)} /></Row>
+              {destinations().filter((d) => d.modules.includes(it.module)).map((d) => <Btn key={d.key} small label={d.label} onPress={() => { const e=act(() => phoneClan().capture.file(me(), it.id, d.to));setErr(e);if(!e)setFiling(null); }} />)}
+              <Row><Btn small label="Done (keep where it is)" onPress={() => { const e=act(() => phoneClan().capture.file(me(), it.id, { kind: 'done' }));setErr(e);if(!e)setFiling(null); }} /><Btn small label="Cancel" onPress={() => setFiling(null)} /></Row>
             </View>
           ) : <Btn small label="File…" a11y={`File ${it.title}`} onPress={() => setFiling(it)} />}
         </Card>
       ))}
       <Card title="Saved">
         <Choice label="Collection" value={col ?? ''} options={cols.map((x) => [x.id, `${x.name} (${x.count})`] as const)} onChange={setCol} />
-        {items.map((s) => <Muted key={s.id}>↗ {s.title} — {s.source}</Muted>)}
+        <Btn label="New collection" onPress={()=>setCollectionEdit({id:null,name:''})}/>
+        {cols.filter(x=>x.id===col&&x.kind==='custom').map(x=><Row key={x.id}><Btn small label="Rename collection" onPress={()=>setCollectionEdit({id:x.id,name:x.name})}/><Btn small danger label="Delete collection" onPress={()=>confirmRemove(x.name,'Saved links move to Inbox; the links themselves remain.',()=>{phoneClan().saved.removeCollection(me(),x.id);setCol(null);},setErr)}/></Row>)}
+        {items.map(s=><Card key={s.id} title={s.title}><Muted>{s.source}</Muted><Row><Btn small label="Open link" onPress={()=>{void Linking.openURL(s.url).catch(e=>setErr(e.message));}}/><Btn small label="Edit saved link" onPress={()=>setEditing(s)}/><Btn small danger label="Delete saved link" a11y={`Delete saved ${s.title}`} onPress={()=>confirmRemove(s.title,'Removes your saved link and its shares on linked devices. The website and independent copies remain.',()=>phoneClan().saved.remove(me(),s.id),setErr)}/></Row><Choice label={`Move ${s.title}`} value={s.collectionId} options={cols.map(x=>[x.id,x.name] as const)} onChange={id=>setErr(act(()=>phoneClan().saved.move(me(),s.id,id)))}/></Card>)}
       </Card>
+      <Card title="Personal files"><Muted small>Files used by a timetable, course, task or exam must be detached there before removal.</Muted>{files.map(f=><Row key={f.refId}><Muted>{f.name}</Muted><Btn small danger label="Delete file" a11y={`Delete file ${f.name}`} onPress={()=>confirmRemove(f.name,'Remove your personal library reference from linked devices. Independently referenced copies remain.',()=>phoneClan().files.remove(me(),f.refId),setErr)}/></Row>)}</Card><Err msg={err}/>
     </Screen>
   );
 }

@@ -25,6 +25,18 @@ export function registerStudy(c: ClanApp) {
   setInterval(() => c.tick(), 60_000).unref();
   c.tick();
 
+  handle('study:removeLecture',(id)=>c.courses.removeLecture(me,Id.parse(id)));
+  handle('study:archivedCourses', () => c.courses.list(me,true));
+  handle('study:restoreCourse', (id) => c.courses.restore(me,Id.parse(id)));
+  handle('study:removeCourse', (id) => c.courses.remove(me,Id.parse(id)));
+  handle('tasks:remove', (id) => c.tasks.remove(me,Id.parse(id)));
+  handle('exams:remove', (id) => c.exams.remove(me,Id.parse(id)));
+  handle('cards:renameDeck', (id,name) => c.flashcards.renameDeck(me,Id.parse(id),z.string().parse(name)));
+  handle('cards:removeDeck', (id) => c.flashcards.removeDeck(me,Id.parse(id)));
+  handle('session:recent', () => c.study.recent(me,{limit:200}));
+  handle('session:update', (id,raw) => c.study.update(me,Id.parse(id),z.object({goal:z.string().optional(),reflection:z.string().optional()}).strict().parse(raw)));
+  handle('session:remove', (id) => c.study.remove(me,Id.parse(id)));
+  handle('reminders:update', (id,raw) => c.reminders.update(me,Id.parse(id),z.object({text:z.string().optional(),dueAt:Ts.optional(),recurrence:z.enum(RECURRENCES).optional()}).strict().parse(raw)));
   // ---- Campus / courses ----
   /** Small campus view models: floors = topics (solid = marked Confident), lit windows = real activity this week, exam flag = upcoming exam within 14 days. */
   handle('study:courses', () => {
@@ -118,7 +130,7 @@ export function registerStudy(c: ClanApp) {
     const links = c.courses.links(me, cid);
     const scope = new Set(prep.exam.topicIds);
     return {
-      ...prep, course: c.courses.mine(me, cid),
+      ...prep, course: c.courses.context(me,cid),
       pastPapers: links.filter((l) => l.kind === 'past_paper'), resources: links.filter((l) => l.module === 'files' && l.kind !== 'past_paper' && (!l.topicId || scope.has(l.topicId))),
       notes: links.filter((l) => l.module === 'notes' && (!l.topicId || scope.has(l.topicId))), saved: links.filter((l) => l.module === 'saved' && (!l.topicId || scope.has(l.topicId))),
       decks: [...c.flashcards.decks(me, { examId: prep.exam.id }), ...c.flashcards.decks(me, { courseId: cid }).filter((d) => !d.examId)],

@@ -13,6 +13,9 @@ export function registerBoards(c: ClanApp) {
   const me = { kind: 'user' as const, userId: c.me };
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
   const owner = (raw: unknown) => { const o = Owner.parse(raw); return o.kind === 'personal' ? { kind: 'personal' as const, id: c.me } : o; };
+  handle('board:archived',(raw)=>c.whiteboard.list(me,owner(raw),true));
+  handle('board:restore',(id)=>c.whiteboard.restore(me,Id.parse(id)));
+  handle('board:discard',(id)=>c.whiteboard.discard(me,Id.parse(id)));
   handle('board:list', (raw) => c.whiteboard.list(me, owner(raw)));
   handle('board:create', (raw, title) => c.whiteboard.create(me, owner(raw), z.string().parse(title)));
   handle('board:read', (id, since) => { const b = c.whiteboard.get(me, Id.parse(id)); if (!b) throw new Error('Board not found.'); return { ...c.whiteboard.read(me, b.id, z.number().int().min(0).parse(since)), title: b.title }; });

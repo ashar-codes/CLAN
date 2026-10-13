@@ -1,3 +1,4 @@
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import { directorySettings } from './people/directory';
 // The phone shell: Home · Study · Inbox · Diary · Me, a bottom bar with large targets, and the CLAN room look
 // (wall, wood, the student's CLANmate). Joining a live CLAN opens the existing pinned-TLS join flow.
@@ -23,7 +24,7 @@ type Tab = 'home' | 'study' | 'people' | 'inbox' | 'diary' | 'me';
 const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study', '✎'], ['people', 'People', '☻'], ['inbox', 'Inbox', '⇣'], ['diary', 'Diary', '❦'], ['me', 'Me', '☺']];
 
 export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEditProfile(): void; intake?: ReactNode }) {
-  const c = useC();
+  const c = useC(),insets=useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false), [hosting, setHosting] = useState(false);
   useEffect(() => onPeopleNotification(() => { setTab('people'); setJoining(false); setDevices(false); setHosting(false); }), []);
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
@@ -45,7 +46,7 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1 }}>{body}</View>
       {!intake && (
-        <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface }}>
+        <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface,paddingBottom:insets.bottom }}>
           {TABS.map(([t, l, ic]) => (
             <Pressable key={t} accessibilityRole="tab" accessibilityLabel={t === 'inbox' && inboxCount ? `${l}, ${inboxCount} items` : t === 'people' && peopleCount ? `${l}, ${peopleCount} new` : l} accessibilityState={{ selected: tab === t }}
               onPress={() => { setTab(t); setJoining(false); setDevices(false); setHosting(false); }} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' }}>
@@ -61,6 +62,9 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
 
 function Home({ onCreate, onJoin, go, onStudy }: { onCreate(): void; onJoin(): void; go(t: Tab): void; onStudy(t: MobileStudyTab): void }) {
   const c = useC();
+  const [clock,setClock]=useState(Date.now());
+  useEffect(()=>{const id=setInterval(()=>setClock(Date.now()),15000),sub=AppState.addEventListener('change',s=>{if(s==='active')setClock(Date.now());});return()=>{clearInterval(id);sub.remove();};},[]);
+  const schedule=useData(()=>phoneClan().timetable.current(me(),clock));
   const name = useData(() => phoneClan().identity.displayName(phoneClan().me)) ?? 'Me';
   const today = useData(() => phoneClan().agenda.today(me())) ?? [];
   const session = useData(() => phoneClan().study.active(me()));
@@ -84,6 +88,7 @@ function Home({ onCreate, onJoin, go, onStudy }: { onCreate(): void; onJoin(): v
           <Text accessible={false} style={{ color, fontSize: 30 }}>{glyph}</Text><Text style={{ color: c.text, fontWeight: '800', fontSize: 16 }}>{title}</Text><Text style={{ color: c.text2, fontSize: 12 }}>{hint}</Text>
         </Pressable>)}
       </View>
+      {schedule&&<Card title={schedule.current.length?'Current class':schedule.status==='holiday'?'Holiday':'No class now'} tone="study">{schedule.current.map((p,i)=><View key={p.period.id}><Text style={{color:c.text,fontWeight:'700'}}>{p.period.subject}</Text><Muted>{p.period.teacher||'Teacher not specified'} · {p.period.room||'Room not specified'} · {p.period.start}–{p.period.end} · {schedule.remainingMinutes[i]} min left</Muted></View>)}{schedule.next&&<Muted>Next: {schedule.next.period.subject} · {schedule.nextInMinutes} min</Muted>}<Btn label="Open timetable" onPress={()=>onStudy('timetable')}/></Card>}
       <LocalClans />
       <Card title="Today" tone="study">
         {today.length === 0 && <Muted>Nothing due today.</Muted>}
@@ -94,7 +99,7 @@ function Home({ onCreate, onJoin, go, onStudy }: { onCreate(): void; onJoin(): v
           </View>
         ))}
       </Card>
-      <Muted small>{linked ? `Synced with ${linked} of your device${linked === 1 ? '' : 's'} when on the same Wi-Fi.` : 'This phone isn’t linked to your computer yet (Me › My Devices).'}</Muted>
+      <Muted small>{linked ? `Synced with ${linked} of your device${linked === 1 ? '' : 's'} when an authenticated local network path is available.` : 'This phone isn’t linked to your computer yet (Me › My Devices).'}</Muted>
     </Screen>
   );
 }

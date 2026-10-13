@@ -71,7 +71,7 @@ export type CourseView = { id: string; name: string; code: string; term: string;
 export type CourseDetail = { course: Course; clanName: string | null; topics: Topic[]; lectures: Lecture[]; links: CourseLink[]; tasks: Task[]; exams: Exam[];
   decks: Deck[]; sessions: StudySession[]; assignments: AssignmentItem[]; reminders: Reminder[]; tapes: Tape[] };
 export type Countdown = ReturnType<typeof countdown>;
-export type ExamCenter = { exam: Exam; course: Course; countdown: Countdown; topics: Topic[]; readiness: ReturnType<typeof readiness>; covered: Topic[]; remaining: Topic[];
+export type ExamCenter = { exam: Exam; course: Course | null; countdown: Countdown; topics: Topic[]; readiness: ReturnType<typeof readiness>; covered: Topic[]; remaining: Topic[];
   pastPapers: CourseLink[]; resources: CourseLink[]; notes: CourseLink[]; saved: CourseLink[]; decks: Deck[]; dueCards: number; tasks: Task[]; sessions: StudySession[]; reminders: Reminder[] };
 export type HistoryRow = { courseId: string | null; course: string; sessions: number; minutes: number; topics: number; reviews: number };
 type LinkModule = 'notes' | 'files' | 'saved';
@@ -81,6 +81,17 @@ export type StudyApi = {
   courses(): Promise<CourseView[]>;
   createCourse(a: { name: string; code?: string; instructor?: string; term?: string; schedule?: string; clanId?: string | null }): Promise<Course>;
   updateCourse(id: string, a: Partial<{ name: string; code: string; instructor: string; term: string; schedule: string; clanId: string | null }>): Promise<Course>;
+  archivedCourses(): Promise<Course[]>;
+  restoreCourse(id: string): Promise<void>;
+  removeCourse(id: string): Promise<void>;
+  removeTask(id: string): Promise<void>;
+  removeExam(id: string): Promise<void>;
+  renameDeck(id: string, name: string): Promise<void>;
+  removeDeck(id: string): Promise<void>;
+  recentSessions(): Promise<StudySession[]>;
+  updateSession(id: string, a: {goal?: string; reflection?: string}): Promise<void>;
+  removeSession(id: string): Promise<void>;
+  updateReminder(id: string, a: {text?: string; dueAt?: number; recurrence?: Recurrence}): Promise<Reminder>;
   archiveCourse(id: string): Promise<void>;
   linkClassrooms(): Promise<number>;
   course(id: string): Promise<CourseDetail>;
@@ -90,6 +101,7 @@ export type StudyApi = {
   removeTopic(id: string): Promise<void>;
   setConfidence(id: string, state: TopicState): Promise<void>;
   addLecture(courseId: string, a: { title: string; at?: number | null; topicIds?: string[] }): Promise<Lecture>;
+  removeLecture(id: string): Promise<void>;
   setLecture(id: string, a: { status?: Lecture['status']; title?: string; at?: number | null }): Promise<void>;
   link(courseId: string, a: { module: LinkModule; entityId: string; topicId?: string | null; lectureId?: string | null; kind?: ResourceKind | null }): Promise<CourseLink>;
   unlink(id: string): Promise<void>;
@@ -164,6 +176,12 @@ export type ClanApi = {
   shareSaved(id: string, clanId: string, on: boolean): Promise<void>;
   diaryDay(day: string): Promise<DiaryEntry | null>;
   writeDiary(a: { day: string; body: string; mood?: string | null }): Promise<DiaryEntry>;
+  removeDiary(day: string): Promise<void>;
+  removePersonalFile(id: string): Promise<void>;
+  updateSaved(id: string, a: {title?: string; note?: string}): Promise<void>;
+  removeSaved(id: string): Promise<void>;
+  renameCollection(id: string, name: string): Promise<void>;
+  removeCollection(id: string): Promise<void>;
   diaryRecent(): Promise<DiaryEntry[]>;
   remind(a: { text: string; dueAt: number; target?: { module: string; id: string } }): Promise<Reminder>;
   search(q: string): Promise<SearchHit[]>;
@@ -253,6 +271,9 @@ export type BoardApi = {
   read(id: string, since: number): Promise<{ ops: WbLogged[]; snapshot: boolean; head: number; title: string }>;
   edit(id: string, ops: WbOp[]): Promise<WbLogged[]>;
   rename(id: string, title: string): Promise<void>;
+  restore(id: string): Promise<void>;
+  discard(id: string): Promise<void>;
+  archived(owner: { kind: Exclude<BoardOwner['kind'], 'clan'>; id: string }): Promise<Board[]>;
   remove(id: string): Promise<void>;
   /** Derived output; returns where it was saved (null = cancelled). */
   export(fmt: 'png' | 'pdf', pngDataUrl: string, title: string): Promise<string | null>;

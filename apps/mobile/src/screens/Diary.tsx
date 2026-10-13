@@ -1,33 +1,15 @@
-// Diary on the phone (core's Diary module). Private: never shared, never searchable, read by AI only with your
-// explicit permission on this device, and synced to your other devices only if you turn that on in My Devices.
-import { useEffect, useState } from 'react';
-import { Text } from 'react-native';
-import { phoneClan, me } from '../core/clan';
-import { act, Btn, Card, Choice, Err, Field, H1, Muted, Screen, useC, useData } from '../ui/kit';
-
-const MOODS = [['calm', 'Calm'], ['happy', 'Happy'], ['proud', 'Proud'], ['tired', 'Tired'], ['anxious', 'Anxious'], ['low', 'Low']] as const;
-const today = () => new Date().toLocaleDateString('en-CA');
-
-export function DiaryScreen() {
-  const c = useC();
-  const entry = useData(() => phoneClan().diary.day(me(), today()));
-  const recent = useData(() => phoneClan().diary.recent(me(), 14)) ?? [];
-  const syncing = useData(() => phoneClan().sync.settings().syncDiary) ?? false;
-  const [body, setBody] = useState(''), [mood, setMood] = useState<string>(''), [err, setErr] = useState<string | null>(null), [saved, setSaved] = useState(false);
-  useEffect(() => { if (entry) { setBody(entry.body); setMood(entry.mood ?? ''); } }, [entry?.id]);
-  return (
-    <Screen>
-      <H1>Diary</H1>
-      <Card title={new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} tone="burgundy">
-        <Choice label="Mood (optional)" value={mood} options={MOODS} onChange={setMood} />
-        <Field label="Today" value={body} onChange={(v) => { setBody(v); setSaved(false); }} multiline placeholder="Only you can read this." />
-        <Btn primary label={saved ? 'Saved' : 'Save'} onPress={() => { const e = act(() => phoneClan().diary.write(me(), { day: today(), body, mood: (mood || undefined) as never })); setErr(e); setSaved(!e); }} />
-        <Err msg={err} />
-        <Muted small>{syncing ? 'Diary syncs to your linked devices (encrypted in transit).' : 'Diary stays on this phone. Syncing it is off (My Devices).'}</Muted>
-      </Card>
-      {recent.filter((e) => e.day !== today()).map((e) => (
-        <Card key={e.id}><Text style={{ color: c.text2, fontWeight: '700' }}>{e.day}{e.mood ? ` · ${e.mood}` : ''}</Text><Text style={{ color: c.text }} numberOfLines={4}>{e.body}</Text></Card>
-      ))}
-    </Screen>
-  );
+// Owner-only Diary. No private body previews outside this screen; sync remains explicit opt-in.
+import {useState} from 'react';
+import {phoneClan,me} from '../core/clan';
+import {act,Btn,Card,DateField,Err,H1,Muted,Row,Screen,useData} from '../ui/kit';
+import {Editor,confirmRemove} from '../ui/Editor';
+const dayKey=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+export function DiaryScreen(){
+ const [day,setDay]=useState(()=>dayKey(new Date())),[editing,setEditing]=useState(false),[error,setError]=useState<string|null>(null);
+ const entry=useData(()=>phoneClan().diary.day(me(),day)),recent=useData(()=>phoneClan().diary.recent(me(),200))??[],syncing=useData(()=>phoneClan().sync.settings().syncDiary)??false;
+ return <Screen><H1>Diary</H1><DateField label="Entry date" time={false} value={new Date(day+'T12:00:00').getTime()} onChange={v=>{if(v!==null){setDay(dayKey(new Date(v)));setError(null);}}}/>
+  <Card title={day} tone="burgundy"><Muted>{entry?'An entry is saved for this date.':'No entry for this date.'}</Muted><Row><Btn primary label={entry?'Edit entry':'Write entry'} onPress={()=>setEditing(true)}/>{entry&&<Btn danger label="Delete entry" onPress={()=>confirmRemove(`Diary ${day}`,syncing?'Deletes this date’s entry on this device and linked devices where Diary sync is enabled. Other dates remain.':'Deletes only this date’s local entry. Diary sync is off.',()=>phoneClan().diary.remove(me(),day),setError)}/>}<Btn label="Today" onPress={()=>setDay(dayKey(new Date()))}/></Row><Err msg={error}/><Muted small>{syncing?'Diary sync is enabled for your linked devices.':'Diary sync is off. Entries stay on this device.'}</Muted></Card>
+  {editing&&<Editor key={day} title={`Diary ${day}`} initial={{body:entry?.body??'',mood:entry?.mood??''}} labels={{body:'Entry',mood:'Mood (optional: calm, happy, proud, tired, anxious, low)'}} multiline={['body']} read={()=>{const e=phoneClan().diary.day(me(),day);return {body:e?.body??'',mood:e?.mood??''};}} onSave={v=>{phoneClan().diary.write(me(),{day,body:v.body!,mood:(v.mood||null) as never});setError(act(()=>{}));}} onClose={()=>setEditing(false)}/>}
+  <H1>Previous entries</H1>{recent.filter(e=>e.day!==day).map(e=><Btn key={e.id} label={e.day} a11y={`Open Diary ${e.day}`} onPress={()=>{setDay(e.day);setError(null);}}/>)}
+ </Screen>;
 }

@@ -1,8 +1,11 @@
 // My Space: the production home. A room made of real objects with real counts; every object is a button with a label,
 // and the same actions exist as quick actions and a conventional "Today" panel (the Minimal experience shows only those).
-import type { KeyboardEvent, ReactNode } from 'react';
+import {useEffect,useState,type KeyboardEvent,type ReactNode} from 'react';
 import { ClanPlace, CLANBeacon, CLANmate, mateFor, type BeaconState } from '@clan/design';
 import type { AgendaItem, HomeView } from '../../shared.ts';
+import {timetableStatus} from '@classroom/protocol';
+import {api} from '../App.tsx';
+import {useLoad} from './useLoad.ts';
 import { openItem, useStudy } from './study/common.tsx';
 import { useRecorder } from './tape/recorder.tsx';
 import type { Experience } from './experience.ts';
@@ -27,6 +30,10 @@ const hhmm = (ts: number | null) => (ts === null ? '' : new Date(ts).toLocaleTim
 export function MySpace({ h, nearby, beacon, experience, go, quick }: {
   h: HomeView; nearby: number; beacon: BeaconState; experience: Experience; go(t: SpaceTarget): void; quick: ReactNode;
 }) {
+  const [timetables]=useLoad(api.timetable.list);
+  const [clock,setClock]=useState(Date.now());
+  useEffect(()=>{const id=setInterval(()=>setClock(Date.now()),15000);const resume=()=>setClock(Date.now());window.addEventListener('focus',resume);return()=>{clearInterval(id);window.removeEventListener('focus',resume);};},[]);
+  const activeTimetable=timetables?.find(t=>t.active&&!t.archived),schedule=activeTimetable?timetableStatus(activeTimetable,clock):null;
   const { notes, saved, courses } = h.library;
   const [avatar] = useAvatar(h.me.name);
   const books = [
@@ -138,6 +145,7 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
         <div className="space-hello"><span className="eyebrow">My Space · {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</span>
           <h1 className="title world">Hi {h.me.name === 'Me' ? 'there' : h.me.name}</h1></div>
         <button onClick={()=>goStudy({tab:'timetable'})}>Timetable · current and next class</button>
+        {schedule&&<section className="card" aria-label="Current class"><b>{schedule.current.length?'Current class':schedule.status==='holiday'?'Holiday':'No class now'}</b>{schedule.current.map((p,i)=><p key={p.period.id}>{p.period.subject} · {p.period.teacher||'Teacher not specified'} · {p.period.room||'Room not specified'} · {p.period.start}–{p.period.end} · {schedule.remainingMinutes[i]} min left</p>)}{schedule.next&&<p>Next: {schedule.next.period.subject} · {schedule.nextInMinutes} min</p>}<button onClick={()=>goStudy({tab:'timetable'})}>Open timetable</button></section>}
         {quick}
         <section className="today-list" aria-label="Today" data-testid="today">
           {h.today.slice(0, 8).map((i) => (

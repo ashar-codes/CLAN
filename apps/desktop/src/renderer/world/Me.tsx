@@ -47,20 +47,17 @@ export function Me({ experience, section }: { experience: Experience; section: '
 }
 
 function Diary({ focus }: { focus: boolean }) {
-  const [entry, setEntry] = useState<{ body: string; mood: string | null }>({ body: '', mood: null });
-  const [recent, reloadRecent] = useLoad<DiaryEntry[]>(api.clan.diaryRecent);
-  const [saved, setSaved] = useState(false);
-  useEffect(() => { api.clan.diaryDay(today()).then((e) => e && setEntry({ body: e.body, mood: e.mood })); }, []);
-  return (
-    <section className="diary-book" aria-label="Diary">
-      <p className="diary-lock">Private · stays on this device · never shared{' '}·{' '}never read by AI unless you allow it</p>
-      <h2 className="diary-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-      <div className="row" role="radiogroup" aria-label="Mood">{MOODS.map((m) => <button key={m} role="radio" aria-checked={entry.mood === m} className={`mood ${entry.mood === m ? 'on' : ''}`} onClick={() => setEntry({ ...entry, mood: m })}>{m}</button>)}</div>
-      <textarea className="diary-text" autoFocus={focus} placeholder="How was today?" value={entry.body} onChange={(e) => { setEntry({ ...entry, body: e.target.value }); setSaved(false); }} aria-label="Diary entry" />
-      <div className="row"><button className="primary" onClick={async () => { await api.clan.writeDiary({ day: today(), ...entry }); setSaved(true); reloadRecent(); }}>Save entry</button>{saved && <span className="muted">Saved</span>}</div>
-      <div className="diary-past">{recent?.filter((e) => e.day !== today()).map((e) => <article key={e.id}><span className="eyebrow">{e.day}{e.mood ? ` · ${e.mood}` : ''}</span><p>{e.body}</p></article>)}</div>
-    </section>
-  );
+  const [day,setDay]=useState(today()),[entry,setEntry]=useState<{body:string;mood:string|null}>({body:'',mood:null}),[original,setOriginal]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+  const [recent,reloadRecent]=useLoad<DiaryEntry[]>(api.clan.diaryRecent);
+  useEffect(()=>{let alive=true;setBusy(true);setError('');api.clan.diaryDay(day).then(e=>{if(alive){const v={body:e?.body??'',mood:e?.mood??null};setEntry(v);setOriginal(JSON.stringify(v));setSaved(false);}}).catch(e=>{if(alive)setError(errText(e));}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;};},[day]);
+  const changeDay=(d:string)=>{if(d&&(!original||JSON.stringify(entry)===original||confirm('Discard unsaved Diary changes?')))setDay(d);};
+  const run=async(f:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setError('');try{await f();reloadRecent();}catch(e){setError(errText(e));}finally{setBusy(false);}};
+  return <section className="diary-book" aria-label="Diary"><p className="diary-lock">Private · never shared with CLAN members · linked-device sync only when you opt in · AI access off by default</p>
+    <label className="row">Entry date<input aria-label="Diary date" type="date" value={day} disabled={busy} onChange={e=>changeDay(e.target.value)}/><button disabled={busy} onClick={()=>changeDay(today())}>Today</button></label><h2 className="diary-date">{day}</h2>
+    <div className="row" role="radiogroup" aria-label="Mood">{MOODS.map(m=><button key={m} disabled={busy} role="radio" aria-checked={entry.mood===m} className={`mood ${entry.mood===m?'on':''}`} onClick={()=>{setEntry({...entry,mood:m});setSaved(false);}}>{m}</button>)}</div>
+    <textarea className="diary-text" autoFocus={focus} disabled={busy} placeholder="Write privately" value={entry.body} onChange={e=>{setEntry({...entry,body:e.target.value});setSaved(false);}} aria-label="Diary entry"/>
+    <div className="row"><button className="primary" disabled={busy} onClick={()=>void run(async()=>{await api.clan.writeDiary({day,...entry});setOriginal(JSON.stringify(entry));setSaved(true);})}>Save entry</button><button disabled={busy||!recent?.some(e=>e.day===day)} onClick={()=>{if(confirm(`Delete Diary entry “${day}”? This removes your entry, including from linked devices when Diary sync is enabled.`))void run(async()=>{await api.clan.removeDiary(day);const empty={body:'',mood:null};setEntry(empty);setOriginal(JSON.stringify(empty));setSaved(false);});}}>Delete entry</button>{saved&&<span role="status">Saved</span>}</div>{error&&<p role="alert" className="error">{error}</p>}
+    <div className="diary-past"><h3>Previous entries</h3>{recent?.filter(e=>e.day!==day).map(e=><button key={e.id} disabled={busy} onClick={()=>changeDay(e.day)}>{e.day}{e.mood?` · ${e.mood}`:''}</button>)}</div></section>;
 }
 
 /** Which conversations may notify you, and whether notices may show message text (off: only who and where). */

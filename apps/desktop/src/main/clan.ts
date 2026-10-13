@@ -17,6 +17,13 @@ export function registerClan(db: Parameters<typeof openClan>[0], storageDir: str
   c.hosting.register(serverCheckpointSection(db, storageDir)); // host-server rows + bytes of a persistent CLAN hand-over
   const me = { kind: 'user' as const, userId: c.me };
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
+  handle('diary:remove',(day)=>c.diary.remove(me,Day.parse(day)));
+  handle('clan:removePersonalFile',(id)=>{const key=Id.parse(id),f=c.files.get(me,key);if(!f||f.scope.kind!=='personal')throw new Error('Personal file not found.');c.files.remove(me,key);});
+  handle('saved:update',(id,raw)=>c.saved.update(me,Id.parse(id),z.object({title:z.string().optional(),note:z.string().optional()}).strict().parse(raw)));
+  handle('saved:remove',(id)=>c.saved.remove(me,Id.parse(id)));
+  handle('saved:renameCollection',(id,name)=>c.saved.renameCollection(me,Id.parse(id),z.string().parse(name)));
+  handle('saved:removeCollection',(id)=>c.saved.removeCollection(me,Id.parse(id)));
+
 
   handle('clan:home', (): HomeView => {
     const now = Date.now();
