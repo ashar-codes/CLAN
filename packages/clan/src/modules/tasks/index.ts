@@ -57,6 +57,7 @@ export class Tasks {
     return this.must(p, id);
   }
   update(p: Principal, id: string, o: Partial<Pick<Task, 'title' | 'description' | 'dueAt' | 'priority'>>) {
+    this.owner(p);
     const t = this.must(p, id);
     this.db.prepare('UPDATE tasks_tasks SET title = ?, description = ?, due_at = ?, priority = ?, updated_at = ? WHERE id = ?')
       .run(z.string().trim().min(1).max(200).parse(o.title ?? t.title), z.string().max(5000).parse(o.description ?? t.description), o.dueAt === undefined ? t.dueAt : o.dueAt, z.enum(['low', 'normal', 'high']).parse(o.priority ?? t.priority), this.now(), id);
@@ -65,18 +66,23 @@ export class Tasks {
   }
   /** TODO → IN_PROGRESS → DONE, or CANCELLED; DONE/CANCELLED can be reopened. */
   setStatus(p: Principal, id: string, status: TaskStatus) {
+    this.owner(p);
     this.must(p, id);
     this.db.prepare('UPDATE tasks_tasks SET status = ?, done_at = ?, updated_at = ? WHERE id = ?').run(z.enum(TASK_STATUSES).parse(status), status === 'done' ? this.now() : null, this.now(), id);
     this.bus.publish(TaskChanged, 'tasks', { taskId: id, ownerId: userOf(p), status });
     return this.must(p, id);
   }
-  check(p: Principal, taskId: string, itemId: string, done: boolean) { this.must(p, taskId); this.db.prepare('UPDATE tasks_checklist SET done = ? WHERE id = ? AND task_id = ?').run(done ? 1 : 0, itemId, taskId); }
+  check(p: Principal, taskId: string, itemId: string, done: boolean) { this.owner(p); this.must(p, taskId); this.db.prepare('UPDATE tasks_checklist SET done = ? WHERE id = ? AND task_id = ?').run(done ? 1 : 0, itemId, taskId); }
   addItem(p: Principal, taskId: string, text: string) {
+    this.owner(p);
     this.must(p, taskId);
     const pos = (this.db.prepare('SELECT coalesce(max(position), -1) + 1 n FROM tasks_checklist WHERE task_id = ?').get(taskId) as { n: number }).n;
     this.db.prepare('INSERT INTO tasks_checklist (id, task_id, text, position) VALUES (?, ?, ?, ?)').run(randomUUID(), taskId, z.string().trim().min(1).max(200).parse(text), pos);
   }
-  attach(p: Principal, taskId: string, module: 'notes' | 'files' | 'saved', entityId: string) { this.must(p, taskId); this.db.prepare('INSERT OR IGNORE INTO tasks_refs (task_id, module, entity_id) VALUES (?, ?, ?)').run(taskId, module, entityId); }
+  attach(p: Principal, taskId: string, module: 'notes' | 'files' | 'saved', entityId: string) { this.owner(p); this.must(p, taskId); this.db.prepare('INSERT OR IGNORE INTO tasks_refs (task_id, module, entity_id) VALUES (?, ?, ?)').run(taskId, module, entityId); }
+
+  hasFileReference(id: string) { return !!this.db.prepare("SELECT 1 FROM tasks_refs WHERE module='files' AND entity_id=? LIMIT 1").get(id); }
+  remove(p: Principal, id: string) { const owner=this.owner(p); this.must(p,id); tx(this.db,()=>{this.db.prepare('DELETE FROM tasks_refs WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_checklist WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_tasks WHERE id = ? AND owner_id = ?').run(id,owner);}); }
 
   /** Open tasks (or all) — by course, or due before a time. Indexed, bounded. */
   list(p: Principal, o: { courseId?: string; open?: boolean; dueBefore?: number; limit?: number } = {}): Task[] {

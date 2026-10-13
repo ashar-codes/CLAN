@@ -37,7 +37,7 @@ export const schema: ModuleSchema = {
     CREATE UNIQUE INDEX courses_links_place ON courses_links(course_id, module, entity_id, coalesce(topic_id, ''), coalesce(lecture_id, ''));
     CREATE INDEX courses_links_course ON courses_links(course_id, module);
     CREATE INDEX courses_links_entity ON courses_links(module, entity_id);
-  `],
+  `, 'ALTER TABLE courses_courses ADD COLUMN deleted_at INTEGER;'],
 };
 
 const ids = { courseId: z.string(), ownerId: z.string() };
@@ -46,7 +46,7 @@ export const TopicCreated = defineEvent('TopicCreated', 1, z.object({ ...ids, to
 export const CourseChanged = defineEvent('CourseChanged', 1, z.object(ids));
 export const TopicConfidenceChanged = defineEvent('TopicConfidenceChanged', 1, z.object({ ...ids, topicId: z.string(), state: z.enum(TOPIC_STATES) }));
 
-export type Course = { id: string; name: string; code: string; instructor: string; term: string; schedule: string; clanId: string | null; createdAt: number; updatedAt: number };
+export type Course = { id: string; name: string; code: string; instructor: string; term: string; schedule: string; clanId: string | null; createdAt: number; updatedAt: number; archivedAt?: number | null };
 export type Topic = { id: string; courseId: string; title: string; position: number; state: TopicState; stateAt: number | null };
 export type Lecture = { id: string; courseId: string; title: string; at: number | null; position: number; status: 'planned' | 'held' | 'cancelled'; sessionId: string | null; topicIds: string[] };
 /** A resolved reference: the item as its own module shows it to this person, or `missing` (deleted / no longer visible). */
@@ -58,8 +58,8 @@ export type CourseLink = {
 };
 
 const Text = (max: number) => z.string().trim().max(max);
-type CRow = { id: string; owner_id: string; name: string; code: string; instructor: string; term: string; schedule: string; clan_id: string | null; created_at: number; updated_at: number };
-const toCourse = (r: CRow): Course => ({ id: r.id, name: r.name, code: r.code, instructor: r.instructor, term: r.term, schedule: r.schedule, clanId: r.clan_id, createdAt: r.created_at, updatedAt: r.updated_at });
+type CRow = { id: string; owner_id: string; name: string; code: string; instructor: string; term: string; schedule: string; clan_id: string | null; created_at: number; updated_at: number; archived_at?: number | null };
+const toCourse = (r: CRow): Course => ({ id: r.id, name: r.name, code: r.code, instructor: r.instructor, term: r.term, schedule: r.schedule, clanId: r.clan_id, createdAt: r.created_at, updatedAt: r.updated_at, archivedAt: r.archived_at ?? null });
 
 export class Courses {
   private db: Db; private bus: EventBus; private m: { clans: Clans; notes: Notes; files: Files; saved: Saved; identity: Identity }; private now: () => number;
@@ -68,30 +68,34 @@ export class Courses {
   /** Personal sync: a course with its topics, lectures and references; newest edit wins (the other is kept for review).
    *  Which CLAN a course is linked to is device-local (linking a device never grants CLAN membership). */
   syncProviders(): SyncProvider[] {
-    return [rowProvider(this.db, { kind: 'course', policy: 'lww', table: 'courses_courses', owner: 'owner_id', exclude: ['clan_id'],
+    const provider = rowProvider(this.db, { kind: 'course', policy: 'lww', table: 'courses_courses', owner: 'owner_id', where: 'deleted_at IS NULL', exclude: ['clan_id'],
       children: [
         { table: 'courses_topics', fk: 'course_id', key: 'id', order: 'position, id', dependents: [{ table: 'courses_lecture_topics', fk: 'topic_id' }] },
         { table: 'courses_lectures', fk: 'course_id', key: 'id', order: 'position, id', dependents: [{ table: 'courses_lecture_topics', fk: 'lecture_id' }] },
         { table: 'courses_lecture_topics', fk: 'lecture_id', via: { table: 'courses_lectures', fk: 'course_id' }, order: 'lecture_id, topic_id' },
         { table: 'courses_links', fk: 'course_id', order: 'id' },
-      ] })];
+      ] });
+    const apply = provider.apply;
+    provider.apply = (owner, id, payload, opts) => { if (payload !== null) return apply(owner,id,payload,opts); const row = this.db.prepare('SELECT owner_id o FROM courses_courses WHERE id = ?').get(id) as {o:string}|undefined; if(row && row.o !== owner) throw Error('That course belongs to someone else.'); if(row) this.markDeleted(id); };
+    return [provider];
   }
 
   private owner(p: Principal) { if (p.kind !== 'user') throw new Error('Only you can change your courses.'); return p.userId; }
   /** The course, if it is this person's. Every operation goes through here (cross-course / cross-user isolation). */
   mine(p: Principal, courseId: string): Course {
-    const r = this.db.prepare('SELECT * FROM courses_courses WHERE id = ? AND owner_id = ? AND archived_at IS NULL').get(courseId, userOf(p)) as CRow | undefined;
+    const r = this.db.prepare('SELECT * FROM courses_courses WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND archived_at IS NULL').get(courseId, userOf(p)) as CRow | undefined;
     if (!r) throw new Error('Course not found.');
     return toCourse(r);
   }
   /** Owner of a course (for modules that attach their own data to it, e.g. a Course board). */
-  ownerOf(courseId: string) { return (this.db.prepare('SELECT owner_id o FROM courses_courses WHERE id = ? AND archived_at IS NULL').get(courseId) as { o: string } | undefined)?.o ?? null; }
+  ownerOf(courseId: string) { return (this.db.prepare('SELECT owner_id o FROM courses_courses WHERE id = ?').get(courseId) as { o: string } | undefined)?.o ?? null; }
   /** Lifecycle retention includes archived personal courses; their file links must keep working. */
+  hasFileReference(id: string) { return !!this.db.prepare("SELECT 1 FROM courses_links l JOIN courses_courses c ON c.id=l.course_id WHERE l.module='files' AND l.entity_id=? AND c.deleted_at IS NULL LIMIT 1").get(id); }
   fileReferences(ownerId: string): string[] {
-    return (this.db.prepare("SELECT DISTINCT l.entity_id id FROM courses_links l JOIN courses_courses c ON c.id = l.course_id WHERE c.owner_id = ? AND l.module = 'files'").all(ownerId) as { id: string }[]).map((r) => r.id);
+    return (this.db.prepare("SELECT DISTINCT l.entity_id id FROM courses_links l JOIN courses_courses c ON c.id = l.course_id WHERE c.owner_id = ? AND c.deleted_at IS NULL AND l.module = 'files'").all(ownerId) as { id: string }[]).map((r) => r.id);
   }
-  list(p: Principal): Course[] {
-    return (this.db.prepare('SELECT * FROM courses_courses WHERE owner_id = ? AND archived_at IS NULL ORDER BY name LIMIT 200').all(userOf(p)) as CRow[]).map(toCourse);
+  list(p: Principal, archived = false): Course[] {
+    return (this.db.prepare(`SELECT * FROM courses_courses WHERE owner_id = ? AND deleted_at IS NULL AND archived_at IS ${archived ? 'NOT NULL' : 'NULL'} ORDER BY name LIMIT 200`).all(userOf(p)) as CRow[]).map(toCourse);
   }
 
   create(p: Principal, o: { name: string; code?: string; instructor?: string; term?: string; schedule?: string; clanId?: string | null }): Course {
@@ -113,14 +117,18 @@ export class Courses {
     this.bus.publish(CourseChanged, 'courses', { courseId: id, ownerId: u });
     return this.mine(p, id);
   }
-  archive(p: Principal, id: string) { this.mine(p, id); this.db.prepare('UPDATE courses_courses SET archived_at = ? WHERE id = ?').run(this.now(), id); this.bus.publish(CourseChanged, 'courses', { courseId: id, ownerId: userOf(p) }); }
+  archive(p: Principal, id: string) { this.owner(p); this.mine(p, id); this.db.prepare('UPDATE courses_courses SET archived_at = ?, updated_at = ? WHERE id = ?').run(this.now(), this.now(), id); this.bus.publish(CourseChanged, 'courses', { courseId: id, ownerId: userOf(p) }); }
+
+  restore(p: Principal, id: string) { const owner=this.owner(p); if(!this.db.prepare('UPDATE courses_courses SET archived_at = NULL, updated_at = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL').run(this.now(),id,owner).changes) throw Error('Archived course not found.'); this.bus.publish(CourseChanged,'courses',{courseId:id,ownerId:owner}); return this.mine(p,id); }
+  remove(p: Principal, id: string) { const owner=this.owner(p); if(!this.db.prepare('SELECT 1 FROM courses_courses WHERE id = ? AND owner_id = ? AND deleted_at IS NULL').get(id,owner)) throw Error('Course not found.'); this.markDeleted(id); this.bus.publish(CourseChanged,'courses',{courseId:id,ownerId:owner}); }
+  private markDeleted(id:string) { tx(this.db,()=>{this.db.prepare('DELETE FROM courses_lecture_topics WHERE lecture_id IN (SELECT id FROM courses_lectures WHERE course_id = ?)').run(id);for(const table of ['courses_links','courses_lectures','courses_topics'])this.db.prepare(`DELETE FROM ${table} WHERE course_id = ?`).run(id);this.db.prepare('UPDATE courses_courses SET deleted_at = ?, archived_at = ?, updated_at = ? WHERE id = ?').run(this.now(),this.now(),this.now(),id);}); }
 
   private assertClassroom(userId: string, clanId: string) {
     const c = this.m.clans.get(clanId);
     if (!c || c.type !== 'CLASSROOM' || !this.m.clans.isActiveMember(clanId, userId)) throw new Error('Only a Classroom you belong to can be linked to a course.');
   }
   /** The person's course linked to a Classroom CLAN, if any. */
-  forClan(p: Principal, clanId: string) { const r = this.db.prepare('SELECT * FROM courses_courses WHERE owner_id = ? AND clan_id = ? AND archived_at IS NULL').get(userOf(p), clanId) as CRow | undefined; return r ? toCourse(r) : null; }
+  forClan(p: Principal, clanId: string) { const r = this.db.prepare('SELECT * FROM courses_courses WHERE owner_id = ? AND clan_id = ? AND deleted_at IS NULL AND archived_at IS NULL').get(userOf(p), clanId) as CRow | undefined; return r ? toCourse(r) : null; }
 
   /**
    * Every CLASSROOM CLAN the person belongs to gets one linked Course (named like the CLAN). Idempotent: the
@@ -151,15 +159,15 @@ export class Courses {
     });
     return this.topics(p, courseId).find((t) => t.id === id)!;
   }
-  renameTopic(p: Principal, topicId: string, title: string) { const t = this.topic(p, topicId); this.db.prepare('UPDATE courses_topics SET title = ? WHERE id = ?').run(Text(160).min(1).parse(title), t.id); this.bus.publish(CourseChanged, 'courses', { courseId: t.courseId, ownerId: userOf(p) }); }
+  renameTopic(p: Principal, topicId: string, title: string) { this.owner(p); const t = this.topic(p, topicId); this.db.prepare('UPDATE courses_topics SET title = ? WHERE id = ?').run(Text(160).min(1).parse(title), t.id); this.bus.publish(CourseChanged, 'courses', { courseId: t.courseId, ownerId: userOf(p) }); }
   /** Moves a topic to `index` (0-based) and renumbers the rest — order is exactly what the student set. */
-  moveTopic(p: Principal, topicId: string, index: number) {
+  moveTopic(p: Principal, topicId: string, index: number) { this.owner(p);
     const t = this.topic(p, topicId);
     const order = this.topics(p, t.courseId).filter((x) => x.id !== t.id);
     order.splice(Math.max(0, Math.min(index, order.length)), 0, t);
     tx(this.db, () => order.forEach((x, i) => this.db.prepare('UPDATE courses_topics SET position = ? WHERE id = ?').run(i, x.id)));
   }
-  removeTopic(p: Principal, topicId: string) {
+  removeTopic(p: Principal, topicId: string) { this.owner(p);
     const t = this.topic(p, topicId);
     tx(this.db, () => {
       this.db.prepare('DELETE FROM courses_lecture_topics WHERE topic_id = ?').run(t.id);
@@ -198,6 +206,7 @@ export class Courses {
     return this.lectures(p, courseId).find((l) => l.id === id)!;
   }
   setLecture(p: Principal, lectureId: string, o: { status?: Lecture['status']; title?: string; at?: number | null }) {
+    this.owner(p);
     const l = this.db.prepare('SELECT l.* FROM courses_lectures l JOIN courses_courses c ON c.id = l.course_id WHERE l.id = ? AND c.owner_id = ?').get(lectureId, userOf(p)) as { id: string; title: string; at: number | null; status: string } | undefined;
     if (!l) throw new Error('Lecture not found.');
     this.db.prepare('UPDATE courses_lectures SET status = ?, title = ?, at = ? WHERE id = ?').run(z.enum(['planned', 'held', 'cancelled']).parse(o.status ?? l.status), Text(160).min(1).parse(o.title ?? l.title), o.at === undefined ? l.at : o.at, l.id);
@@ -217,9 +226,9 @@ export class Courses {
     const row = this.db.prepare('SELECT id FROM courses_links WHERE course_id = ? AND module = ? AND entity_id = ? AND topic_id IS ? AND lecture_id IS ?').get(courseId, o.module, o.entityId, o.topicId ?? null, o.lectureId ?? null) as { id: string };
     return this.links(p, courseId).find((l) => l.id === row.id)!;
   }
-  classify(p: Principal, linkId: string, kind: ResourceKind) { const l = this.linkRow(p, linkId); this.db.prepare("UPDATE courses_links SET kind = ? WHERE id = ? AND module = 'files'").run(z.enum(RESOURCE_KINDS).parse(kind), l.id); }
+  classify(p: Principal, linkId: string, kind: ResourceKind) { this.owner(p); const l = this.linkRow(p, linkId); this.db.prepare("UPDATE courses_links SET kind = ? WHERE id = ? AND module = 'files'").run(z.enum(RESOURCE_KINDS).parse(kind), l.id); }
   /** Removes the reference only — the note, file or saved item itself is untouched. */
-  unlink(p: Principal, linkId: string) { const l = this.linkRow(p, linkId); this.db.prepare('DELETE FROM courses_links WHERE id = ?').run(l.id); }
+  unlink(p: Principal, linkId: string) { this.owner(p); const l = this.linkRow(p, linkId); this.db.prepare('DELETE FROM courses_links WHERE id = ?').run(l.id); }
   private linkRow(p: Principal, id: string) {
     const l = this.db.prepare('SELECT l.id FROM courses_links l JOIN courses_courses c ON c.id = l.course_id WHERE l.id = ? AND c.owner_id = ?').get(id, userOf(p)) as { id: string } | undefined;
     if (!l) throw new Error('Not found.');
@@ -253,7 +262,7 @@ export class Courses {
 
   searchProvider(): SearchProvider {
     const doc = (id: string) => {
-      const c = this.db.prepare('SELECT * FROM courses_courses WHERE id = ? AND archived_at IS NULL').get(id) as CRow | undefined;
+      const c = this.db.prepare('SELECT * FROM courses_courses WHERE id = ? AND deleted_at IS NULL AND archived_at IS NULL').get(id) as CRow | undefined;
       if (!c) return null;
       const topics = (this.db.prepare('SELECT title FROM courses_topics WHERE course_id = ?').all(id) as { title: string }[]).map((t) => t.title);
       const lectures = (this.db.prepare('SELECT title FROM courses_lectures WHERE course_id = ?').all(id) as { title: string }[]).map((t) => t.title);

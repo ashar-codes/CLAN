@@ -262,6 +262,18 @@ export class PersonalSync {
     // concurrent edits
     if (p.policy === 'union') return this.applyRemote(p, fromFp, rec, m, true);
     const local = m.deleted ? null : p.one(owner, rec.id);
+    // Concurrent deletion wins; preserve the edit for explicit recovery instead of silently resurrecting content.
+    // A causally later explicit restore was already handled by rec.history.includes(m.hash) above.
+    if (m.deleted && !rec.deleted) {
+      this.conflict(rec, fromFp, 'preserve', 'Deleted here; an offline edit is retained for explicit recovery.', null, rec.payload, false);
+      tx(this.db, () => this.writeMeta({ ...m, version: this.tick(), history: [...m.history, rec.hash] }));
+      return true;
+    }
+    if (rec.deleted && !m.deleted) {
+      const applied = this.applyRemote(p, fromFp, rec, m, false);
+      if (p.one(owner, rec.id) === null) this.conflict(rec, fromFp, 'preserve', 'Deleted on another device; choose the retained edit only to explicitly restore it.', null, local, false);
+      return applied;
+    }
     if (p.policy === 'lww') {
       const remoteWins = rec.version > m.version;
       this.conflict(rec, fromFp, 'lww', remoteWins ? 'Edited on two devices — the newer edit was kept; the other is here.' : 'Edited on two devices — this device’s newer edit was kept.', remoteWins ? local : rec.payload, remoteWins ? rec.payload : local, true);
@@ -270,12 +282,6 @@ export class PersonalSync {
       return true;
     }
     // preserve: never lose writing
-    if (m.deleted && !rec.deleted) { this.conflict(rec, fromFp, 'preserve', 'Deleted here but edited on another device — restored.', null, rec.payload, true); return this.applyRemote(p, fromFp, rec, m, false); }
-    if (rec.deleted && !m.deleted) {
-      this.conflict(rec, fromFp, 'preserve', 'Deleted on another device but edited here — kept.', local, null, true);
-      tx(this.db, () => this.writeMeta({ ...m, version: this.tick(), history: [...m.history, rec.hash] }));
-      return true;
-    }
     this.conflict(rec, fromFp, 'preserve', 'Edited on two devices while apart. Compare and choose.', local, rec.payload, false);
     return true;
   }

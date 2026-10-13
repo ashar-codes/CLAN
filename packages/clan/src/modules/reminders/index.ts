@@ -56,7 +56,7 @@ export class Reminders {
     return this.get(p, id)!;
   }
   get(p: Principal, id: string) { const r = this.db.prepare('SELECT * FROM reminders_reminders WHERE id = ? AND owner_id = ?').get(id, userOf(p)) as Raw | undefined; return r ? toR(r) : null; }
-  private must(p: Principal, id: string) { const r = this.db.prepare('SELECT * FROM reminders_reminders WHERE id = ? AND owner_id = ?').get(id, userOf(p)) as Raw | undefined; if (!r) throw new Error('Reminder not found.'); return r; }
+  private must(p: Principal, id: string) { if (p.kind !== 'user') throw new Error('Agents cannot change reminders.'); const r = this.db.prepare('SELECT * FROM reminders_reminders WHERE id = ? AND owner_id = ?').get(id, userOf(p)) as Raw | undefined; if (!r) throw new Error('Reminder not found.'); return r; }
 
   /** Done: a one-off closes; a recurring one moves to its next occurrence after now (missed ones are not replayed). */
   done(p: Principal, id: string) { this.advance(this.must(p, id), 'done'); }
@@ -72,6 +72,12 @@ export class Reminders {
     const r = this.must(p, id);
     if (r.done_at) throw new Error('That reminder is closed.');
     this.db.prepare('UPDATE reminders_reminders SET snoozed_until = ?, fired_at = NULL WHERE id = ?').run(z.number().int().min(this.now()).parse(until), r.id);
+  }
+  update(p: Principal, id: string, raw: {text?: string; dueAt?: number; recurrence?: Recurrence}) {
+    const r=this.must(p,id), edit=z.object({text:z.string().trim().min(1).max(300).optional(),dueAt:z.number().int().positive().optional(),recurrence:z.enum(RECURRENCES).optional()}).strict().parse(raw);
+    if(r.done_at!==null) throw new Error('That reminder is closed.');
+    this.db.prepare('UPDATE reminders_reminders SET text=?,due_at=?,anchor_at=?,recurrence=?,snoozed_until=NULL,fired_at=NULL WHERE id=?').run(edit.text??r.text,edit.dueAt??r.due_at,edit.dueAt??r.anchor_at??r.due_at,edit.recurrence??r.recurrence,id);
+    return this.get(p,id)!;
   }
   remove(p: Principal, id: string) { this.must(p, id); this.db.prepare('DELETE FROM reminders_reminders WHERE id = ?').run(id); }
 

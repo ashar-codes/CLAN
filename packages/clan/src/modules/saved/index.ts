@@ -68,11 +68,14 @@ export class Saved {
    *  items in them travel as `builtin:<kind>`. Shares into CLANs stay device-local. */
   syncProviders(): SyncProvider[] {
     const builtin = (owner: string, kind: string) => { this.ensureDefaults(owner); return (this.db.prepare('SELECT id FROM saved_collections WHERE owner_id = ? AND kind = ?').get(owner, kind) as { id: string }).id; };
+    const collection = rowProvider(this.db, { kind: 'saved-collection', policy: 'lww', table: 'saved_collections', owner: 'owner_id', where: "kind = 'custom'", toLocal: (_o,r) => ({...r,kind:'custom'}) });
+    const applyCollection = collection.apply;
+    collection.apply = (owner,id,payload,opts) => { const prior=this.db.prepare('SELECT owner_id,kind FROM saved_collections WHERE id = ?').get(id) as {owner_id:string;kind:string}|undefined;if(prior && (prior.owner_id!==owner || prior.kind!=='custom'))throw Error('That collection is protected.');if(payload===null){if(prior)this.removeCollection({kind:'user',userId:owner},id);return;}return applyCollection(owner,id,payload,opts); };
     return [
-      rowProvider(this.db, { kind: 'saved-collection', policy: 'lww', table: 'saved_collections', owner: 'owner_id', where: "kind = 'custom'", toLocal: (_o, r) => ({ ...r, kind: 'custom' }) }),
+      collection,
       rowProvider(this.db, { kind: 'saved-item', policy: 'lww', table: 'saved_items', owner: 'owner_id',
         toWire: (_o, r) => { const k = (this.db.prepare('SELECT kind FROM saved_collections WHERE id = ?').get(r.collection_id as string) as { kind: string } | undefined)?.kind; return k && k !== 'custom' ? { ...r, collection_id: `builtin:${k}` } : r; },
-        toLocal: (owner, r) => { const c = String(r.collection_id ?? 'builtin:inbox'); return { ...r, collection_id: c.startsWith('builtin:') ? builtin(owner, c.slice(8) === 'watch-later' ? 'watch-later' : 'inbox') : c }; } }),
+        toLocal: (owner, r) => { const c = String(r.collection_id ?? 'builtin:inbox'); if(!c.startsWith('builtin:')) { const prior = this.db.prepare('SELECT owner_id FROM saved_collections WHERE id = ?').get(c) as {owner_id:string}|undefined; if(prior && prior.owner_id !== owner) throw Error('That collection belongs to another owner.'); } return { ...r, collection_id: c.startsWith('builtin:') ? builtin(owner, c.slice(8) === 'watch-later' ? 'watch-later' : 'inbox') : c }; } }),
     ];
   }
 
@@ -102,6 +105,11 @@ export class Saved {
     });
     return this.get(p, id)!;
   }
+  update(p:Principal,id:string,o:{title?:string;note?:string}) { const owner=this.writer(p);const r=this.db.prepare('SELECT title,note FROM saved_items WHERE id = ? AND owner_id = ?').get(id,owner) as {title:string;note:string}|undefined;if(!r)throw Error('Saved item not found.');this.db.prepare('UPDATE saved_items SET title = ?, note = ?, updated_at = ? WHERE id = ? AND owner_id = ?').run(z.string().trim().min(1).max(300).parse(o.title??r.title),z.string().max(5000).parse(o.note??r.note),this.now(),id,owner);this.bus.publish(SavedItemChanged,'saved',{itemId:id}); }
+  remove(p:Principal,id:string) { const owner=this.writer(p);if(!this.db.prepare('SELECT 1 FROM saved_items WHERE id = ? AND owner_id = ?').get(id,owner))throw Error('Saved item not found.');tx(this.db,()=>{this.db.prepare('DELETE FROM saved_shares WHERE item_id = ?').run(id);this.db.prepare('DELETE FROM saved_items WHERE id = ? AND owner_id = ?').run(id,owner);});this.bus.publish(SavedItemChanged,'saved',{itemId:id}); }
+  renameCollection(p:Principal,id:string,name:string) { const owner=this.writer(p);this.ownCollection(owner,id);if(!this.db.prepare("UPDATE saved_collections SET name = ? WHERE id = ? AND owner_id = ? AND kind = 'custom'").run(z.string().trim().min(1).max(80).parse(name),id,owner).changes)throw Error('Built-in collections cannot be renamed.'); }
+  removeCollection(p:Principal,id:string) { const owner=this.writer(p);this.ownCollection(owner,id);const r=this.db.prepare('SELECT kind FROM saved_collections WHERE id = ?').get(id) as {kind:string};if(r.kind!=='custom')throw Error('Built-in collections cannot be deleted.');const inbox=this.inbox(p);tx(this.db,()=>{this.db.prepare('UPDATE saved_items SET collection_id = ?, updated_at = ? WHERE collection_id = ? AND owner_id = ?').run(inbox,this.now(),id,owner);this.db.prepare('DELETE FROM saved_collections WHERE id = ? AND owner_id = ?').run(id,owner);}); }
+
   /** Links still waiting for a title (saved offline). Retried later; never blocks saving. */
   pendingMeta(limit = 20) { return this.db.prepare("SELECT id, url FROM saved_items WHERE meta = 'pending' ORDER BY created_at DESC LIMIT ?").all(limit) as { id: string; url: string }[]; }
   applyMeta(itemId: string, m: { title?: string; previewUrl?: string } | null) {

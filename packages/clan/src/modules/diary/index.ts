@@ -17,7 +17,7 @@ export const schema: ModuleSchema = {
 
 export const MOODS = ['calm', 'tired', 'proud', 'anxious', 'low', 'happy'] as const;
 export type Entry = { id: string; day: string; mood: (typeof MOODS)[number] | null; body: string; updatedAt: number };
-const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(day => { const d = new Date(day+'T12:00:00Z'); return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === day; }, 'Choose a valid calendar date.');
 
 export class Diary {
   private db: Db; private now: () => number;
@@ -28,7 +28,6 @@ export class Diary {
   syncProviders(): SyncProvider[] {
     type R = { id: string; day: string; mood: string | null; body: string; created_at: number; updated_at: number };
     const wire = (r: R) => ({ body: r.body, created_at: r.created_at, day: r.day, mood: r.mood, updated_at: r.updated_at });
-    const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
     const In = z.object({ body: z.string().max(200_000), created_at: z.number().int(), mood: z.string().max(40).nullable(), updated_at: z.number().int() });
     return [{
       kind: 'diary', policy: 'preserve', sensitive: true,
@@ -63,6 +62,8 @@ export class Diary {
   recent(p: Principal, limit = 14): Entry[] {
     return this.db.prepare('SELECT id, day, mood, body, updated_at updatedAt FROM diary_entries WHERE owner_id = ? ORDER BY day DESC LIMIT ?').all(this.owner(p), limit) as Entry[];
   }
+
+  remove(p: Principal, day: string) { const owner = this.owner(p); if (!this.db.prepare('DELETE FROM diary_entries WHERE owner_id = ? AND day = ?').run(owner, Day.parse(day)).changes) throw new Error('Diary entry not found.'); }
 
   /** Registered with the broker as `private`: the broker denies before this runs unless a grant exists. */
   contextProvider(): ContextProvider {

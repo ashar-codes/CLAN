@@ -70,6 +70,7 @@ export class Study {
     return this.get(p, id!)!;
   }
   end(p: Principal, id: string, reflection?: string): StudySession {
+    this.owner(p);
     const s = this.get(p, id);
     if (!s || s.status !== 'active') throw new Error('No running session.');
     const t = this.now();
@@ -79,7 +80,9 @@ export class Study {
     });
     return this.get(p, id)!;
   }
-  cancel(p: Principal, id: string) { const s = this.get(p, id); if (s?.status === 'planned') this.db.prepare("UPDATE study_sessions SET status = 'cancelled' WHERE id = ?").run(id); }
+  cancel(p: Principal, id: string) { this.owner(p); const s = this.get(p, id); if (s?.status === 'planned') this.db.prepare("UPDATE study_sessions SET status = 'cancelled' WHERE id = ?").run(id); }
+  update(p: Principal,id:string,o:{goal?:string;reflection?:string}) { this.owner(p);const s=this.get(p,id);if(!s||s.status==='active')throw Error('End the session before editing its saved record.');this.db.prepare('UPDATE study_sessions SET goal = ?, reflection = ? WHERE id = ?').run(z.string().trim().max(300).parse(o.goal??s.goal),z.string().max(5000).parse(o.reflection??s.reflection??''),id);return this.get(p,id)!; }
+  remove(p: Principal,id:string) { const owner=this.owner(p),s=this.get(p,id);if(!s)throw Error('Study record not found.');if(s.status==='active')throw Error('End the session before deleting its saved record.');this.db.prepare('DELETE FROM study_sessions WHERE id = ? AND owner_id = ?').run(id,owner); }
   planned(p: Principal, from: number, to: number) { return (this.db.prepare(`SELECT ${COLS} FROM study_sessions WHERE owner_id = ? AND status = 'planned' AND planned_at BETWEEN ? AND ? ORDER BY planned_at LIMIT 200`).all(userOf(p), from, to) as unknown as StudySession[]).map(fix); }
   recent(p: Principal, o: { courseId?: string; limit?: number } = {}) {
     return (this.db.prepare(`SELECT ${COLS} FROM study_sessions WHERE owner_id = ? AND status = 'ended' ${o.courseId ? 'AND course_id = ?' : ''} ORDER BY ended_at DESC LIMIT ?`).all(...[userOf(p), ...(o.courseId ? [o.courseId] : []), o.limit ?? 20]) as unknown as StudySession[]).map(fix);

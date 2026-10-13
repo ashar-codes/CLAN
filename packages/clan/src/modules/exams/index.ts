@@ -53,6 +53,7 @@ export class Exams {
     return this.must(p, id);
   }
   update(p: Principal, id: string, o: { name?: string; at?: number; location?: string; notes?: string; topicIds?: string[] }) {
+    this.owner(p);
     const e = this.must(p, id);
     tx(this.db, () => {
       this.db.prepare('UPDATE exams_exams SET name = ?, at = ?, location = ?, notes = ?, updated_at = ? WHERE id = ?')
@@ -71,6 +72,7 @@ export class Exams {
    * when the student passes it (an empty string clears it explicitly). Nothing is ever computed or guessed.
    */
   setStatus(p: Principal, id: string, status: ExamStatus, result?: { grade?: string; total?: string; reflection?: string }) {
+    this.owner(p);
     const e = this.must(p, id), r = result ?? {};
     const pick = (v: string | undefined, cur: string | null, max: number) => (v === undefined ? cur : z.string().trim().max(max).parse(v) || null);
     this.db.prepare('UPDATE exams_exams SET status = ?, grade = ?, total = ?, reflection = ?, updated_at = ? WHERE id = ?')
@@ -78,7 +80,10 @@ export class Exams {
     this.bus.publish(ExamChanged, 'exams', { examId: id, ownerId: userOf(p), status });
     return this.must(p, id);
   }
-  attach(p: Principal, examId: string, module: 'notes' | 'files' | 'saved', entityId: string) { this.must(p, examId); this.db.prepare('INSERT OR IGNORE INTO exams_refs (exam_id, module, entity_id) VALUES (?, ?, ?)').run(examId, module, entityId); }
+  attach(p: Principal, examId: string, module: 'notes' | 'files' | 'saved', entityId: string) { this.owner(p); this.must(p, examId); this.db.prepare('INSERT OR IGNORE INTO exams_refs (exam_id, module, entity_id) VALUES (?, ?, ?)').run(examId, module, entityId); }
+
+  hasFileReference(id: string) { return !!this.db.prepare("SELECT 1 FROM exams_refs WHERE module='files' AND entity_id=? LIMIT 1").get(id); }
+  remove(p: Principal, id: string) { const owner=this.owner(p); this.must(p,id); tx(this.db,()=>{this.db.prepare('DELETE FROM exams_refs WHERE exam_id = ?').run(id);this.db.prepare('DELETE FROM exams_topics WHERE exam_id = ?').run(id);this.db.prepare('DELETE FROM exams_exams WHERE id = ? AND owner_id = ?').run(id,owner);}); }
 
   list(p: Principal, o: { courseId?: string; upcoming?: boolean; from?: number; to?: number } = {}): Exam[] {
     if (p.kind === 'agent' && !p.scopes.includes('exams:read')) return [];

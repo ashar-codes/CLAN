@@ -89,6 +89,12 @@ export function rowProvider(db: Db, s: RowSpec): SyncProvider {
         const rows = list.map((x) => { const f = clean(x as Record<string, unknown>, cc, cex); if (!c.via) f[c.fk] = id; return f; });
         if (c.via) { const parents = new Set((db.prepare(`SELECT id FROM ${c.via.table} WHERE ${c.via.fk} = ?`).all(id) as { id: string }[]).map((r) => r.id)); if (rows.some((r) => !parents.has(r[c.fk] as string))) throw new Error('Child of another record.'); }
         if (c.key) {
+          const ids = rows.map(r => r[c.key!]);
+          if (ids.some(k => typeof k !== 'string' || !okId(k)) || new Set(ids).size !== ids.length) throw new Error('Invalid or duplicate child identity.');
+          for (const row of rows) {
+            const prior = db.prepare(`SELECT ${c.fk} parent FROM ${c.table} WHERE ${c.key} = ?`).get(row[c.key] as string) as {parent:string}|undefined;
+            if (prior && prior.parent !== row[c.fk]) throw new Error('That child belongs to another record.');
+          }
           const keep = new Set(rows.map((r) => r[c.key!] as string));
           const existing = (c.via ? db.prepare(`SELECT ${c.key} k FROM ${c.table} WHERE ${c.fk} IN (SELECT id FROM ${c.via.table} WHERE ${c.via.fk} = ?)`) : db.prepare(`SELECT ${c.key} k FROM ${c.table} WHERE ${c.fk} = ?`)).all(id) as { k: string }[];
           for (const e of existing) if (!keep.has(e.k)) { for (const d of c.dependents ?? []) db.prepare(`DELETE FROM ${d.table} WHERE ${d.fk} = ?`).run(e.k); db.prepare(`DELETE FROM ${c.table} WHERE ${c.key} = ?`).run(e.k); }

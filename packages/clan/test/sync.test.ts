@@ -202,7 +202,7 @@ describe('sync', () => {
     expect(a.app.study.recent(a.me).map((s) => s.goal).sort()).toEqual(['laptop', 'phone']);
   });
 
-  it('deletions are versioned tombstones: no resurrection, and a newer edit beats an older delete', async () => {
+  it('deletions are versioned tombstones: stale and concurrent edits require explicit recovery', async () => {
     const { a, b } = pair();
     const r1 = a.app.reminders.create(a.me, { text: 'Lab', dueAt: clock.t + 1e6 }), r2 = a.app.reminders.create(a.me, { text: 'Quiz', dueAt: clock.t + 1e6 });
     await sync(b, a);
@@ -215,7 +215,15 @@ describe('sync', () => {
     a.app.reminders.remove(a.me, r2.id); a.app.sync.refresh(); clock.t += 100; // the app detects changes on a timer
     b.app.reminders.snooze(b.me, r2.id, clock.t + 5e6); b.app.sync.refresh(); // edited on the phone after the laptop deleted it
     await sync(b, a);
-    expect(a.app.reminders.get(a.me, r2.id)?.text).toBe('Quiz');
+    expect(a.app.reminders.get(a.me, r2.id)).toBeNull();
+    expect(b.app.reminders.get(b.me, r2.id)).toBeNull();
+    expect([...a.app.sync.conflicts(),...b.app.sync.conflicts()].some(c => JSON.stringify(c).includes('Quiz'))).toBe(true);
+    const recovery=b.app.sync.conflicts().find(c=>c.kind==='reminder'&&c.entityId===r2.id);
+    expect(recovery).toBeDefined();
+    b.app.sync.resolve(recovery!.id,'theirs');
+    await sync(b,a);await sync(a,b);
+    expect(a.app.reminders.get(a.me,r2.id)?.text).toBe('Quiz');
+    expect(b.app.reminders.get(b.me,r2.id)?.text).toBe('Quiz');
   });
 
   it('Diary syncs only when turned on; the same day written on both is kept for comparison', async () => {

@@ -78,7 +78,7 @@ export class Files {
       apply: (owner, id, payload) => {
         const cur = this.store.getRef(id);
         if (cur && (cur.module !== 'files' || cur.scope.kind !== 'personal' || cur.scope.ownerId !== owner)) throw new Error('That file belongs to someone else.');
-        if (payload === null) { if (cur) this.store.unref(id); return; }
+        if (payload === null) { if (cur) this.remove({kind:'user',userId:owner}, id); return; }
         const f = In.parse(payload), obj = this.store.bySha(f.sha256);
         if (!obj) return { needs: { sha256: f.sha256, size: f.size, mime: f.mime } }; // bytes first; the engine re-applies after
         if (cur && cur.objectId !== obj.id) this.store.unref(id);
@@ -128,10 +128,15 @@ export class Files {
     return this.store.refsIn(scope, 'files').map((r) => this.view(r, names));
   }
 
+  private referenced: (refId: string) => boolean = () => false;
+  /** Composition supplies references through module APIs, never deletes independently owned content. */
+  guardReferences(f: (refId: string) => boolean) { this.referenced = f; }
   remove(p: Principal, refId: string) {
     const ref = this.store.getRef(refId);
     if (!ref || ref.module !== 'files') return;
+    this.assertWrite(p, ref.scope);
     if (ref.createdBy !== userOf(p) && !(ref.scope.kind === 'clan' && this.clans.members(ref.scope.clanId).some((m) => m.userId === userOf(p) && m.role !== 'member'))) throw new Error('Only the person who added it or a CLAN owner can remove it.');
+    if (this.referenced(refId)) throw new Error('This file is still used by a course, timetable, task or exam. Remove those references first.');
     this.store.unref(refId);
   }
 
