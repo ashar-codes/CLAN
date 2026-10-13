@@ -30,3 +30,5 @@ BTC-2B/C implementation and platform evidence: [direct video/group audio](BTC_2B
 - **BTC-2E — Comprehensive cross-platform UI/content management:** consistent create/edit/delete/archive controls, accessible responsive layouts and fixed chat headers/menus. Preserve verified networking, calls, control consent and private timetable behavior; do not expand into unrelated CLAN Ask.
 - **BTC-2F — Smart Timetable (current):** private offline schedule versions, original images, local optional recognition/manual correction, deterministic current/next class, exceptions, personal sync and optional local reminders.
 - **BTC-2G — Final packages and hardware QA:** complete physical LAN/media/control/timetable/notification matrices, fix failures, freeze one source revision and then generate compatible TEST packages. Current BTC-1 installers remain unchanged.
+
+BTC-2D/F delivered implementation checkpoint: `32667a0`. Combined acceptance remains blocked by intermittent Mac second-member discovery/join and outstanding physical RemoteControl safety gates; see [verification](BTC_2DF_VERIFICATION.md). Do not infer public-release or installer readiness from CI passes.

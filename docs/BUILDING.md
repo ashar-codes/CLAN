@@ -97,3 +97,11 @@ xcodebuild -workspace apps/mobile/ios/CLAN.xcworkspace -scheme CLAN \
 ```
 
 Xcode supplies simulator application-identifier entitlements in the Mach-O; its `FAKETEAMID` is a simulator placeholder, not an Apple Account or physical provisioning team. An empty ordinary `codesign --entitlements` display on this simulator build does not mean the simulated Mach-O entitlement is absent. Native startup and XCTest note/restart persistence passed without SecureStore fallback, Keychain resets or replacement identities. Use the existing `apps/mobile/e2e/ios-smoke-target.rb` only on a disposable generated project to add the native XCTest scheme. Physical iPhones still require a real team and compatible App Group/Hotspot Configuration provisioning; no IPA is produced in BTC-2B+C.
+
+## BTC-2D/F native helpers (2026-10-13)
+
+Before desktop packaging, build `sh native/remote-control/build.sh` on the target Mac or Windows build machine. Windows requires .NET 8 and emits a self-contained adapter; Mac requires Xcode Swift tools and currently ad-hoc signs its development helper. On Mac also run `sh native/timetable-ocr/build.sh` for local Vision. Electron Builder includes the platform helpers and validates their presence. Production identity/notarization must include embedded helpers; no installer is created by these helper commands.
+
+Run `node native/remote-control/test-macos.mjs` only with normal OS permission approval: it creates a disposable Electron target, restricts the helper to that PID, checks known text and verifies input stops. It does not use the installed CLAN profile. Windows compilation does not prove UIPI, DPI or physical input behavior.
+
+The mobile iOS local Vision module autolinks through Expo/CocoaPods. Preserve Xcode-managed simulator signing for SecureStore; use the existing disposable smoke target for Timetable persistence. Physical Apple signing is a separate gate. Android/Windows OCR is unavailable; no recognition dependency is needed for manual schedules.
