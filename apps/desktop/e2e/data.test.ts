@@ -26,8 +26,17 @@ async function launch(userData = tmp(), recovery = false) {
   const args = recovery ? ['-r', join(import.meta.dirname, 'fixtures/accept-recovery-dialog.cjs'), '.'] : ['.'];
   const app = await electron.launch({ args, cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData } });
   apps.push(app);
-  const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
-  return { app, page, userData };
+  try {
+    const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
+    return { app, page, userData };
+  } catch (error) {
+    const diagnostic = await Promise.race([
+      app.evaluate(({ app, BrowserWindow }) => ({ ready: app.isReady(), ownsLock: app.hasSingleInstanceLock(), windows: BrowserWindow.getAllWindows().length, warningPresented: !!(globalThis as { __qaRecoveryWarning?: boolean }).__qaRecoveryWarning })).catch(() => ({ evaluationFailed: true })),
+      new Promise(resolve => setTimeout(() => resolve({ mainUnresponsive: true }), 3000)),
+    ]);
+    console.error('Disposable recovery launch diagnostic', { recovery, exited: app.process().exitCode !== null, diagnostic });
+    throw error;
+  }
 }
 const pickDir = (app: ElectronApplication, dir: string) => app.evaluate(({ dialog }, d) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [d] })) as never; }, dir);
 const saveTo = (app: ElectronApplication, path: string) => app.evaluate(({ dialog }, f) => { dialog.showSaveDialog = (async () => ({ canceled: false, filePath: f })) as never; }, path);

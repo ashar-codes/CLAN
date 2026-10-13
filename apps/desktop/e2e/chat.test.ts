@@ -231,7 +231,11 @@ it('Classroom: sharing permissions update live; approved student files reach the
   await h.page.getByRole('button', { name: 'Approve file', exact: true }).click();
   await a.page.getByTestId('room-table').getByTitle('student-for-review.pdf').waitFor();
   await h.page.getByLabel('Student file sharing').selectOption('teacher');
-  await expect.poll(() => a.page.getByRole('button', { name: 'Attach file' }).count()).toBe(0);
+  try { await expect.poll(() => a.page.getByRole('button', { name: 'Attach file' }).count()).toBe(0); }
+  catch (error) {
+    console.error('Sharing revocation diagnostic', { hostPolicy: await h.page.getByLabel('Student file sharing').inputValue(), memberAttachButtons: await a.page.getByRole('button', { name: 'Attach file' }).count(), memberSecure: await a.page.getByTestId('secure-state').count() });
+    throw error;
+  }
 }, 120_000);
 
 it('verified files: passive text preview, native save dialog, unknown-type export, and tamper rejection', async () => {

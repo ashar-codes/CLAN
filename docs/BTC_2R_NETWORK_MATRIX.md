@@ -4,14 +4,14 @@ Recorded outcomes belong in BTC_2R_VERIFICATION.md; existing BTC-2A real-socket 
 
 | Topology | Available verification / limitation |
 | --- | --- |
-| A/B Mac↔Windows same/bridged LAN | Windows hosted-runner protocol/Electron regressions plus Mac local regressions; simultaneous physical pair NOT TESTED |
-| C/D/E Mac↔Android active/background/locked | Disposable emulator with actual native encrypted authenticated TCP and Mac Node peer; physical Xiaomi NOT TESTED |
+| A/B Mac↔Windows same/bridged LAN | Windows hosted-runner regressions latest join/meeting tests PASS; overall FAIL at recovery and sharing-policy UI; Mac regressions PASS; simultaneous physical pair NOT TESTED |
+| C/D/E Mac↔Android active/background/locked | Disposable emulator with actual native encrypted authenticated TCP and Mac Node peer; two complete emulator runs PASS; physical Xiaomi pairing/delivery/media NOT TESTED |
 | F Windows↔Android | Physical NOT TESTED |
 | G roaming/IP change | Real-socket address replacement/queue tests and emulator network interruption; physical roaming NOT TESTED |
 | H no public internet | Protocol fixtures use only local endpoints; physical disconnected-internet router NOT TESTED |
 | I blocked/isolated | BTC-2A pinned directory/isolation/identity fixtures; no firewall bypass |
 | J/K desktop close/quit | Electron opt-in hidden window and real listener/explicit quit fixture |
-| L Android restriction/restart | Native callback/service build and emulator checks; OEM kill/reboot/force-stop distinctions required |
+| L Android restriction/restart | Native build and emulator force-stop unavailable PASS; autonomous process recreation absent; physical OEM kill/reboot NOT TESTED |
 | M/N late advertisement/multiple peers | Existing bounded OPAQUE/TLS join and simultaneous-dial arbitration regressions |
 | O mixed-version | Source schema/keys preserved; actual old/new native pair NOT TESTED |
 
