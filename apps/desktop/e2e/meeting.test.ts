@@ -38,7 +38,7 @@ async function joinClan(p: Page, name: string, code: string, host: Page) {
   await p.locator('.code-input').fill(code); await p.getByRole('button', { name: 'Join', exact: true }).click();
   try { await host.getByRole('button', { name: 'Approve', exact: true }).click({ timeout: 25_000 }); }
   catch (error) {
-    console.error('Bounded join failure', { fixtureMember: name, approvalButtons: await host.getByRole('button', { name: 'Approve', exact: true }).count(), authenticatedPendingScreen: await p.getByText(/Waiting for .* to let you in/).count(), joinErrors: await p.getByRole('alert').count(), hostWaitingSection: await host.getByRole('heading', { name: /Waiting to join/ }).count() });
+    console.error('Bounded join failure', { fixtureMember: name, approvalButtons: await host.getByRole('button', { name: 'Approve', exact: true }).count(), authenticatedPendingScreen: await p.getByText(/Waiting for .* to let you in/).count(), joinErrors: await p.locator('.error').count(), stillJoining: await p.getByRole('button', { name: 'Joining…', exact: true }).count(), noReachableHint: await p.locator('.error').filter({ hasText: /No classrooms found|Could not reach|No additional reachable/ }).count(), badCode: await p.locator('.error').filter({ hasText: /No CLAN matches/ }).count(), hostWaitingSection: await host.getByRole('heading', { name: /Waiting to join/ }).count() });
     throw error;
   }
   await p.getByTestId('secure-state').waitFor({ timeout: 15_000 });

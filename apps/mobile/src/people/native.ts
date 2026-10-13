@@ -55,7 +55,7 @@ const env: PhoneEnv = {
 let devicesTimer: ReturnType<typeof setInterval> | null = null;
 if (Platform.OS === 'android') PeerLink?.addListener('availabilityTick', (e) => {
   if (!nearby.keepInBackground()) return;
-  if (e.networkChanged) { rt?.reconnect(); nearby.networkChanged(); }
+  if (e.networkChanged) { rt?.reconnect(); nearby.networkChanged(true); }
   void refreshDirectory(); void rt?.tick(); void nearby.cm?.tick(); nearby.advertise();
 });
 let rt: PhonePeople | null = null, starting: Promise<PhonePeople> | null = null, wanted = false;

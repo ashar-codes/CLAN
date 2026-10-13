@@ -70,6 +70,46 @@ describe('people over clan-link/1 (no TLS server, no router needed)', () => {
     await new Promise(r => setTimeout(r, 350)); expect(a.cm.connected(b.key)).toBe(false);
   });
 
+  it('invalidates old interface sessions while resume preserves a healthy link', async () => {
+    const a = await device('InterfaceA'), b = await device('InterfaceB');
+    await a.cm.connect(b.addr(), { expectKey: b.key, invite: b.p.inviteToken() });
+    const conv = a.p.inviteChat(b.key); await a.cm.tick();
+    await wait(() => b.p.conversations().length === 1); b.p.acceptChat(conv); await b.cm.tick();
+    await wait(() => a.p.conversation(conv)?.state === 'active');
+    const old = a.cm.session(b.key)!;
+    a.cm.networkChanged(); expect(a.cm.session(b.key)).toBe(old);
+    const message = a.p.sendText(conv, 'new interface, one delivery');
+    a.cm.networkChanged(true); expect(old.open).toBe(false);
+    await wait(() => a.p.message(message.id)?.state === 'delivered', 3000);
+    expect(a.cm.session(b.key)).not.toBe(old);
+    expect(a.cm.session(b.key)!.peerKey).toBe(b.key);
+    expect(b.p.page(conv).filter(m => m.id === message.id)).toHaveLength(1);
+  });
+
+  it('a native pulse expires an unanswered request and retains its encrypted outbox', async () => {
+    const a = await device('DeadlineA'), b = await device('DeadlineB');
+    const session = await a.cm.connect(b.addr(), { expectKey: b.key, invite: b.p.inviteToken() });
+    await wait(() => a.p.contact(b.key)?.name === 'DeadlineB');
+    // Drop outgoing bytes after authenticating, modeling a blackholed route rather than a refused peer.
+    session.link.send = () => {};
+    a.p.inviteChat(b.key);
+    const pending = session.flush(); await Promise.resolve();
+    session.checkHealth(Date.now() + 20_001); await pending;
+    expect(session.open).toBe(false);
+    expect(a.p.due(Number.MAX_SAFE_INTEGER, 1000).some(d => d.to === b.key)).toBe(true);
+    expect(b.p.conversations()).toHaveLength(0);
+  });
+
+  it('expires a silent socket from a native pulse without waiting for a JS timer', async () => {
+    const a = await device('PulseA'), b = await device('PulseB');
+    const session = await a.cm.connect(b.addr(), { expectKey: b.key, invite: b.p.inviteToken() });
+    await wait(() => a.p.contact(b.key)?.name === 'PulseB');
+    // Advance the health clock only; the actual authenticated socket is closed immediately.
+    session.checkHealth(Date.now() + 45_001);
+    expect(session.open).toBe(false);
+    expect(a.cm.connected(b.key)).toBe(false);
+  });
+
   it('coalesces identical dials and rejects a handshake that completes after shutdown', async () => {
     const a = await device('CoalesceA'), b = await device('CoalesceB');
     const options = { expectKey: b.key, invite: b.p.inviteToken() };

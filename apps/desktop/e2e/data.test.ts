@@ -22,8 +22,9 @@ async function removeReleased(path: string, recursive = false) {
 const tmp = (p = 'clan-data-') => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
 afterAll(async () => { await Promise.all(apps.map((a) => a.close().catch(() => {}))); for (const d of dirs) await removeReleased(d, true); });
 
-async function launch(userData = tmp()) {
-  const app = await electron.launch({ args: ['.'], cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData } });
+async function launch(userData = tmp(), recovery = false) {
+  const args = recovery ? ['-r', join(import.meta.dirname, 'fixtures/accept-recovery-dialog.cjs'), '.'] : ['.'];
+  const app = await electron.launch({ args, cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData } });
   apps.push(app);
   const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
   return { app, page, userData };
@@ -91,8 +92,9 @@ it('export → import, local feedback without private text, and recovery from a 
   const fd = openSync(dbPath, 'r+'), size = statSync(dbPath).size;
   for (let off = 0; off < size; off += 4096) writeSync(fd, Buffer.alloc(512, 0xa5), 0, 512, off);
   closeSync(fd);
-  const a2 = await launch(a.userData);
+  const a2 = await launch(a.userData, true);
   await a2.page.getByRole('button', { name: 'Study', exact: true }).click(); await a2.page.getByRole('tablist', { name: 'Study area' }).getByRole('tab', { name: 'Notes', exact: true }).click();
   await a2.page.getByRole('button', { name: /^Exported note/ }).waitFor({ timeout: 20_000 });
   expect(readdirSync(a.userData).some((n) => n.startsWith('teacher.db.corrupt-'))).toBe(true); // kept, not deleted
+  await expect.poll(() => a2.app.evaluate(() => (globalThis as { __qaRecoveryWarning?: boolean }).__qaRecoveryWarning)).toBe(true);
 });

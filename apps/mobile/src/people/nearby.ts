@@ -153,11 +153,11 @@ class Nearby {
     this.keepAlive();
   }
   /** Native network changes invalidate DNS-SD hints, not authenticated identities or durable queues. */
-  networkChanged() {
+  networkChanged(invalidateSessions = false) {
     if (!PeerLink || !this.running) return;
     this.generation++; this.directoryGeneration++; this.probed.clear(); this.entries.clear();
     try { PeerLink.browse(); } catch { this.status = 'Discovery could not restart. Try a trusted QR or address.'; }
-    this.advertise(true); this.cm?.networkChanged(); void refreshDirectory(true); bump();
+    this.advertise(true); this.cm?.networkChanged(invalidateSessions); void refreshDirectory(true); bump();
   }
   /** Rotated hourly and whenever visibility changes; nothing while Invisible. */
   advertise(force = false) {

@@ -36,10 +36,11 @@ export class LinkSession {
   private readonly files: LinkFiles;
   private readonly hooks: { onLive?(e: PeerEnvelope): void; onChange?(what: string): void; myAddrs(): string[] };
   private seq = 0;
-  private readonly waits = new Map<string, { res(m: Msg): void; rej(e: Error): void; t: ReturnType<typeof setTimeout> }>();
+  private readonly waits = new Map<string, { res(m: Msg): void; rej(e: Error): void; t: ReturnType<typeof setTimeout>; deadline: number }>();
   /** Transfers being written right now, shared by every session: one writer per part file, even across reconnects. */
   private readonly downloads: Set<string>;
   private lastHeard = Date.now();
+  private lastPing = Date.now();
   private readonly pinger: ReturnType<typeof setInterval>;
   private flushing: Promise<void> | null = null;
 
@@ -49,9 +50,16 @@ export class LinkSession {
     this.p = p; this.link = link; this.files = files; this.hooks = hooks; this.peerKey = link.peerKey; this.startedAt = Date.now();
     link.onMessage((m) => { this.lastHeard = Date.now(); void this.handle(m).catch(() => link.close('Peer request failed.')); });
     link.onClose(() => { clearInterval(this.pinger); for (const w of this.waits.values()) { clearTimeout(w.t); w.rej(new Error('The connection closed.')); } this.waits.clear(); });
-    this.pinger = setInterval(() => { if (Date.now() - this.lastHeard > DEAD_MS) link.close('No answer.'); else this.post({ t: 'ping' }); }, PING_MS);
+    this.pinger = setInterval(() => this.checkHealth(), PING_MS);
     (this.pinger as { unref?(): void }).unref?.();
     this.introduce();
+  }
+  /** Native availability pulses also run this: background liveness must not depend on JS timers. */
+  checkHealth(now = Date.now()) {
+    if (!this.open) return;
+    if ([...this.waits.values()].some(w => w.deadline <= now)) { this.link.close('No reply.'); return; }
+    if (now - this.lastHeard > DEAD_MS) { this.link.close('No answer.'); return; }
+    if (now - this.lastPing >= PING_MS) { this.lastPing = now; this.post({ t: 'ping' }); }
   }
   private lastHi = '';
   /** What this person may see of us (it changes when they become a requester or friend) and where we listen. */
@@ -64,8 +72,8 @@ export class LinkSession {
   private ask(m: Msg): Promise<Msg> {
     const id = `${++this.seq}`;
     return new Promise((res, rej) => {
-      const t = setTimeout(() => { this.waits.delete(id); rej(new Error('No reply.')); }, REPLY_MS);
-      this.waits.set(id, { res, rej, t });
+      const t = setTimeout(() => this.link.close('No reply.'), REPLY_MS);
+      this.waits.set(id, { res, rej, t, deadline: Date.now() + REPLY_MS });
       try { this.post({ ...m, id }); } catch (e) { clearTimeout(t); this.waits.delete(id); rej(e as Error); }
     });
   }
@@ -293,7 +301,7 @@ export class ConnectionManager {
   async tick() {
     if (this.stopped) return;
     const now = Date.now();
-    for (const [key, s] of this.sessions) if (s.open) { if (this.p.isBlocked(key)) s.link.close('blocked'); else void s.flush(); }
+    for (const [key, s] of this.sessions) if (s.open) { if (this.p.isBlocked(key)) s.link.close('blocked'); else { s.checkHealth(now); if (s.open) void s.flush(); } }
     const availableFriends = this.idleAvailable() ? this.p.contacts('friends').slice(0, 100).map(c => c.key) : [];
     const keys = new Set([...this.p.due(Number.MAX_SAFE_INTEGER, 1000).map((d) => d.to), ...this.p.pendingDownloads().map((t) => t.peerKey), ...availableFriends]);
     for (const key of keys) {
@@ -314,7 +322,7 @@ export class ConnectionManager {
       })().finally(() => this.dialing.delete(key));
     }
   }
-  networkChanged() { if (this.stopped) return; this.working.clear(); for (const [key, value] of this.state) { this.state.set(key, { ...value, retryAt: 0 }); this.p.wake(key); } void this.tick(); }
+  networkChanged(invalidateSessions = false) { if (this.stopped) return; if (invalidateSessions) for (const s of this.sessions.values()) s.link.close('Network changed.'); this.working.clear(); for (const [key, value] of this.state) { this.state.set(key, { ...value, retryAt: 0 }); this.p.wake(key); } void this.tick(); }
   stop() { this.stopped = true; if (this.timer) clearInterval(this.timer); for (const s of this.sessions.values()) s.link.close('stopped'); this.sessions.clear(); for (const key of this.state.keys()) this.set(key, 'offline'); }
 }
 
