@@ -36,7 +36,7 @@ jobs:
       - run: pnpm build:desktop
       - name: Build unsigned TEST NSIS installer
         working-directory: apps/desktop
-        run: pnpm exec electron-builder --config electron-builder.btc2r.yml --win nsis --x64 --publish never -c.extraMetadata.clanSourceCommit=$env:CLAN_SOURCE_SHA
+        run: node scripts/package-btc2r.mjs win
       - name: Install and launch on disposable runner
         shell: pwsh
         run: |
