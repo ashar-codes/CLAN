@@ -43,3 +43,7 @@ Windows diagnostic CI 38441379549: recovery relaunch process remains alive but i
 ## Confirmed locked-database misclassification
 
 A disposable actual SQLite exclusive lock returns ERR_SQLITE_ERROR/errcode 5. The existing integrity helper catches every error as corruption; on Mac, openDbSafely then renamed the locked database and opened a fresh database without its original proof table. This is a reproduced data-safety defect, independent of the unproven Windows startup cause. Recovery must distinguish confirmed corruption (SQLite base codes 11/26 or failed quick_check) from lock, permission and I/O errors; uncertain failures must leave the database and backups untouched.
+
+## E2E cleanup ownership failure
+
+Overlapping a targeted Mac data fixture with the full Mac regression caused the target's global cleanup to terminate the full run's People apps. Cleanup previously checked only executable/project cwd, so distinct active runners were indistinguishable. Two People tests failed with Target page/context/browser closed during that cleanup. This is a fixture ownership defect and an avoidable execution mistake, not a People delivery result. Cleanup now requires live process ancestry under its own runner as well as the existing executable/cwd checks; uncertain reparented processes are retained. Two adversarial ownership tests pass. Full suites run serially; the failed 43 PASS/2 FAIL/2 existing skips remains recorded. Installed CLAN TEST was not matched or changed.
