@@ -194,7 +194,13 @@ it('chat scroll stays put while reading, jumps to latest, and preserves the visi
   await log(again.page).getByText('arrived while reading').waitFor();
   expect(await log(again.page).getByTestId('chat-message').count()).toBe(50);
   await log(again.page).evaluate((el) => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
+  // A narrow native window can place this panel below the room. Bring the page
+  // into view before measuring; clicking Load earlier must not be our first page scroll.
+  await again.page.getByRole('button', { name: 'Load earlier messages' }).scrollIntoViewIfNeeded();
   const anchor = log(again.page).getByTestId('chat-message').first();
+  const box = (await anchor.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(await again.page.evaluate(() => innerHeight));
   const label = await anchor.getAttribute('aria-label'), y = (await anchor.boundingBox())!.y;
   await again.page.getByRole('button', { name: 'Load earlier messages' }).click();
   await expect.poll(() => log(again.page).getByTestId('chat-message').count()).toBe(59);
