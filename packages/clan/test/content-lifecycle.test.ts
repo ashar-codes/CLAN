@@ -49,3 +49,15 @@ it('recording references protect library files; active tapes/read agents cannot 
  const task=app.tasks.create(me,{title:'Task'}),foreign=app.notes.create(user('other'),{title:'Private',body:'Keep'});expect(()=>app.tasks.attach(me,task.id,'notes',foreign.id)).toThrow(/not allowed/);
  }finally{db.close();}
 });
+
+it('removed card text and tape timelines disappear from personal search',()=>{
+ const {app,db,storageDir}=setup(),me=user(app.me);try{
+ const deck=app.flashcards.createDeck(me,{name:'Deck'}),card=app.flashcards.addCard(me,deck.id,{front:'Privatecardword',back:'Answer'});
+ expect(app.search.query(me,'Privatecardword').some(h=>h.module==='flashcards'&&h.entityId===deck.id)).toBe(true);
+ app.flashcards.removeCard(me,card.id);expect(app.search.query(me,'Privatecardword')).toEqual([]);
+ const tape=app.recordings.start(me,{title:'Privatetapeword',source:'screen',partPath:storageDir+'/disposable.part'});
+ app.recordings.mark(me,tape.id,{kind:'note',atMs:0,text:'Privatetimelineword'});app.recordings.fail(me,tape.id,'Disposable fixture');
+ expect(app.search.query(me,'Privatetimelineword').some(h=>h.module==='recordings')).toBe(true);
+ app.recordings.remove(me,tape.id);expect(app.search.query(me,'Privatetimelineword')).toEqual([]);expect(app.search.query(me,'Privatetapeword')).toEqual([]);
+ }finally{db.close();}
+});

@@ -111,7 +111,7 @@ export class Flashcards {
     const c = this.card(p, id); if (!c) throw new Error('Card not found.');
     this.db.prepare('UPDATE flashcards_cards SET front = ?, back = ?, note = ?, updated_at = ? WHERE id = ?').run(z.string().trim().min(1).max(2000).parse(o.front ?? c.front), z.string().trim().min(1).max(4000).parse(o.back ?? c.back), z.string().max(2000).parse(o.note ?? c.note), this.now(), id);
   }
-  removeCard(p: Principal, id: string) { this.owner(p); if (!this.card(p, id)) throw new Error('Card not found.'); tx(this.db, () => { this.db.prepare('DELETE FROM flashcards_reviews WHERE card_id = ?').run(id); this.db.prepare('DELETE FROM flashcards_cards WHERE id = ?').run(id); }); }
+  removeCard(p: Principal, id: string) { this.owner(p); const card=this.card(p,id); if (!card) throw new Error('Card not found.'); tx(this.db, () => { this.db.prepare('DELETE FROM flashcards_reviews WHERE card_id = ?').run(id); this.db.prepare('DELETE FROM flashcards_cards WHERE id = ?').run(id);this.bus.publish(DeckChanged,'flashcards',{deckId:card.deckId,ownerId:userOf(p)}); }); }
   card(p: Principal, id: string) { const r = this.db.prepare('SELECT c.* FROM flashcards_cards c JOIN flashcards_decks d ON d.id = c.deck_id WHERE c.id = ? AND d.owner_id = ?').get(id, userOf(p)) as CRaw | undefined; return r ? toCard(r) : null; }
   /** The review queue: only cards due now, oldest due first, bounded — never the whole deck. */
   queue(p: Principal, deckId: string, limit = 50): Card[] {

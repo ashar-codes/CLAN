@@ -148,7 +148,7 @@ export class Recordings {
     const r = this.must(p, id);
     if(r.status==='recording')throw new Error('Stop the recording before deleting it.');
     const refs = [r.ref_id, ...(this.db.prepare('SELECT ref_id r FROM rec_events WHERE tape_id = ? AND ref_id IS NOT NULL').all(id) as { r: string }[]).map((x) => x.r)].filter(Boolean) as string[];
-    tx(this.db, () => { this.db.prepare('DELETE FROM rec_events WHERE tape_id = ?').run(id); this.db.prepare('DELETE FROM rec_tapes WHERE id = ?').run(id); });
+    tx(this.db, () => { this.db.prepare('DELETE FROM rec_events WHERE tape_id = ?').run(id); this.db.prepare('DELETE FROM rec_tapes WHERE id = ?').run(id);this.bus.publish(TapeChanged,'recordings',{tapeId:id,ownerId:userOf(p)}); });
     return refs;
   }
   /** Text the AI Context layer may use (timeline only; no transcript exists yet). */

@@ -87,7 +87,8 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const people = new People(db, bus, store, now, local);
   search.register(recordings.searchProvider());
   // timeline entries are their own search documents (so a hit opens the tape at that moment)
-  bus.subscribe('search.recordings.events', TapeChanged, (e) => { search.forget('recordings', `${e.payload.tapeId}:`); for (const k of recordings.eventKeys(e.payload.tapeId)) search.reindex('recordings', k); }, { persistent: true });
+  const reindexTapeEvents = (id: string) => { search.forget('recordings', `${id}:`); for (const k of recordings.eventKeys(id)) search.reindex('recordings', k); };
+  bus.subscribe('search.recordings.events', TapeChanged, (e) => reindexTapeEvents(e.payload.tapeId), { persistent: true });
   const context = new ContextBroker(permissions);
   for (const p of [notes.contextProvider(), saved.contextProvider(), diary.contextProvider()]) context.register(p);
   // CLAN Intelligence: reads through module APIs only; writes only via accepted proposals.
@@ -98,7 +99,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   sync.register(profileProvider(identity));
   for (const p of [notifications, timetable, courses, notes, saved, capture, diary, tasks, reminders, exams, flashcards, study, whiteboard, files, recordings, people].flatMap((m) => m.syncProviders())) sync.register(p);
   const SEARCH: Record<string, string> = { note: 'notes', 'saved-item': 'saved', course: 'courses', task: 'tasks', exam: 'exams', deck: 'flashcards', tape: 'recordings' };
-  sync.onApplied((kind, id) => { if (SEARCH[kind]) search.reindex(SEARCH[kind], id); });
+  sync.onApplied((kind, id) => { if (SEARCH[kind]) search.reindex(SEARCH[kind], id); if(kind==='tape') reindexTapeEvents(id); });
 
   // Persistent hosting checkpoint sections owned by CLAN modules (the host server adds its own section).
   for (const p of [clans.checkpointProvider(), chat.checkpointProvider(), whiteboard.checkpointProvider(), files.checkpointProvider()]) hosting.register(p);

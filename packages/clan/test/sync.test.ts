@@ -361,3 +361,14 @@ describe('files', () => {
 
 it('timetable and original image sync over signed personal transport; selection stays local and deletion persists',async()=>{const {a,b}=pair();try{const image=join(tmp(),'timetable.png');writeFileSync(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGZkAAAAASUVORK5CYII=','base64'));const file=await a.app.files.add(a.me,image,'Timetable.png',{kind:'personal',ownerId:a.app.me},'image/png');const t=a.app.timetable.save(a.me,TimetableDraft.parse({name:'Offline semester',imageId:file.refId}));a.app.timetable.activate(a.me,t.id);await sync(b,a);expect(b.app.timetable.get(b.me,t.id).imageId).toBe(file.refId);expect(b.app.timetable.current(b.me)).toBeNull();expect(b.app.files.get(b.me,file.refId)?.sha256).toBe(file.sha256);a.app.timetable.remove(a.me,t.id);await sync(b,a);expect(()=>b.app.timetable.get(b.me,t.id)).toThrow();await sync(a,b);expect(()=>a.app.timetable.get(a.me,t.id)).toThrow();expect(b.app.files.get(b.me,file.refId)).not.toBeNull();}finally{a.db.close();b.db.close();}});
 it('offline timetable edits create a reviewable Keep Both conflict, never silently overwrite',async()=>{const {a,b}=pair();try{const t=a.app.timetable.save(a.me,TimetableDraft.parse({name:'Semester'}));await sync(b,a);a.app.timetable.save(a.me,TimetableDraft.parse({name:'Laptop revision'}),t.id);b.app.timetable.save(b.me,TimetableDraft.parse({name:'Phone revision'}),t.id);await sync(b,a);const c=b.app.sync.conflicts().find(c=>c.kind==='timetable');expect(c).toBeDefined();b.app.sync.resolve(c!.id,'both');expect(b.app.timetable.list(b.me).map(t=>t.name)).toContain('Phone revision');expect(b.app.timetable.list(b.me).some(t=>t.name.includes('Laptop revision'))).toBe(true);await sync(a,b);expect(a.app.timetable.list(a.me)).toHaveLength(2);}finally{a.db.close();b.db.close();}});
+
+it('signed tape and flashcard sync removes deleted text from peer search',async()=>{
+ const {a,b}=pair();try{
+ const tape=a.app.recordings.start(a.me,{title:'Synctapeword',source:'screen',partPath:join(tmp(),'disposable.part')}),event=a.app.recordings.mark(a.me,tape.id,{kind:'note',atMs:0,text:'Synctimelineword'});a.app.recordings.fail(a.me,tape.id,'Disposable fixture');
+ await sync(b,a);expect(b.app.search.query(b.me,'Synctimelineword').some(h=>h.module==='recordings')).toBe(true);
+ a.app.recordings.removeEvent(a.me,event.id);await sync(b,a);expect(b.app.search.query(b.me,'Synctimelineword')).toEqual([]);
+ a.app.recordings.remove(a.me,tape.id);await sync(b,a);expect(b.app.search.query(b.me,'Synctapeword')).toEqual([]);
+ const deck=a.app.flashcards.createDeck(a.me,{name:'Deck'}),card=a.app.flashcards.addCard(a.me,deck.id,{front:'Synccardword',back:'Answer'});await sync(b,a);expect(b.app.search.query(b.me,'Synccardword').length).toBe(1);
+ a.app.flashcards.removeCard(a.me,card.id);await sync(b,a);expect(b.app.search.query(b.me,'Synccardword')).toEqual([]);
+ }finally{a.db.close();b.db.close();}
+});
