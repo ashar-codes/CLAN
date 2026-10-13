@@ -175,11 +175,20 @@ async function resumableUpload<S extends { uploadId: string; offset: number; sta
     o.onProgress?.(st.offset, size);
     let sent = st.offset;
     try {
-      const body = createReadStream(o.path, { start: st.offset }).pipe(new Transform({ transform(c, _e, cb) { sent += c.length; o.onProgress?.(sent, size); cb(null, c); } }));
-      const res = await t.fetch(`${o.url}${o.base}/${st.uploadId}`, {
-        method: 'PUT', body: Readable.toWeb(body) as never, duplex: 'half', signal: o.signal,
-        headers: { authorization: `Bearer ${o.token}`, 'content-type': UPLOAD_CONTENT_TYPE, 'upload-offset': String(st.offset) },
-      } as RequestInit);
+      const source = createReadStream(o.path, { start: st.offset });
+      // Undici accepts an async iterable directly. Avoid Node's toWeb adapter enqueueing
+      // into an already-cancelled controller after a connection drop (observed on Windows).
+      const body = (async function* () {
+        try { for await (const chunk of source) { sent += chunk.length; o.onProgress?.(sent, size); yield chunk; } }
+        finally { source.destroy(); }
+      })();
+      let res: Response;
+      try {
+        res = await t.fetch(`${o.url}${o.base}/${st.uploadId}`, {
+          method: 'PUT', body: body as never, duplex: 'half', signal: o.signal,
+          headers: { authorization: `Bearer ${o.token}`, 'content-type': UPLOAD_CONTENT_TYPE, 'upload-offset': String(st.offset) },
+        } as RequestInit);
+      } finally { source.destroy(); }
       const b = await res.json().catch(() => ({}));
       if (res.ok) { st = b; continue; }
       if (res.status === 409 && b.code === 'offset_mismatch') { st = { ...st, offset: b.offset }; continue; }

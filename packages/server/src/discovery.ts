@@ -1,4 +1,5 @@
 import { Bonjour } from 'bonjour-service';
+import { candidateInterfaces } from './netinfo.ts';
 import { lanUrls, SERVICE_TYPE, type Advertisement } from '@classroom/protocol';
 
 export type DiscoveredClassroom = { sid: string; title: string; url: string; type: string; alt?: string[]; discoverySource?: 'directory' };
@@ -36,28 +37,39 @@ export function advertise(o: { host: string; port: number; sid: string; title: s
 }
 
 /** Browse for classrooms. Calls onChange with the full current list whenever it changes. Returns stop. */
-export function browse(onChange: (list: DiscoveredClassroom[]) => void): () => void {
-  const bonjour = new Bonjour({}, (e: Error) => console.warn('[mdns]', e.message));
-  const found = new Map<string, DiscoveredClassroom>();
-  const browser = bonjour.find({ type: SERVICE_TYPE });
-  dlog('browse start');
-  const emit = () => onChange([...found.values()]);
-  const up = (s: (typeof browser.services)[number]) => {
-    const txt = (s.txt ?? {}) as Partial<Advertisement>;
-    const [url, ...alt] = lanUrls(s.port, s.addresses ?? [], [txt.a, s.referer?.address]);
-    if (!txt.sid || !url || txt.v !== '1') return;
-    dlog('browse up', { sid: txt.sid, url, alt, port: s.port });
-    found.set(txt.sid, { sid: txt.sid, title: String(txt.title ?? 'CLAN'), type: /^[A-Z_]{3,20}$/.test(String(txt.type)) ? String(txt.type) : 'CLASSROOM', url, alt });
-    emit();
-  };
-  browser.on('up', up);
-  browser.on('srv-update', up);
-  browser.on('txt-update', up);
-  browser.on('down', (s) => {
-    const sid = (s.txt as Partial<Advertisement> | undefined)?.sid;
-    if (sid && found.delete(sid)) emit();
+export function browse(onChange: (list: DiscoveredClassroom[]) => void, interfaces = candidateInterfaces().map(i => i.address)): () => void {
+  // multicast-dns otherwise sends Windows queries through the OS default adapter,
+  // which can be a VPN/virtual interface even while advertisements arrive on Wi-Fi.
+  // Select bounded real LAN interfaces explicitly; discovery remains an untrusted hint.
+  const addresses = [...new Set(interfaces)].slice(0, 8);
+  const sources = (addresses.length ? addresses : [undefined]).map(address => {
+    const bonjour = new Bonjour({ bind: '0.0.0.0', ...(address ? { interface: address } : {}) } as object, (e: Error) => console.warn('[mdns]', e.message));
+    const found = new Map<string, DiscoveredClassroom>();
+    const browser = bonjour.find({ type: SERVICE_TYPE });
+    return { bonjour, found, browser };
   });
-  // Re-query periodically: phones and laptops drop multicast packets on busy classroom Wi-Fi.
-  const t = setInterval(() => { browser.expire(); browser.update(); }, 3000);
-  return () => { clearInterval(t); browser.stop(); bonjour.destroy(); };
+  const emit = () => {
+    const merged = new Map<string, DiscoveredClassroom>();
+    for (const source of sources) for (const [id, item] of source.found) {
+      const previous = merged.get(id);
+      const urls = [...new Set([...(previous ? [previous.url, ...(previous.alt ?? [])] : []), item.url, ...(item.alt ?? [])])].slice(0, 8);
+      merged.set(id, { ...item, url: urls[0]!, alt: urls.slice(1) });
+    }
+    onChange([...merged.values()]);
+  };
+  for (const { browser, found } of sources) {
+    const up = (s: (typeof browser.services)[number]) => {
+      const txt = (s.txt ?? {}) as Partial<Advertisement>;
+      const [url, ...alt] = lanUrls(s.port, s.addresses ?? [], [txt.a, s.referer?.address]);
+      if (!txt.sid || !url || txt.v !== '1') return;
+      dlog('browse up', { sid: txt.sid, url, alt, port: s.port });
+      found.set(txt.sid, { sid: txt.sid, title: String(txt.title ?? 'CLAN'), type: /^[A-Z_]{3,20}$/.test(String(txt.type)) ? String(txt.type) : 'CLASSROOM', url, alt });
+      emit();
+    };
+    browser.on('up', up); browser.on('srv-update', up); browser.on('txt-update', up);
+    browser.on('down', s => { const sid = (s.txt as Partial<Advertisement> | undefined)?.sid; if (sid && found.delete(sid)) emit(); });
+  }
+  dlog('browse start', { interfaces: addresses.length });
+  const t = setInterval(() => { for (const { browser } of sources) { browser.expire(); browser.update(); } }, 3000);
+  return () => { clearInterval(t); for (const { browser, bonjour } of sources) { browser.stop(); bonjour.destroy(); } };
 }

@@ -75,9 +75,10 @@ def main():
     ui.adb('shell','cmd','connectivity','airplane-mode','enable'); time.sleep(4)
     queued=api('/message',{'text':'BTC2R queued across network loss'})
     time.sleep(2); assert not any(m['id']==queued['id'] and m['state'] in ('delivered','read') for m in api('/state')['messages'])
-    ui.adb('shell','cmd','connectivity','airplane-mode','disable')
+    returned=time.monotonic(); ui.adb('shell','cmd','connectivity','airplane-mode','disable')
     ui.until(lambda:any(m['id']==queued['id'] and m['state'] in ('delivered','read') for m in api('/state')['messages']),'background network-return receipt',secs=45)
-    print('PASS background network return and queued delivery',flush=True)
+    assert sum(m['id']==queued['id'] for m in api('/state')['messages'])==1
+    print('PASS background network return and queued delivery',round(time.monotonic()-returned,2),'s',flush=True)
     ui.adb('shell','am','force-stop',ui.PKG); time.sleep(2)
     ui.until(lambda:not api('/state')['connected'],'force-stop unavailable',secs=15)
     assert 'PeerLinkService' not in ui.adb('shell','dumpsys','activity','services',ui.PKG).decode()
