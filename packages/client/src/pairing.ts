@@ -214,7 +214,9 @@ export async function pairAndJoin(o: {
         }
         await new Promise(r => setTimeout(r, 100));
       }
-      throw new TransferError('none_found', 'No additional reachable CLAN was discovered. Use the host address or QR fallback.');
+      const noHint=new TransferError('none_found', 'No additional reachable CLAN was discovered. Use the host address or QR fallback.');
+      if(!errors.length)errors.push(noHint);
+      throw noHint;
     })());
   }
   try {

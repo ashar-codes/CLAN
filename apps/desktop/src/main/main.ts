@@ -148,7 +148,7 @@ function registerIpc() {
     }
     // Nearby Direct hosts over BLE are tried alongside LAN hosts; the code (OPAQUE) decides which one is ours.
     let ble: Awaited<ReturnType<DesktopDirect['bleCarriers']>> | null = manual ? [] : null;
-    const t0 = Date.now();
+    const t0 = Date.now(), joinStarted=performance.now();
     dlog('join: discovery', { known: candidates.length, ble: !manual });
     const bleP = manual ? Promise.resolve([]) : direct.bleCarriers().then((c) => { dlog('join: ble scan', { hosts: c.length, ms: Date.now() - t0 }); return (ble = c); });
     // Multicast discovery can take several seconds on busy Wi-Fi: wait up to 10 s, unless BLE already found a host.
@@ -156,8 +156,10 @@ function registerIpc() {
     dlog('join: candidates', { lan: candidates.length, ms: Date.now() - t0 });
     const carriers = candidates.length ? await Promise.race([bleP, new Promise<[]>((r) => setTimeout(() => r([]), 500))]) : await bleP;
     await opaque.ready;
+    // Keep negative join feedback inside the existing 10s UI budget: reserve 1s for IPC/render/poll scheduling.
+    // Discovery still waits up to 10s if initially empty; fresh-hint search shares that budget rather than adding it.
     const r = await pairAndJoin({
-      candidates, candidatesNow: manual ? undefined : () => discovered, discoveryWindowMs: Math.max(0, 10000-(Date.now()-t0)), code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName }, device: trust.device(),
+      candidates, candidatesNow: manual ? undefined : () => discovered, discoveryWindowMs: Math.max(0, 9000-(performance.now()-joinStarted)), code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName }, device: trust.device(),
       opaque: opaque.client, transportFor: (b) => pinnedTransport(b), carriers, associate: direct.associator(),
     }).catch((e) => { logError('join', (e as { cause?: unknown }).cause ?? e); throw joinError(e); });
     trust.remember({ sessionId: r.classroom.sessionId, clanId: r.classroom.clanId ?? r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });

@@ -18,3 +18,7 @@ it('unknown advertisements cannot grant access; bounded window ends without a me
  await expect(pairAndJoin({candidates:[old],candidatesNow:()=>[old,old],discoveryWindowMs:300,code:'482915',profile:profile(),device:device(),opaque:opaque.client,plainFetch:async(u,i)=>{if(String(u).endsWith('/api/pair/start'))starts++;return fetch(u,i);},transportFor:pinnedTransport})).rejects.toMatchObject({code:'bad_code'});
  expect(starts).toBe(1);expect(wrong.classroom.roster()).toHaveLength(0);
 });
+
+it('an empty bounded discovery produces no-host feedback rather than a fabricated wrong-code result',async()=>{
+ await opaque.ready;const started=performance.now();await expect(pairAndJoin({candidates:[],candidatesNow:()=>[],discoveryWindowMs:200,code:'482915',profile:profile(),device:device(),opaque:opaque.client,transportFor:pinnedTransport})).rejects.toMatchObject({code:'none_found'});expect(performance.now()-started).toBeLessThan(1000);
+});
