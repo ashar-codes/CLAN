@@ -83,3 +83,17 @@ Use Node 24 and the frozen pnpm lockfile. `pnpm build:desktop`, then in apps/des
 Android: `pnpm build:android` is the ordinary build; for the isolated standalone debug-signed TEST variant run apps/mobile/scripts/android-qa.sh with Node 24, JDK 17 and SDK 36. When rebuilding after changes in workspace packages, force Gradle's JS bundling task (or use --rerun-tasks) so the embedded bundle cannot remain stale. Do not use the beta key without verified secure backup. The .qa APK installs beside the beta and cannot update a differently signed package.
 
 iOS: apps/mobile/scripts/ios-build.sh uses a separate build directory and ad-hoc simulator signing for Keychain access. --device-compile only compiles the device SDK without provisioning. An iPhone installation requires signing both CLAN and CLANShare, a supported Team, the configured App Group and Hotspot Configuration capability. A simulator .app is not an IPA. Read Installable Files/Documentation/IPHONE_XCODE_INSTALL.md in the local delivery for the two-device workflow. Never clear a production identity or remove entitlements to force a signed build.
+
+
+## BTC-2B+C simulator Keychain repair (2026-10-13)
+
+`CODE_SIGNING_ALLOWED=NO` produced the BTC-2A SecureStore `-34018` startup failure. Use Xcode-managed **simulator** signing in a separate disposable build directory:
+
+```sh
+xcodebuild -workspace apps/mobile/ios/CLAN.xcworkspace -scheme CLAN \
+  -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath ios-derived ONLY_ACTIVE_ARCH=YES ARCHS=arm64 \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -jobs 2 build
+```
+
+Xcode supplies simulator application-identifier entitlements in the Mach-O; its `FAKETEAMID` is a simulator placeholder, not an Apple Account or physical provisioning team. An empty ordinary `codesign --entitlements` display on this simulator build does not mean the simulated Mach-O entitlement is absent. Native startup and XCTest note/restart persistence passed without SecureStore fallback, Keychain resets or replacement identities. Use the existing `apps/mobile/e2e/ios-smoke-target.rb` only on a disposable generated project to add the native XCTest scheme. Physical iPhones still require a real team and compatible App Group/Hotspot Configuration provisioning; no IPA is produced in BTC-2B+C.

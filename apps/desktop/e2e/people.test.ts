@@ -115,7 +115,7 @@ it('permanent chat: delivery, read receipts, file with consent and verification,
 
 it('audio call: ringing, answer, encrypted audio flows both ways, hang up is logged', async () => {
   const chatA = A.page.getByRole('region', { name: 'Chat with Bilal Ahmed' });
-  await chatA.getByRole('button', { name: 'Call' }).click();
+  await chatA.getByRole('button', { name: 'Call', exact: true }).click();
   const ring = B.page.getByRole('alertdialog', { name: /Incoming call: Aisha Khan/ });
   await ring.getByRole('button', { name: 'Answer' }).click({ timeout: 20_000 });
   const panelA = A.page.locator('.call-panel'), panelB = B.page.locator('.call-panel');
@@ -129,8 +129,37 @@ it('audio call: ringing, answer, encrypted audio flows both ways, hang up is log
   await chatA.getByText(/^Call · \d+:\d\d/).waitFor({ timeout: 10_000 });
 }, 120_000);
 
+it('video call: real decoded frames and audio, camera toggles, upgrade, hangup releases tracks',async()=>{
+  const chat=A.page.getByRole('region',{name:'Chat with Bilal Ahmed'});
+  await chat.getByRole('button',{name:'Video call',exact:true}).click();
+  await B.page.getByRole('alertdialog',{name:/Incoming call:/}).getByRole('button',{name:'Answer'}).click();
+  const pa=A.page.locator('.call-panel'),pb=B.page.locator('.call-panel');
+  await expect.poll(async()=>Number(await pa.getAttribute('data-video-rx')),{timeout:20000}).toBeGreaterThan(1000);
+  await expect.poll(async()=>Number(await pb.getAttribute('data-video-rx')),{timeout:20000}).toBeGreaterThan(1000);
+  for(const p of [A.page,B.page]){
+    await p.bringToFront();
+    const counts=await p.getByLabel('Remote video',{exact:true}).evaluate(async(node)=>{const v=node as HTMLVideoElement;let frames=0;const end=Date.now()+2000;while(Date.now()<end){await new Promise<void>(resolve=>{const timeout=setTimeout(resolve,500);v.requestVideoFrameCallback(()=>{clearTimeout(timeout);frames++;resolve();});});}return {frames,width:v.videoWidth,height:v.videoHeight};});
+    expect(counts.frames).toBeGreaterThan(10);expect(counts.width).toBeGreaterThan(0);
+  }
+  await pa.getByRole('button',{name:'Camera off',exact:true}).click();await pa.getByRole('button',{name:'Camera on',exact:true}).waitFor();
+  await pa.getByRole('button',{name:'Camera on',exact:true}).click();await pa.getByRole('button',{name:'Camera off',exact:true}).waitFor();
+  await pa.getByRole('button',{name:'Hang up'}).click();await pb.getByText(/Call ended/).waitFor();
+  expect(await pa.getByLabel('Local video',{exact:true}).evaluate(v=>(v as HTMLVideoElement).srcObject)).toBeNull();
+},90000);
+
+it('audio-only calls upgrade to video with explicit camera consent and keep the original call',async()=>{
+  await A.page.getByRole('region',{name:'Chat with Bilal Ahmed'}).getByRole('button',{name:'Call',exact:true}).click();
+  await B.page.getByRole('alertdialog',{name:/Incoming call:/}).getByRole('button',{name:'Answer'}).click();
+  const a=A.page.locator('.call-panel'),b=B.page.locator('.call-panel');await a.getByRole('button',{name:'Camera on',exact:true}).waitFor();
+  await a.getByRole('button',{name:'Camera on',exact:true}).click();await expect.poll(async()=>Number(await b.getAttribute('data-video-rx')),{timeout:15000}).toBeGreaterThan(1000);
+  await b.getByRole('button',{name:'Camera on',exact:true}).click();await expect.poll(async()=>Number(await a.getAttribute('data-video-rx')),{timeout:15000}).toBeGreaterThan(1000);
+  await a.getByRole('button',{name:'Camera off',exact:true}).click();await expect.poll(()=>a.getAttribute('data-phase')).toBe('connected');
+  await a.getByRole('button',{name:'Hang up'}).click();await b.getByText(/Call ended/).waitFor();
+},60000);
+
 it('temporary chat terms need acceptance; queued messages reach a restarted app; history survives restart', async () => {
   const chatA = A.page.getByRole('region', { name: 'Chat with Bilal Ahmed' });
+  await chatA.getByRole('button', { name: 'Chat options', exact: true }).click();
   await chatA.getByRole('button', { name: 'Change terms…' }).click();
   await chatA.getByLabel(/Temporary — messages and files disappear after 1 hour/).check();
   await chatA.getByRole('button', { name: 'Send invitation' }).click();
@@ -160,6 +189,7 @@ it('temporary chat terms need acceptance; queued messages reach a restarted app;
   await chatA.locator('.msg', { hasText: 'Sent while you were away' }).getByText(/Delivered|Read/).waitFor({ timeout: 20_000 });
 
   // clearing is local and says so
+  await chatB2.getByRole('button', { name: 'Chat options', exact: true }).click();
   await chatB2.getByRole('button', { name: 'Clear history' }).click();
   await chatB2.getByText(/Aisha Khan keeps their own copy/).waitFor();
   await chatB2.getByRole('alertdialog').getByRole('button', { name: 'Clear history' }).click();

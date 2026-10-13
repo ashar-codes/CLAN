@@ -414,6 +414,8 @@ export type DesktopApi = {
   mediaPermission(): Promise<{ platform: string; screen: string; audio: boolean; testCapture: boolean }>;
   mediaSources(): Promise<{ id: string; kind: 'screen' | 'window'; name: string; thumbnail: string }[]>;
   mediaChoose(id: string, audio: boolean): Promise<void>;
+  meetingNotice(c:{url:string;token:string;sessionId:string}, id:string):Promise<void>;
+  meetingRequest(c: {url:string;token:string;sessionId:string}, path:string, body?:unknown): Promise<unknown>;
   mediaToken(c: { url: string; token: string; sessionId: string }): Promise<{ token: string }>;
   stopClassroom(): Promise<void>;
   discover(onList: (list: DiscoveredClassroom[]) => void): () => void;

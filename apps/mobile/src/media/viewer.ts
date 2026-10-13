@@ -1,7 +1,8 @@
 // Watching a presentation on the phone: the subscribe side of MediaTransport over the host's LiveKit SFU (same as the
 // desktop viewer). LiveKit's signalling (binary protobuf over WebSocket) is carried by the native PINNED socket to the
 // host's /media route — the platform WebSocket can't pin the per-CLAN CA and is never used for it. Media itself is
-// WebRTC (DTLS-SRTP) straight to the host. Phones only view; they never publish (tokens are subscribe-only anyway).
+// WebRTC (DTLS-SRTP) straight to the host. Presentation viewers receive subscribe-only tokens; meetings reuse this
+// pinned adapter with separate, authorized microphone/camera grants.
 import { registerGlobals } from '@livekit/react-native';
 import { ConnectionQuality, Room, RoomEvent, Track, VideoQuality, type RemoteTrackPublication, type RemoteVideoTrack } from 'livekit-client';
 import type { WebSocketLike } from '@classroom/client';
@@ -9,7 +10,8 @@ import type { PinnedNativeTransport } from '../native';
 
 let globalsReady = false;
 const RNWebSocket = globalThis.WebSocket;
-const pinned = new Map<string, PinnedNativeTransport>(); // "host:port" of a CLAN → its pinned transport
+const pinned = new Map<string, PinnedNativeTransport>();
+const references=new Map<string,{transport:PinnedNativeTransport;count:number}>(); // "host:port" of a CLAN → its pinned transport
 
 /** A W3C-WebSocket façade over the pinned native socket, used only for registered CLAN origins. */
 class PinnedWebSocket {
@@ -53,13 +55,18 @@ function install() {
   globalsReady = true;
 }
 
+export function registerPinnedMedia(url:string,transport:PinnedNativeTransport) {
+  install();const host=new URL(url).host;const old=references.get(host);if(old && old.transport!==transport)throw Error('An active media connection uses different host trust.');const entry=old ?? {transport,count:0};entry.count++;references.set(host,entry);pinned.set(host,transport);let released=false;
+  return()=>{if(released)return;released=true;if(--entry.count===0){references.delete(host);pinned.delete(host);}};
+}
+
 export type ScreenState = { track: RemoteVideoTrack | null; presenter: string | null; state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected'; quality: 'good' | 'fair' | 'poor' | 'unknown' };
 
 /** Joins the CLAN's media room as a viewer. `onChange` fires on every screen / connection / quality change. */
 export async function watch(c: { url: string; token: string; transport: PinnedNativeTransport }, onChange: (s: ScreenState) => void) {
-  install();
-  const origin = c.url.replace(/^https/, 'wss'), host = new URL(c.url).host;
-  pinned.set(host, c.transport);
+  const release=registerPinnedMedia(c.url,c.transport);
+  try {
+  const origin = c.url.replace(/^https/, 'wss');
   const r = await c.transport.fetch(`${c.url}/api/media/token`, { method: 'POST', headers: { authorization: `Bearer ${c.token}`, 'content-type': 'application/json' }, body: '{}' });
   if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { message?: string }).message ?? 'Screen sharing is not available on this host.');
   const { token } = (await r.json()) as { token: string };
@@ -81,6 +88,7 @@ export async function watch(c: { url: string; token: string; transport: PinnedNa
   return {
     /** Small view → low layer; fullscreen → the sharp layer (text on slides). */
     setFullscreen(on: boolean) { const pub = [...room.remoteParticipants.values()].flatMap((p) => [...p.trackPublications.values()]).find((t) => t.source === Track.Source.ScreenShare) as RemoteTrackPublication | undefined; pub?.setVideoQuality(on ? VideoQuality.HIGH : VideoQuality.LOW); },
-    stop: async () => { await room.disconnect(); pinned.delete(host); },
+    stop: async () => { try{await room.disconnect();}finally{release();} },
   };
+  }catch(e){release();throw e;}
 }

@@ -104,6 +104,8 @@ const api: DesktopApi = {
   mediaPermission: () => ipcRenderer.invoke('media:permission'),
   mediaSources: () => ipcRenderer.invoke('media:sources'),
   mediaChoose: (id, audio) => ipcRenderer.invoke('media:choose', id, audio),
+  meetingNotice:(c,id)=>ipcRenderer.invoke('meetings:notice',c,id),
+  meetingRequest: (c,path,body) => ipcRenderer.invoke('meetings:request',c,path,body),
   mediaToken: (c) => ipcRenderer.invoke('media:token', c),
   discover(onList) {
     const h = (_e: unknown, list: Parameters<typeof onList>[0]) => onList(list);

@@ -1,15 +1,17 @@
 // The shared call state machine (desktop + phone): ringing, answer, connected on both sides, busy, decline, denied
 // microphone, and signals for another call or from another person being ignored.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { CallEngine, type PeerLike } from '../src/call-engine.ts';
 
+const engines:CallEngine[]=[];afterEach(()=>engines.splice(0).forEach(e=>e.hangup()));
 type Ev = Record<string, ((e: object) => void)[]>;
 class FakePeer implements PeerLike {
   iceGatheringState = 'complete'; connectionState = 'new'; localDescription: { type: string; sdp: string } | null = null; remote = false; ev: Ev = {};
   private cb: (p: FakePeer) => void;
   constructor(cb: (p: FakePeer) => void) { this.cb = cb; }
   addTrack() { return undefined; }
+  addTransceiver() { return {sender:{replaceTrack:async()=>{}}}; }
   async createOffer() { return { type: 'offer', sdp: `offer-${randomUUID()}` }; }
   async createAnswer() { return { type: 'answer', sdp: `answer-${randomUUID()}` }; }
   async setLocalDescription(d?: unknown) { this.localDescription = d as never; this.check(); }
@@ -27,17 +29,38 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 function pair(o: { micB?: 'denied' } = {}) {
   const peers: FakePeer[] = [];
   const connectAll = () => { const live = peers.filter((p) => p.connectionState !== 'closed'); if (live.length === 2 && live.every((p) => p.remote && p.localDescription)) live.forEach((p) => p.set('connected')); };
+  const captureScope={};
   const mk = (me: string, other: () => CallEngine, mic?: 'denied') => new CallEngine({
-    createPeer: () => { const p = new FakePeer(connectAll); peers.push(p); return p; },
+    captureScope,createPeer: () => { const p = new FakePeer(connectAll); peers.push(p); return p; },
     microphone: async () => { if (mic === 'denied') throw new Error('Microphone access was denied.'); return stream(); },
     signal: async (_k, body) => { queueMicrotask(() => other().onSignal(me, body as never)); return true; },
     log: () => {}, nameOf: async (k) => k.toUpperCase(), uuid: () => randomUUID(),
   });
   const a: CallEngine = mk('a', () => b), b: CallEngine = mk('b', () => a, o.micB);
-  return { a, b };
+  engines.push(a,b);return { a, b };
 }
 
 describe('call engine', () => {
+  it('stops a microphone granted after hangup without resurrecting the call', async () => {
+    let resolve!:(s:ReturnType<typeof stream>)=>void;
+    const stop=(()=>{let n=0;return {track:{enabled:true,stop:()=>{n++;}},count:()=>n};})();
+    const engine=new CallEngine({createPeer:()=>{throw Error('Must not create a cancelled peer');}, microphone:()=>new Promise(r=>{resolve=r;}),signal:async()=>true,log:()=>{},nameOf:async()=>null,uuid:randomUUID});
+    const pending=engine.start('b','B');engine.hangup();resolve({getTracks:()=>[stop.track],getAudioTracks:()=>[stop.track]});await pending;
+    expect(stop.count()).toBe(1);expect(engine.active).toBe(false);expect(engine.call?.phase).toBe('ended');
+  });
+  it('stops late camera capture after hangup and ignores old peer track events', async () => {
+    let resolve!:(s:ReturnType<typeof stream>)=>void;let stopped=0,attached=0;
+    const peer=new FakePeer(()=>{});peer.addTransceiver=()=>({sender:{replaceTrack:async()=>{attached++;}}});
+    const engine=new CallEngine({createPeer:()=>peer,microphone:async()=>stream(),camera:()=>new Promise(r=>{resolve=r;}),signal:async()=>true,log:()=>{},nameOf:async()=>null,uuid:randomUUID});
+    const pending=engine.start('b','B',true);await tick();engine.hangup();const t={kind:'video',enabled:true,stop:()=>{stopped++;}};resolve({getTracks:()=>[t],getAudioTracks:()=>[]});await pending;
+    expect(stopped).toBe(1);expect(attached).toBe(0);expect(engine.active).toBe(false);
+  });
+  it('camera permission denial releases an initial video call and leaves audio upgrade failures recoverable',async()=>{
+    let stopped=0;const t={enabled:true,stop:()=>{stopped++;}},p=new FakePeer(()=>{});
+    const e=new CallEngine({createPeer:()=>p,microphone:async()=>({getTracks:()=>[t],getAudioTracks:()=>[t]}),camera:async()=>{throw Error('Camera permission denied');},signal:async()=>true,log:()=>{},nameOf:async()=>null,uuid:randomUUID});
+    await e.start('b','B',true);expect(e.active).toBe(false);expect(stopped).toBe(1);expect(e.call?.note).toContain('Camera permission denied');
+    await e.start('b','B');await expect(e.setCamera(true)).rejects.toThrow('Camera permission denied');expect(e.active).toBe(true);e.hangup();
+  });
   it('rings, answers, connects both sides with audio stats, and hangs up for both', async () => {
     const { a, b } = pair();
     await a.start('b', 'Bilal'); await tick();
@@ -54,7 +77,7 @@ describe('call engine', () => {
     expect(p.b.call?.peerKey).toBe('a');
     p.b.hangup(); await tick();
     expect(p.a.call).toMatchObject({ phase: 'ended', note: 'Bilal declined the call.' });
-    const q = pair({ micB: 'denied' }); await q.a.start('b', 'Bilal'); await tick();
+    p.a.hangup();p.b.hangup();const q = pair({ micB: 'denied' }); await q.a.start('b', 'Bilal'); await tick();
     await q.b.accept(); await tick();
     expect(q.b.call?.note).toMatch(/denied/); expect(q.a.call?.note).toMatch(/microphone unavailable/);
   });
@@ -63,6 +86,6 @@ describe('call engine', () => {
     const id = p.a.call!.id;
     p.a.onSignal('mallory', { kind: 'call.end', callId: id, reason: 'hangup' });
     p.a.onSignal('b', { kind: 'call.end', callId: randomUUID(), reason: 'hangup' });
-    expect(p.a.call?.phase).toBe('calling');
+    expect(p.a.call?.phase).toBe('calling');p.a.hangup();p.b.hangup();
   });
 });

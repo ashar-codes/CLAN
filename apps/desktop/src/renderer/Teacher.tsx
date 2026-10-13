@@ -1,3 +1,4 @@
+import { MeetingPanel } from './world/Meeting.tsx';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ClassroomConnection, formatBytes, recommendDistribution, type Quality } from '@classroom/client';
 import { clanLabels, shortFingerprint, type ClanCapability, type ClanType, type ClassroomInfo, type JoinPolicy, type Member, type TeacherAssignmentView, type TeacherResourceView, type TimelineEvent, type TransferStats, type PendingShare, type FileSharingPolicy } from '@classroom/protocol';
@@ -240,7 +241,7 @@ export function TeacherDashboard({ caps, started, onEnded }: { caps: Capabilitie
             people={roster.filter((m) => m.handle).map((m) => ({ handle: m.handle!, name: m.fullName, host: false, connected: m.connected }))} />
         </Suspense>
       </div>
-
+      <MeetingPanel conn={{url:started.url,token:started.teacherToken,sessionId:info.sessionId}} />
       <section className="grid">
         <TeacherFiles sessionId={info.sessionId} resources={resources} stats={stats} send={send} />
         {can.includes('CREATE_ASSIGNMENT') && <TeacherAssignments assignments={assignments} send={send} />}

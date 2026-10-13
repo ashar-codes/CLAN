@@ -25,6 +25,7 @@ import { Resources } from './resources.ts';
 import { ApiError, contentDisposition, DEFAULT_LIMITS, parseRange, RateLimit, Storage, UUID_RE, type Limits } from './storage.ts';
 import { Classroom, JoinError, type ClanSession, type NetworkMode, type Principal } from './classroom.ts';
 import { MediaService } from './media.ts';
+import { Meetings } from './meeting.ts';
 import { mediaIdentity, Presentations } from './presentation.ts';
 import { WebSocket as UpstreamSocket } from 'ws';
 import { openDb, type Db } from './db.ts';
@@ -36,6 +37,8 @@ export type ServerOptions = {
   clan?: ClanSession;
   /** Host's canonical display name; members see it only after pairing (never in discovery). */
   hostName?: string;
+  mediaHostKey?:string;
+  mediaBlocked?:(deviceKey:string)=>boolean;
   /** Chat store (desktop host: @clan/core's Chat on the device database). Omitted → chat unavailable. */
   chat?: ChatStore;
   /** Whiteboard store (desktop host: @clan/core's Whiteboard). Omitted → no whiteboard. */
@@ -91,6 +94,7 @@ export type RunningServer = {
   resources: Resources;
   presentations: Presentations;
   media: MediaService | null;
+  meetings: Meetings;
   chat: ChatRelay | null;
   whiteboard: WhiteboardRelay | null;
   shares: Shares;
@@ -147,6 +151,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const resources = new Resources(db, classroom, storage, limits, signer);
   const peers = new PeerRegistry(classroom, signer);
   const media = opts.media ? new MediaService({ binary: opts.media.binary, host: opts.host, workDir: opts.media.workDir }) : null;
+  const meetings = new Meetings(classroom,media,fence,opts.mediaBlocked,opts.mediaHostKey);
   const presentations = new Presentations(db, classroom, media, { hostName: opts.hostName, graceMs: opts.media?.presenterGraceMs });
   const assignments = new Assignments(db, classroom, storage, limits, signer);
   const chat = opts.chat ? new ChatRelay({ store: opts.chat, classroom, resources, teacherPublicKey, hostName: opts.hostName ?? null }) : null;
@@ -364,6 +369,21 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       return { token: t.token, identity, expiresAt: t.expiresAt, codec: media.codec };
     } catch (e) { throw new ApiError(503, 'media_unavailable', (e as Error).message); }
   });
+  app.get('/api/meetings', req=>meetings.state(auth(req)));
+  app.post('/api/meetings', req=>meetings.action(auth(req),undefined,req.body));
+  app.post('/api/meetings/:room', req=>meetings.action(auth(req),parse(z.object({room:z.string().regex(/^m-[a-f0-9-]{36}$/)}),req.params).room,req.body));
+  const authorizeMedia = async (req:FastifyRequest) => {
+    try {
+      fence(); if(classroom.info().ended || !media) return false;
+      const token=new URL(req.url,'https://localhost').searchParams.get('access_token') ?? req.headers.authorization?.replace(/^Bearer /,'');
+      if(!token || token.length>8192) return false;
+      const claims=await media.verifyToken(token),identity=claims.sub,room=claims.video?.room;
+      fence();
+      if(claims.video?.roomJoin!==true || !identity || !room || !(identity==='host' || classroom.status(identity)==='approved')) return false;
+      return room===media.room || meetings.authorized(room,identity,claims.metadata);
+    } catch { return false; }
+  };
+  const mediaFenceTimer=setInterval(()=>{try{fence();void meetings.sweep().catch(()=>media?.close());}catch{void meetings.end().finally(()=>media?.close()).catch(()=>{});}},3000); mediaFenceTimer.unref();
   // LiveKit signalling, carried inside the pinned CLAN TLS channel to the loopback-only SFU.
   let mediaSockets = 0;
   app.register(async (scope) => {
@@ -371,10 +391,12 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       method: 'GET', url: '/media/*',
       handler: async (req, reply) => {
         if (media?.state !== 'ready') return reply.code(503).send({ code: 'media_unavailable' });
+        if(!await authorizeMedia(req)) return reply.code(401).send({code:'unauthorized'});
         const r = await fetch(`http://127.0.0.1:${new URL(media.signalUrl).port}${req.url.slice('/media'.length)}`).catch(() => null);
         return reply.code(r?.status ?? 502).send(r ? await r.text() : '');
       },
-      wsHandler: (ws, req) => {
+      wsHandler: async (ws, req) => {
+        if(!await authorizeMedia(req)) return ws.close(1008, 'media access revoked or invalid');
         if (media?.state !== 'ready') return ws.close(1013, 'media unavailable');
         if (mediaSockets >= MEDIA_MAX_SOCKETS) return ws.close(1013, 'too many media connections');
         mediaSockets++;
@@ -510,6 +532,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   classroom.on('member', (memberId: string, status: string) => {
     if (status === 'approved') for (const [ws, p] of sockets) if (p.role === 'student' && p.memberId === memberId) send(ws, classroom.handView(p));
     if (status === 'approved') return;
+    void meetings.revoked(memberId).catch(()=>{});
     void presentations.removed(memberId); // stops their presentation and drops their media connection now
     const fp = peers.revoke(memberId);
     if (fp) for (const [ws, p] of sockets) if (p.role === 'student') send(ws, { t: 'peer.revoked', fingerprints: [fp] });
@@ -525,7 +548,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   classroom.on('state', () => {
     const info = classroom.info();
     for (const [ws, p] of sockets) send(ws, { t: 'class.state', classroom: { ...info, ...(sessionAuthority ? { authority: sessionAuthority() } : {}) }, capabilities: [...classroom.capabilities(p)] });
-    if (info.ended) { void presentations.end().then(() => media?.close()); for (const ws of sockets.keys()) ws.close(WS_CLOSE.ended, 'class ended'); }
+    if (info.ended) { void meetings.end(); void presentations.end().then(() => media?.close()); for (const ws of sockets.keys()) ws.close(WS_CLOSE.ended, 'class ended'); }
   });
   // Presentation control state to everyone; pending requests only to those who may decide on them.
   const presentationMsg = (p: Principal): ServerMessage => ({ t: 'presentation', state: presentations.view(), policy: presentations.policy, mine: presentations.mine(p),
@@ -722,6 +745,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     peers,
     presentations,
     media,
+    meetings,
     chat,
     whiteboard,
     shares,
@@ -754,6 +778,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     teacherPublicKey,
     async close() {
       await stopAdvertising?.();
+      clearInterval(mediaFenceTimer); await meetings.end();
       await presentations.end();
       classroom.end();
       shuttingDown = true;

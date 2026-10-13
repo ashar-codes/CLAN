@@ -595,3 +595,10 @@ button.link.ai-link { border: 0; }
 @keyframes clan-sweep { to { transform:rotate(360deg); } } @keyframes radar-appear { from { opacity:0; } to { opacity:1; } }
 @media(prefers-reduced-motion:reduce) { .radar-sweep,.radar-peer { animation:none; } }
 html[data-radar-paused] .radar-sweep { animation-play-state:paused; }
+/* Call and meeting surfaces keep capture controls visible without moving the composer. */
+.chat-fixed-header { position: sticky; top: 0; z-index: 2; background: var(--surface); flex-shrink: 0; }
+.call-videos { display: flex; gap: .5rem; }
+.call-videos video { width: 48%; max-height: 160px; background: #111; object-fit: contain; }
+.meeting-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: .6rem; }
+.meeting-grid video { width: 100%; height: 180px; background: #111; object-fit: contain; }
+.meeting-grid [data-speaking='true'] { outline: 2px solid var(--ok); }

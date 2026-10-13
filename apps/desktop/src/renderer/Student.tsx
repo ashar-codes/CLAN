@@ -1,3 +1,4 @@
+import { MeetingPanel } from './world/Meeting.tsx';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClassroomConnection, SessionGate, type Candidate, type Quality } from '@classroom/client';
 import { clanLabels, shortFingerprint, type ClanCapability, type ClassroomInfo, type ClientMessage, type MemberStatus, type ResourceView, type StudentAssignmentView } from '@classroom/protocol';
@@ -261,6 +262,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
             people={can.includes('VIEW_MEMBERS') ? people.map((p) => ({ handle: p.handle, name: p.name, host: p.host, connected: p.connected })) : []} />
         </Suspense>
       </div>
+      <MeetingPanel conn={{url:session.url,token:session.token,sessionId:info.sessionId}} />
       <section className="grid">
         <FilesCard conn={conn} resources={resources} pushed={pushed} send={send} host={L.host.toLowerCase()} />
         {can.includes('SUBMIT_ASSIGNMENT') && <StudentAssignments conn={conn} assignments={assignments} />}

@@ -17,9 +17,9 @@
           "_clansync._tcp",
           "_classroomlan._tcp"
         ],
-        "NSCameraUsageDescription": "CLAN uses the camera when you scan a CLAN code (a person, a CLAN or an optical file transfer) or take a photo for your Inbox.",
+        "NSCameraUsageDescription": "CLAN uses the camera when you scan a code, take an Inbox photo or enable video in a call or meeting.",
         "NSPhotoLibraryUsageDescription": "CLAN opens your photos only when you pick one to save in your Inbox or send in a chat.",
-        "NSMicrophoneUsageDescription": "CLAN uses the microphone only while you record a voice message or are in a call you started or answered.",
+        "NSMicrophoneUsageDescription": "CLAN uses the microphone only while you record a voice message or join a call or meeting.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
@@ -115,7 +115,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "CLAN uses the camera when you scan a CLAN code (a person, a CLAN or an optical file transfer) or take a photo for your Inbox.",
+          "cameraPermission": "CLAN uses the camera when you scan a code, take an Inbox photo or enable video in a call or meeting.",
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": true
         }
@@ -123,7 +123,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "CLAN uses the microphone only while you record a voice message or are in a call you started or answered."
+          "microphonePermission": "CLAN uses the microphone only while you record a voice message or join a call or meeting."
         }
       ],
       "@react-native-community/datetimepicker",

@@ -71,3 +71,7 @@ Direct network yet.
 On one access point every viewer's copy crosses the same radio channel: 20 viewers × ~2–3 Mb/s is 40–60 Mb/s of airtime on
 top of everything else. The SFU removes the presenter's uplink as the bottleneck; it does not add Wi-Fi capacity. Lower
 quality profiles and simulcast help. See BENCHMARKS.md (simulated only).
+
+## BTC-2B+C extension
+
+Personal video retains signed People signaling and the direct CallEngine, with reserved/adopted video transceivers and native capture adapters. Group rooms reuse MediaService and the pinned `/media` gateway; authenticated room actions live at `/api/meetings`. See [BTC-2B](BTC_2B_RESULTS.md), [BTC-2C security/lifecycle contract](BTC_2C_RESULTS.md) and [test evidence](BTC_2BC_VERIFICATION.md). Short-lived leased tokens and current membership fence admission, while removal and host fencing terminate existing sessions. Group transport is DTLS-SRTP, not host-blind E2EE. Phones join available desktop SFUs and receive screens; phone broadcasting is unsupported.

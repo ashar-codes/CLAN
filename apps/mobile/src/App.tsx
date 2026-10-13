@@ -1,3 +1,4 @@
+import { PhoneMeeting } from './media/Meeting';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -291,6 +292,7 @@ function InClass({ c, joined: first, onLeave }: { c: C; joined: PairedJoin; onLe
           {board.view?.wall === 'WHITEBOARD' && !presenting && <MobileBoard c={c} board={board} title={`${info.title} board`} />}
           <ChatSection c={c} chat={chat} conn={conn} people={people} canSendFiles={info.clanType !== 'CLASSROOM' || (info.fileSharingPolicy ?? 'teacher') !== 'teacher'} />
           <ClassContent c={c} conn={conn} resources={resources} assignments={assignments} pushed={pushed} send={send} />
+          <PhoneMeeting conn={{url:joined.url,token:joined.token,transport:joined.transport as PinnedNativeTransport}} />
           {handSupported && <Button c={c} disabled={quality === 'disconnected'} label={handRaised ? 'Lower hand' : 'Raise hand'} onPress={() => send({ t: 'hand.set', raised: !handRaised })} />}
           {!!handError && <Text accessibilityRole="alert" style={{ color: c.danger }}>{handError}</Text>}
           <Button c={c} label={`Leave ${L.session}`} onPress={onLeave} />

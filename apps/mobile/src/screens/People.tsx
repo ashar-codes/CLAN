@@ -3,7 +3,7 @@ import { saveDirectory, directoryStatus, directoryEnrollmentKey } from '../peopl
 // (Wi-Fi Direct, Wi-Fi Aware, Apple peer-to-peer, hotspots), friends and requests, personal chats with files and voice
 // notes, calls, and QR file transfer.
 import { useEffect, useState } from 'react';
-import { Alert, Linking, Platform, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, ScrollView, Linking, Platform, Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
@@ -22,7 +22,7 @@ import { QrImage, QrScanner } from '../ui/qr';
 import { OpticalScreen } from './Optical';
 import { usePhoneCall } from '../people/Call';
 import { VoiceNotePlayer, VoiceRecorder } from '../people/Voice';
-import { act, bump, Btn, Card, Err, Field, H1, Muted, PersonPic, Row, Screen, useC, useData, when } from '../ui/kit';
+import { act, bump, Btn, Card, Err, Field, H1, Muted, Mate, PersonPic, Row, Screen, useC, useData, when } from '../ui/kit';
 
 type Seg = 'nearby' | 'chats' | 'friends';
 const people = () => phoneClan().people;
@@ -269,6 +269,7 @@ function ChatView({ id, onBack }: { id: string; onBack(): void }) {
   const c = useC();
   const calls = usePhoneCall();
   const [limit, setLimit] = useState(PAGE), [text, setText] = useState(''), [err, setErr] = useState<string | null>(null);
+  const [menu,setMenu]=useState(false),[query,setQuery]=useState<string|null>(null),[filesOnly,setFilesOnly]=useState(false);
   const conv = useData(() => people().conversation(id));
   const msgs = useData(() => people().page(id, { limit })) ?? [];
   const tick = () => void phonePeople().then((r) => r.tick());
@@ -288,25 +289,31 @@ function ChatView({ id, onBack }: { id: string; onBack(): void }) {
       else void (what === 'clear' ? people().clearHistory(id) : people().removeConversation(id).then(onBack)).catch((e) => setErr((e as Error).message));
     } }]);
   return (
-    <Screen>
-      <Row><Btn small label="← Chats" onPress={onBack} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '800', fontSize: 18, color: c.text }}>{conv.peerName}</Text><Muted small>{ttlText(conv.ttlMs)}</Muted></View></Row>
+    <KeyboardAvoidingView style={{flex:1,padding:12,gap:8}} behavior={Platform.OS==='ios'?'padding':undefined}>
+      <Row><Btn small label="← Chats" onPress={onBack} /><Mate name={conv.peerName}/><View style={{ flex: 1 }}><Text style={{ fontWeight: '800', fontSize: 18, color: c.text }}>{conv.peerName}</Text><Muted small>{ttlText(conv.ttlMs)}</Muted></View></Row>
       <Row gap={6}>
-        {(conv.friend || conv.state === 'active') && <Btn small label="Call" disabled={calls.active} onPress={() => calls.call(conv.peerKey, conv.peerName)} />}
+        {(conv.friend || conv.state === 'active') && <><Btn small label="Call" disabled={calls.active} onPress={() => calls.call(conv.peerKey, conv.peerName)} /><Btn small label="Video call" disabled={calls.active} onPress={()=>calls.call(conv.peerKey,conv.peerName,true)} /></>}
+        <Btn small label="⋯" a11y="Chat options" onPress={()=>setMenu(!menu)}/>
+      </Row>
+      {menu && <Row gap={6}><Btn small label="View contact details" onPress={()=>Alert.alert(conv.peerName,`${conv.friend?'Friend':'Chat contact'}\n${conv.peerKey}`)}/><Btn small label="Search chat" onPress={()=>setQuery(query===null?'':null)}/><Btn small label={filesOnly?'All messages':'Shared media/files'} onPress={()=>setFilesOnly(!filesOnly)}/><Btn small label="Notification settings" onPress={()=>Alert.alert('Notifications','Toggle messages and calls on this device?', [{text:'Cancel'},{text:'Toggle',onPress:()=>{const n=phoneClan().notifications;n.setPrefs(me(),{direct:!n.prefs(me()).direct});bump();}}])}/>
         {conv.state === 'active' && <Btn small label="End chat" onPress={() => confirm('end')} />}
         <Btn small label="Clear history" onPress={() => confirm('clear')} />
         <Btn small danger label="Remove" onPress={() => confirm('remove')} />
-      </Row>
+      </Row>}
+      {query!==null && <Field label="Search loaded messages" value={query} onChange={setQuery}/>}
+      <ScrollView style={{flex:1}} contentContainerStyle={{gap:8}} keyboardShouldPersistTaps="handled">
       {conv.state === 'invited_in' && <Card tone="ok"><Text style={{ color: c.text }}>{conv.peerName} invites you to {conv.mode === 'temporary' ? `a temporary chat (${ttlText(conv.ttlMs).toLowerCase()} on both devices)` : 'a saved chat'}.</Text>
         <Row><Btn small primary label="Accept" onPress={() => run(() => people().acceptChat(id))} /><Btn small label="Decline" onPress={() => run(() => people().declineChat(id))} /></Row></Card>}
       {conv.state === 'invited_out' && <Muted>Waiting for {conv.peerName} to accept.</Muted>}
       {msgs.length >= limit && <Btn small label="Load earlier messages" onPress={() => setLimit(limit + PAGE)} />}
-      {msgs.map((m) => <Bubble key={m.id} m={m} onError={setErr} onAct={run} />)}
+      {msgs.filter(m=>(!filesOnly || !!m.transfer) && (!query || m.text?.toLowerCase().includes(query.toLowerCase()) || m.transfer?.name.toLowerCase().includes(query.toLowerCase()))).map((m) => <Bubble key={m.id} m={m} onError={setErr} onAct={run} />)}
+      </ScrollView>
       <Err msg={err} />
       {conv.state === 'active' ? <>
         <Field label="Message" value={text} onChange={setText} multiline maxLength={8000} />
         <Row><Btn primary label="Send" disabled={!text.trim()} onPress={send} /><Btn label="📎 File" a11y="Send a file" onPress={() => void sendFile()} /><VoiceRecorder convId={id} onError={setErr} onSent={tick} /></Row>
       </> : conv.state !== 'invited_in' && conv.state !== 'invited_out' ? <Muted>This chat is closed.</Muted> : null}
-    </Screen>
+    </KeyboardAvoidingView>
   );
 }
 

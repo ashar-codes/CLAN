@@ -1,6 +1,7 @@
 // Local SFU for CLAN screen sharing: a self-hosted LiveKit server owned by the CLAN host.
 // Secrets (API key/secret) are generated per process and never leave the host. Clients get short-lived JWTs that can
-// subscribe only; publishing is granted/revoked on the SFU by the host (server-side enforcement), never by the client.
+// presentation subscribers receive subscribe-only credentials; meeting credentials grant scoped microphone/camera
+// sources. Publishing and revocation are enforced on the SFU by the host, never trusted to client controls.
 // Signalling listens on 127.0.0.1 only and is reached through the CLAN HTTPS server (pinned TLS); media (DTLS-SRTP)
 // listens only on the CLAN interface address. No cloud, TURN or external auth.
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -11,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
-import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
+import { AccessToken, TokenVerifier, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 
 export type MediaState = 'stopped' | 'starting' | 'ready' | 'failed';
 export const MEDIA_TOKEN_TTL_S = 10 * 60;
@@ -59,6 +60,7 @@ export class MediaService extends EventEmitter {
 
   /** Starts the SFU on first use (lazy). */
   ensure(): Promise<void> {
+    if (this.closing) return Promise.reject(new Error('The media service has closed. Start a new authorized CLAN session.'));
     if (this.state === 'ready') return Promise.resolve();
     return (this.starting ??= this.start().finally(() => { this.starting = null; }));
   }
@@ -114,6 +116,19 @@ export class MediaService extends EventEmitter {
     at.addGrant({ roomJoin: true, room: this.room, canSubscribe: true, canPublish: o.canPublish, canPublishSources: o.canPublish ? PUBLISH_SOURCES : [], canPublishData: false, canUpdateOwnMetadata: false });
     return { token: await at.toJwt(), expiresAt: Date.now() + ttl * 1000 };
   }
+
+  async meetingToken(room: string, identity: string, name: string, lease: string, video: boolean) {
+    await this.ensure();
+    await this.api().createRoom({name:room,maxParticipants:8,emptyTimeout:60});
+    const at = new AccessToken(this.apiKey,this.secret,{identity,name:name.slice(0,80),ttl:120,metadata:lease});
+    at.addGrant({roomJoin:true,room,canSubscribe:true,canPublish:true,canPublishSources:[TrackSource.MICROPHONE,...(video ? [TrackSource.CAMERA] : []),TrackSource.SCREEN_SHARE],canPublishData:false,canUpdateOwnMetadata:false});
+    return {token:await at.toJwt(),expiresAt:Date.now()+120000};
+  }
+  verifyToken(token:string) { return new TokenVerifier(this.apiKey,this.secret).verify(token,0); }
+  async meetingParticipants(room:string) { return this.state==='ready' ? this.api().listParticipants(room) : []; }
+  async meetingRemove(room:string,identity:string) { if(this.state==='ready') await this.api().removeParticipant(room,identity).catch(async e=>{if(String(e?.code)==='not_found')return;await this.close();throw e;}); }
+  async meetingMute(room:string,identity:string) { for(const track of (await this.meetingParticipants(room)).find(p=>p.identity===identity)?.tracks ?? []) if(track.source===TrackSource.MICROPHONE) await this.api().mutePublishedTrack(room,identity,track.sid,true); }
+  async meetingEnd(room:string) { if(this.state==='ready') await this.api().deleteRoom(room).catch(async e=>{if(String(e?.code)==='not_found')return;await this.close();throw e;}); }
 
   /** Grant/revoke publishing on the SFU itself (revocation unpublishes immediately). */
   async setPublish(identity: string, allowed: boolean) {

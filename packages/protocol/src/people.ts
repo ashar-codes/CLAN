@@ -87,7 +87,7 @@ export const PeerBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('file.done'), transferId: Id }).strict(),
   // Durable intent only; contains no SDP/ICE and must never ring after reconnect.
   z.object({ kind: z.literal('call.attempt'), callId: Id, expiresAt: z.number().int().nonnegative() }).strict(),
-  z.object({ kind: z.literal('call.invite'), callId: Id, sdp: z.string().max(20_000) }).strict(),
+  z.object({ kind: z.literal('call.invite'), callId: Id, sdp: z.string().max(20_000), video: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal('call.answer'), callId: Id, sdp: z.string().max(20_000) }).strict(),
   z.object({ kind: z.literal('call.ice'), callId: Id, candidate: z.string().max(2000), mid: z.string().max(64).nullable(), index: z.number().int().min(0).max(64).nullable() }).strict(),
   z.object({ kind: z.literal('call.reject'), callId: Id, reason: z.enum(['declined', 'busy', 'unavailable']) }).strict(),

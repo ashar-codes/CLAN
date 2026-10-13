@@ -1,5 +1,5 @@
 import { setDirectoryHost, directoryClassrooms, onDirectoryClassrooms } from './lan-directory.ts';
-import { app, BrowserWindow, dialog, ipcMain, powerMonitor, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, Notification, dialog, ipcMain, powerMonitor, session, shell, type WebContents } from 'electron';
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import * as opaque from '@serenity-kit/opaque';
 import { hostname } from 'node:os';
@@ -198,6 +198,28 @@ function registerIpc() {
     if (!r.ok || !b.token) throw new Error(b.message ?? 'Screen sharing is unavailable.');
     return { token: b.token };
   });
+  const meetingNotices=new Set<string>();
+  ipcMain.handle('meetings:notice',async(_e,raw:unknown,id:unknown)=>{
+    const c=z.object({url:z.string(),token:z.string().min(16).max(128),sessionId:z.uuid()}).parse(raw),room=z.string().regex(/^m-[a-f0-9-]{36}$/).parse(id);
+    const tr=server?.url===c.url && server.classroom.id===c.sessionId ? pinnedTransport(server.tls) : trust.session(c.sessionId)?.transport;
+    const base=server?.url===c.url && server.classroom.id===c.sessionId?server.url:trust.session(c.sessionId)?.url;
+    if(!tr || !base || !Notification.isSupported())return;
+    const r=await tr.fetch(base+'/api/meetings',{headers:{authorization:`Bearer ${c.token}`}});if(!r.ok)return;
+    const state=await r.json() as {meetings:{id:string;owner:string}[];me:string};if(!state.meetings.some(m=>m.id===room && m.owner!==state.me))return;
+    const prefs=clan.notifications.prefs({kind:'user',userId:clan.me});if(!prefs.direct)return;
+    const key=c.sessionId+room;if(meetingNotices.has(key))return;if(meetingNotices.size>=256)meetingNotices.clear();meetingNotices.add(key);
+    const n=new Notification({title:'CLAN',body:'You are invited to a local meeting. Open your CLAN to join.'});n.on('click',()=>{const w=BrowserWindow.getAllWindows()[0];w?.show();w?.focus();});n.show();
+  });
+  ipcMain.handle('meetings:request',async(_e,raw:unknown,path:unknown,body:unknown)=>{
+    const c=z.object({url:z.string().regex(/^https:\/\/[\w.:[\]-]+$/),token:z.string().min(16).max(128),sessionId:z.uuid()}).parse(raw);
+    const route=z.string().regex(/^\/api\/meetings(?:\/m-[a-f0-9-]{36})?$/).parse(path);
+    const own=server && server.url===c.url && server.classroom.id===c.sessionId;
+    const tr=own?pinnedTransport(server!.tls):trust.session(c.sessionId)?.transport;
+    const base=own?server!.url:trust.session(c.sessionId)?.url;if(!tr || !base)throw new Error('Not connected to that CLAN.');
+    const text=body===undefined?undefined:JSON.stringify(body);if(text && text.length>4096)throw new Error('Meeting request too large.');
+    const r=await tr.fetch(base+route,{method:text?'POST':'GET',headers:{authorization:`Bearer ${c.token}`,'content-type':'application/json'},body:text});
+    const result=await r.json() as {message?:string};if(!r.ok)throw new Error(result.message ?? 'Meeting unavailable.');return result;
+  });
   ipcMain.handle('direct:availability', () => direct.availability());
   ipcMain.handle('direct:status', async () => (server && direct.net?.active ? { ...(await direct.net.status()), connected: server.classroom.roster().filter((m) => m.connected).length, p2p: server.classroom.p2p } : null));
   ipcMain.handle('direct:qr', async () => { if (!server) throw new Error('No active CLAN.'); return direct.qr(server); });
@@ -250,7 +272,7 @@ function registerIpc() {
     const hostName = loadProfile().fullName || (named && named !== 'Me' ? named : undefined);
     try {
       server = await startClassroomServer({ title, host, db: db(), storageDir: join(app.getPath('userData'), 'storage'), advertise: true, networkMode: a.connectivity === 'direct' ? 'direct' : 'lan', identity: await trust.teacherIdentity(),
-        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, authority: clanId ? hostingAuthority(clanId) : undefined, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat, whiteboard: clan.whiteboard,
+        clan: { type, id: clanId, description: a.description, expiresAt }, hostName, mediaHostKey:trust.device().publicKey,mediaBlocked:key=>!!clan.people.contact(key)?.blocked,authority: clanId ? hostingAuthority(clanId) : undefined, media: { binary: mediaBinary(), workDir: mediaWorkDir() }, chat: clan.chat, whiteboard: clan.whiteboard,
         direct: directNet ? { ssid: directNet.ssid, passphrase: directNet.passphrase, auth: 'WPA2', host: directNet.hostAddress, expiresAt: expiresAt ?? Date.now() + 12 * 3600_000 } : undefined });
       if (directNet) await direct.publish(server);
       chatHooks.hosted(server);
@@ -437,10 +459,10 @@ app.whenReady().then(async () => {
   app.setName(PRODUCT_NAME); // …then present as CLAN
   trust = new Trust(keystore, app.getPath('userData'));
   trust.installVerifyProc(session.defaultSession);
-  // Nothing needs camera/mic/notifications yet; grant capabilities explicitly as features land.
-  // Only screen capture (display-capture) may be requested, and only after the user picked a source in CLAN. No mic/camera.
+  // Capture permissions require the explicit feature intent below.
+  // Screen capture uses the source-selection handler. Microphone and camera requests use separate, expiring intents.
   // Microphone only right after the student started a Study Tape with “Microphone” ticked, recorded a voice note or
-  // placed/answered a call (audio only). Camera only right after “Scan with camera” (video only), for reading a QR code.
+  // placed/answered a call or joined a meeting. Camera requests follow explicit video/QR actions; combined audio/video requests stay denied.
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb, details) => {
     const types = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
     cb(perm === 'display-capture' || (perm === 'media' && types.length > 0 && ((micArmed() && types.every((t) => t === 'audio')) || (camArmed() && types.every((t) => t === 'video')))));

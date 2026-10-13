@@ -59,6 +59,7 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
   const [older, setOlder] = useState<PeopleMessage[]>([]), [noMore, setNoMore] = useState(false);
   const [recent] = usePeople(() => api.people.page(c.id, null, PAGE), [c.id]);
   const [text, setText] = useState(''), [err, setErr] = useState(''), [confirm, setConfirm] = useState<'clear' | 'remove' | 'end' | null>(null);
+  const [menu,setMenu]=useState(false),[search,setSearch]=useState<string|null>(null),[filesOnly,setFilesOnly]=useState(false),[details,setDetails]=useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const box = useRef<HTMLDivElement>(null);
   const { call, active } = useCall();
@@ -81,16 +82,21 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
 
   return (
     <section className="card chat-view stack" aria-label={`Chat with ${c.peerName}`}>
-      <div className="row between">
-        <div className="row"><Avatar k={c.peerKey} name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
+      <header className="row between chat-fixed-header">
+        <div className="row"><button aria-label="Back to conversations" onClick={onRemoved}>←</button><Avatar k={c.peerKey} name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
         <div className="row">
-          {(c.friend || c.state === 'active') && <button disabled={active} onClick={() => call(c.peerKey, c.peerName)}>Call</button>}
+          {(c.friend || c.state === 'active') && <><button disabled={active} onClick={() => call(c.peerKey, c.peerName)}>Call</button><button disabled={active} onClick={() => call(c.peerKey,c.peerName,true)}>Video call</button></>}
+          <button aria-label="Chat options" aria-expanded={menu} onClick={()=>setMenu(!menu)}>⋯</button>
+        </div>
+      </header>
+      {menu && <div className="card inset row" aria-label="Chat options menu"><button onClick={()=>setDetails(!details)}>View contact details</button><button onClick={()=>setSearch(search===null?'':null)}>Search chat</button><button onClick={()=>setFilesOnly(!filesOnly)}>{filesOnly?'All messages':'Shared media/files'}</button><button onClick={()=>run(async()=>{const prefs=await api.notify.prefs();if(window.confirm('Toggle message and call notifications on this device?'))await api.notify.setPrefs({direct:!prefs.direct});})}>Notification settings</button>
           {(c.state === 'active' || c.state === 'ended' || c.state === 'declined') && <ChatInvite peerKey={c.peerKey} onChat={() => {}} onError={setErr} label={c.state === 'active' ? 'Change terms…' : 'Invite again…'} terms />}
           {c.state === 'active' && <button onClick={() => setConfirm('end')}>End chat</button>}
           <button onClick={() => setConfirm('clear')}>Clear history</button>
           <button className="danger" onClick={() => setConfirm('remove')}>Remove</button>
-        </div>
-      </div>
+        </div>}
+      {details && <p>Contact: {c.peerName} · {c.friend?'Verified friend':'Chat contact'} · {c.peerKey}</p>}
+      {search!==null && <label>Search loaded messages<input value={search} onChange={e=>setSearch(e.target.value)} /></label>}
       {confirm && <div className="card inset" role="alertdialog" aria-label="Confirm">
         <p>{confirm === 'clear' ? 'Delete every message and received file in this chat from this device?' : confirm === 'remove' ? 'Remove this conversation and everything in it from this device?' : `End the chat with ${c.peerName}? Neither of you can send more messages until a new invitation is accepted.`}
           {confirm !== 'end' && <> {c.peerName} keeps their own copy — CLAN cannot delete what is already on their device.</>}</p>
@@ -104,7 +110,7 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
       {c.state === 'invited_out' && <p className="muted" role="status">Waiting for {c.peerName} to accept. They will get the invitation as soon as their device is reachable.</p>}
       <div className="messages" ref={box} onScroll={onScroll} role="log" aria-label="Messages" aria-live="polite">
         {msgs.length >= PAGE && !noMore && <button className="link load-earlier" onClick={loadEarlier}>Load earlier messages</button>}
-        {msgs.map((m) => <Bubble key={m.id} m={m} onError={setErr} />)}
+        {msgs.filter(m=>(!filesOnly || !!m.transfer) && (!search || m.text?.toLowerCase().includes(search.toLowerCase()) || m.transfer?.name.toLowerCase().includes(search.toLowerCase()))).map((m) => <Bubble key={m.id} m={m} onError={setErr} />)}
       </div>
       {!atBottom && <button className="small jump" onClick={() => { const b = box.current; if (b) b.scrollTop = b.scrollHeight; setAtBottom(true); }}>Jump to latest</button>}
       {err && <p role="alert" className="error">{err}</p>}

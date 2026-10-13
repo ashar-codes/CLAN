@@ -16,8 +16,9 @@ final class CLANQASmoke: XCTestCase {
     let title = "iOS QA persistence"
     if !app.buttons["Open note " + title].exists {
       app.buttons["New note"].tap()
-      let field = app.textFields["Title"]; XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText(title)
-      let body = app.textViews["Note"]; body.tap(); body.typeText("Disposable native simulator evidence")
+      let field = app.textFields["Title"]; XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); for character in title { field.typeText(String(character)) }; XCTAssertEqual(field.value as? String, title)
+      let body = app.textViews["Note"]; body.tap(); for character in "Disposable native simulator evidence" { body.typeText(String(character)) }; XCTAssertEqual(body.value as? String, "Disposable native simulator evidence")
+      app.staticTexts["New note"].firstMatch.tap() // dismiss the software keyboard before tapping a scrolled button
       app.buttons["Save"].tap()
     }
     XCTAssertTrue(app.buttons["Open note " + title].waitForExistence(timeout: 15))
