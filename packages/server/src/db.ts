@@ -246,7 +246,18 @@ export function migrate(db: Db, upTo = MIGRATIONS.length): number {
 const backupName = (t: number) => `teacher-${new Date(t).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.db`;
 const isBackup = (n: string) => /^teacher-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/.test(n);
 const healthy = (path: string) => {
-  try { const d = new DatabaseSync(path, { readOnly: true }); try { return (d.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check === 'ok'; } finally { d.close(); } } catch { return false; }
+  try {
+    const d = new DatabaseSync(path, { readOnly: true });
+    try { return (d.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check === 'ok'; }
+    finally { d.close(); }
+  } catch (error) {
+    // SQLite extended codes retain the primary code in the low byte.
+    // A lock, permission error or I/O failure is not evidence of corruption:
+    // never rename that database or replace newer data with a backup/empty file.
+    const code = (error as { errcode?: number }).errcode;
+    if (typeof code === 'number' && [11, 26].includes(code & 255)) return false; // CORRUPT / NOTADB
+    throw error;
+  }
 };
 
 /** A consistent copy of the live database (VACUUM INTO: a snapshot, safe while the app runs). Keeps the newest `keep`. */
@@ -265,8 +276,9 @@ export function backupDb(db: Db, dir: string, o: { keep?: number; now?: number; 
 }
 
 /**
- * Opens the device database after an integrity check. A corrupt or unreadable file is never deleted: it is moved aside
+ * Opens the device database after an integrity check. A confirmed corrupt file is never deleted: it is moved aside
  * and the newest backup that passes its own check is restored (no healthy backup → a fresh database). Reports what happened.
+ * Lock/permission/I/O errors propagate without modifying the database or backups.
  */
 export function openDbSafely(path: string, backupsDir: string): { db: Db; recovered: null | { from: string | null; keptAt: string } } {
   if (!existsSync(path) || healthy(path)) {

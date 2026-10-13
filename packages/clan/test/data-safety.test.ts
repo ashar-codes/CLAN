@@ -60,6 +60,33 @@ describe('device database safety', () => {
     expect(openDbSafely(path, join(dir, 'backups')).recovered).toBeNull();
   });
 
+  it('a locked healthy database is not renamed, reset or rolled back to an older backup', () => {
+    const dir = tmp(), path = join(dir, 'teacher.db'), backups = join(dir, 'backups');
+    const raw = new DatabaseSync(path); dbs.push(raw);
+    raw.exec('CREATE TABLE proof(value); INSERT INTO proof VALUES(7)');
+    backupDb(raw, backups, { reserve: 0 });
+    raw.exec('INSERT INTO proof VALUES(9); BEGIN EXCLUSIVE');
+    const files = readdirSync(dir).sort(), saved = readdirSync(backups).sort();
+    try {
+      expect(() => openDbSafely(path, backups)).toThrow(/locked/);
+      expect(readdirSync(dir).sort()).toEqual(files);
+      expect(readdirSync(backups).sort()).toEqual(saved);
+    } finally { raw.exec('ROLLBACK'); }
+    raw.close();
+    const result = openDbSafely(path, backups);
+    expect(result.recovered).toBeNull();
+    expect(result.db.prepare('SELECT value FROM proof ORDER BY value').all().map(r => r.value)).toEqual([7, 9]);
+  });
+
+  it('an inaccessible database path fails without renaming its contents', () => {
+    const dir = tmp(), path = tmp(), sentinel = join(path, 'keep.txt');
+    writeFileSync(sentinel, 'must remain in place');
+    const files = readdirSync(path).sort();
+    expect(() => openDbSafely(path, join(dir, 'backups'))).toThrow();
+    expect(existsSync(sentinel)).toBe(true);
+    expect(readdirSync(path).sort()).toEqual(files);
+  });
+
   it('update: an older database is migrated forward and keeps its data (re-opening is idempotent)', () => {
     const dir = tmp(), path = join(dir, 'teacher.db');
     const old = new DatabaseSync(path); migrate(old, MIGRATIONS.length - 1); old.close(); // a build one migration behind

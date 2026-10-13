@@ -296,3 +296,9 @@ Named confirmations, busy guards and draft retention add UI safety; domain check
 Final BTC-2E audit retains 0 critical / 2 high / 2 moderate dependency findings. Redacted staged and nine-commit implementation history scans found no secrets. Windows pagination verification passed after correcting the visible-anchor precondition; complete native workflow parity remains an acceptance blocker; software passes do not constitute hardware/privacy or public-release approval.
 
 Search-retention follow-up: deleted flashcard text and study-tape title/timeline documents are invalidated through existing events. Authenticated personal-sync application also refreshes all timeline keys, so deleted or edited timeline text does not remain searchable on a linked device. Two-device signed fixtures cover timeline/card deletion and unchanged private ownership. This does not promise forensic erasure of immutable sync/audit history.
+
+## BTC-2R reliability follow-up
+
+Authenticated People reconnect preserves opt-in availability, Invisible and block rules; discovery remains an untrusted hint. Native service pulses enforce existing session deadlines and interface-change reconnect without activating capture. Desktop file-progress telemetry is bounded and deferred until host authority verification succeeds; live capture/control is never deferred past consent.
+
+Device database recovery distinguishes confirmed SQLite corruption (CORRUPT/NOTADB or failed integrity check) from lock, permission and I/O failures. Uncertain access errors stop startup without renaming/replacing the database or rolling it back to a backup. Disposable actual-lock and corrupted-file tests verify both paths. This fixes reproduced data replacement under an exclusive lock; the intermittent Windows startup stall remains a separate unproven cause. Inherited two high/two moderate dependency advisories and desktop at-rest limitations remain unresolved.

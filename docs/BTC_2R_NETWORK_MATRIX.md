@@ -4,7 +4,7 @@ Recorded outcomes belong in BTC_2R_VERIFICATION.md; existing BTC-2A real-socket 
 
 | Topology | Available verification / limitation |
 | --- | --- |
-| A/B Mac↔Windows same/bridged LAN | Windows hosted-runner regressions latest join/meeting tests PASS; overall FAIL at recovery and sharing-policy UI; Mac regressions PASS; simultaneous physical pair NOT TESTED |
+| A/B Mac↔Windows same/bridged LAN | Windows hosted-runner regressions latest join/meeting tests PASS; overall FAIL at recovery; sharing-policy intermittent failure and native SFU teardown timeout recorded; Mac regressions PASS; simultaneous physical pair NOT TESTED |
 | C/D/E Mac↔Android active/background/locked | Disposable emulator with actual native encrypted authenticated TCP and Mac Node peer; two complete emulator runs PASS; physical Xiaomi pairing/delivery/media NOT TESTED |
 | F Windows↔Android | Physical NOT TESTED |
 | G roaming/IP change | Real-socket address replacement/queue tests and emulator network interruption; physical roaming NOT TESTED |
