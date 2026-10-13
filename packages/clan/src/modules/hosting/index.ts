@@ -62,6 +62,7 @@ export const CLAN_TABLES: Record<string, string> = {
   clans_classroom_members: 'derived: rebuilt from carried host-server members after activation',
   clans_local_preferences: 'device-local', clans_cleanup: 'device-local', clans_local_sessions: 'device-local (member routes)',
   chat_me: 'device-local', chat_outbox: 'device-local', assign_seen: 'device-local (member cache)', search_docs: 'derived index', core_events: 'device-local',
+  timetable_selection: 'device-local', timetable_alerts: 'device-local', timetable_versions: 'personal: private timetable versions; linked-device sync only, never CLAN hosting',
   core_consumed: 'device-local', core_grants: 'personal', identity_users: 'device-local', identity_devices: 'device-local', identity_local: 'device-local',
   hosting_authority: 'hosting control', hosting_transitions: 'hosting control', hosting_revocations: 'hosting control', hosting_staging: 'hosting control',
   hosting_anchors: 'hosting control', hosting_checkpoints: 'hosting control', hosting_resolutions: 'hosting control', hosting_requests: 'hosting control', hosting_superseded: 'hosting control (retains this device\'s unchosen copy)',

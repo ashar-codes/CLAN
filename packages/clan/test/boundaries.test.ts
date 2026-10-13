@@ -9,7 +9,7 @@ const root = join(import.meta.dirname, '../../..');
 const src = join(import.meta.dirname, '../src');
 const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));
 const imports = (f: string) => [...readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*'([^']+)'/g)].map((m) => m[1]!);
-const PREFIX: Record<string, string[]> = { clans: ['clans_'], files: ['resources_'], notes: ['notes_'], saved: ['saved_'], diary: ['diary_'], reminders: ['reminders_'], share: [], chat: ['chat_'], capture: ['capture_'], notifications: ['notify_'],
+const PREFIX: Record<string, string[]> = { timetable: ['timetable_'], clans: ['clans_'], files: ['resources_'], notes: ['notes_'], saved: ['saved_'], diary: ['diary_'], reminders: ['reminders_'], share: [], chat: ['chat_'], capture: ['capture_'], notifications: ['notify_'],
   courses: ['courses_'], tasks: ['tasks_'], exams: ['exams_'], flashcards: ['flashcards_'], study: ['study_'], assignments: ['assign_'], agenda: [], ai: ['ai_'], whiteboard: ['wb_'], recordings: ['rec_'], sync: ['sync_'], hosting: ['hosting_'], people: ['people_'] };
 /** Read-only classroom readers (see their headers). */
 const LEGACY_READERS: Record<string, string[]> = { 'modules/clans/classroom-import.ts': ['sessions', 'members'], 'modules/files/classroom-adopt.ts': ['resources'], 'modules/assignments/classroom-read.ts': ['assignments', 'submissions'] };

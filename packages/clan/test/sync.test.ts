@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createReadStream, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto';
-import { linkTranscript, normalizeLinkCode, type SyncRecord, type SyncTransport } from '@classroom/protocol';
+import { TimetableDraft, linkTranscript, normalizeLinkCode, type SyncRecord, type SyncTransport } from '@classroom/protocol';
 import { linkProof } from '../src/index.ts';
 import { setup, tmp, user } from './helpers.ts';
 import { clock, device, link, now, type Dev } from './sync-helpers.ts';
@@ -346,3 +346,6 @@ describe('files', () => {
     expect(b.app.sync.transfers()[0]).toMatchObject({ state: 'waiting_space' });
   });
 });
+
+it('timetable and original image sync over signed personal transport; selection stays local and deletion persists',async()=>{const {a,b}=pair();try{const image=join(tmp(),'timetable.png');writeFileSync(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGZkAAAAASUVORK5CYII=','base64'));const file=await a.app.files.add(a.me,image,'Timetable.png',{kind:'personal',ownerId:a.app.me},'image/png');const t=a.app.timetable.save(a.me,TimetableDraft.parse({name:'Offline semester',imageId:file.refId}));a.app.timetable.activate(a.me,t.id);await sync(b,a);expect(b.app.timetable.get(b.me,t.id).imageId).toBe(file.refId);expect(b.app.timetable.current(b.me)).toBeNull();expect(b.app.files.get(b.me,file.refId)?.sha256).toBe(file.sha256);a.app.timetable.remove(a.me,t.id);await sync(b,a);expect(()=>b.app.timetable.get(b.me,t.id)).toThrow();await sync(a,b);expect(()=>a.app.timetable.get(a.me,t.id)).toThrow();expect(b.app.files.get(b.me,file.refId)).not.toBeNull();}finally{a.db.close();b.db.close();}});
+it('offline timetable edits create a reviewable Keep Both conflict, never silently overwrite',async()=>{const {a,b}=pair();try{const t=a.app.timetable.save(a.me,TimetableDraft.parse({name:'Semester'}));await sync(b,a);a.app.timetable.save(a.me,TimetableDraft.parse({name:'Laptop revision'}),t.id);b.app.timetable.save(b.me,TimetableDraft.parse({name:'Phone revision'}),t.id);await sync(b,a);const c=b.app.sync.conflicts().find(c=>c.kind==='timetable');expect(c).toBeDefined();b.app.sync.resolve(c!.id,'both');expect(b.app.timetable.list(b.me).map(t=>t.name)).toContain('Phone revision');expect(b.app.timetable.list(b.me).some(t=>t.name.includes('Laptop revision'))).toBe(true);await sync(a,b);expect(a.app.timetable.list(a.me)).toHaveLength(2);}finally{a.db.close();b.db.close();}});

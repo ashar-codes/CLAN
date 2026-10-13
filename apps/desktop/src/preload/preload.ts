@@ -105,6 +105,7 @@ const api: DesktopApi = {
   mediaSources: () => ipcRenderer.invoke('media:sources'),
   mediaChoose: (id, audio) => ipcRenderer.invoke('media:choose', id, audio),
   meetingNotice:(c,id)=>ipcRenderer.invoke('meetings:notice',c,id),
+  timetable:Object.fromEntries(['list','save','activate','archive','duplicate','remove','import','image','recognize'].map(name=>[name,(...args:unknown[])=>ipcRenderer.invoke('timetable:'+name,...args)])) as DesktopApi['timetable'],
   controlCapability:()=>ipcRenderer.invoke('control:capability'),
   controlPermission:()=>ipcRenderer.invoke('control:permission'),
   controlStop:()=>ipcRenderer.invoke('control:stop'),

@@ -1,3 +1,4 @@
+import {TimetablePanel} from './study/Timetable.tsx';
 // Study: Knowledge Campus (your Courses), course spaces, Semester Board, tasks, the Exam Command Center, flashcards,
 // notes and personal history. Everything here is real Study Engine data; nothing is estimated.
 import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -31,7 +32,7 @@ class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-const TABS: [StudyTab, string][] = [['campus', 'Campus'], ['board', 'Semester Board'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['cards', 'Flashcards'], ['notes', 'Notes'], ['tapes', 'Study Tapes'], ['boards', 'Boards'], ['history', 'History']];
+const TABS: [StudyTab, string][] = [['timetable','Timetable'], ['campus', 'Campus'], ['board', 'Semester Board'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['cards', 'Flashcards'], ['notes', 'Notes'], ['tapes', 'Study Tapes'], ['boards', 'Boards'], ['history', 'History']];
 
 export function Study({ experience }: { experience: Experience }) {
   const { target, go } = useStudy();
@@ -44,6 +45,7 @@ export function Study({ experience }: { experience: Experience }) {
           {TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => go({ tab: t })}>{l}</button>)}
         </div>
       </header>
+      {tab === 'timetable' && <TimetablePanel/>}
       {tab === 'campus' && (target.courseId ? <CourseSpace id={target.courseId} onBack={() => go({ tab: 'campus' })} /> : <Campus experience={experience} />)}
       {tab === 'board' && <Board />}
       {tab === 'tasks' && <Tasks courseId={target.courseId} />}

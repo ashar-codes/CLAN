@@ -1,3 +1,4 @@
+import {Timetables,schema as timetableSchema} from './modules/timetable/index.ts';
 // Composition root: the only place that knows every module. Modules receive their collaborators here and talk to each
 // other only through public APIs (modules/<name>/index.ts), events and the core services.
 import { mkdir } from 'node:fs/promises';
@@ -35,7 +36,7 @@ import { People, schema as peopleSchema } from './modules/people/index.ts';
 import type { AIProvider } from '@classroom/protocol';
 
 export const SCHEMAS: ModuleSchema[] = [eventsSchema, permissionsSchema, identitySchema, resourcesSchema, searchSchema, clansSchema, notesSchema, savedSchema, diarySchema, remindersSchema, chatSchema, captureSchema, notifySchema,
-  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema, syncSchema, hostingSchema, peopleSchema];
+  coursesSchema, tasksSchema, examsSchema, flashcardsSchema, studySchema, assignmentsSchema, aiSchema, whiteboardSchema, recordingsSchema, syncSchema, hostingSchema, peopleSchema, timetableSchema];
 
 export type ClanApp = ReturnType<typeof openClan>;
 
@@ -61,6 +62,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   let me = '';
   const local = () => me;
   const chat = new Chat(db, bus, permissions, now, local, (clanId) => !clans.cleanup(clanId));
+  const timetable = new Timetables(db,now);
   const courses = new Courses(db, bus, { clans, notes, files, saved, identity }, now);
   const tasks = new Tasks(db, bus, courses, (c, u) => clans.isActiveMember(c, u), now);
   const exams = new Exams(db, bus, courses, now);
@@ -93,7 +95,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   // Personal device sync: only the owner's personal data, each module through its own provider.
   const sync = new PersonalSync(db, identity, { tmpDir: join(opts.storageDir, 'sync-incoming'), ingest: async (p, mime) => { await mkdir(join(opts.storageDir, 'sync-incoming'), { recursive: true }); return store.ingest(p, mime); }, freeBytes: opts.freeBytes }, now);
   sync.register(profileProvider(identity));
-  for (const p of [notifications, courses, notes, saved, capture, diary, tasks, reminders, exams, flashcards, study, whiteboard, files, recordings, people].flatMap((m) => m.syncProviders())) sync.register(p);
+  for (const p of [notifications, timetable, courses, notes, saved, capture, diary, tasks, reminders, exams, flashcards, study, whiteboard, files, recordings, people].flatMap((m) => m.syncProviders())) sync.register(p);
   const SEARCH: Record<string, string> = { note: 'notes', 'saved-item': 'saved', course: 'courses', task: 'tasks', exam: 'exams', deck: 'flashcards', tape: 'recordings' };
   sync.onApplied((kind, id) => { if (SEARCH[kind]) search.reindex(SEARCH[kind], id); });
 
@@ -130,7 +132,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
     });
   };
 
-  return { db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, hosting, people, me, syncClassrooms, tick, purgeClanProjection };
+  return { timetable, db, bus, identity, permissions, store, search, context, clans, files, notes, saved, diary, reminders, share, chat, capture, notifications, courses, tasks, exams, flashcards, study, assignments, agenda, ai, whiteboard, recordings, sync, hosting, people, me, syncClassrooms, tick, purgeClanProjection };
 }
 
 export type { Principal, Scope } from './core/permissions.ts';

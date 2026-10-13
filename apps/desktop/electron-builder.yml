@@ -36,6 +36,7 @@ mac:
   extraResources:
     - { from: ../../native/macos-ble/clan-ble, to: clan-ble }
     - { from: "../../native/remote-control/bin/darwin-${arch}", to: remote-control }
+    - { from: "../../native/timetable-ocr/bin/darwin-${arch}/clan-timetable-ocr", to: clan-timetable-ocr }
     # Local SFU for screen sharing: sh native/livekit/fetch.sh (builds from source on macOS)
     - { from: "../../native/livekit/bin/darwin-${arch}/livekit-server", to: livekit-server }
 win:

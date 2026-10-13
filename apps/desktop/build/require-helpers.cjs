@@ -6,7 +6,7 @@ const { Arch } = require('builder-util');
 
 const native = join(__dirname, '..', '..', '..', 'native');
 const required = (platform, arch) => ({
-  darwin: [['remote-control','bin',`darwin-${arch}`,'clan-control'], ['macos-ble', 'clan-ble'], ['livekit', 'bin', `darwin-${arch}`, 'livekit-server']],
+  darwin: [['remote-control','bin',`darwin-${arch}`,'clan-control'], ['timetable-ocr','bin',`darwin-${arch}`,'clan-timetable-ocr'], ['macos-ble', 'clan-ble'], ['livekit', 'bin', `darwin-${arch}`, 'livekit-server']],
   win32: [['remote-control','bin',`win32-${arch}`,'clan-control.exe'], ['windows-direct', 'bin', 'publish', 'CLAN.DirectHelper.exe'], ['livekit', 'bin', `win32-${arch}`, 'livekit-server.exe']],
   linux: [['livekit', 'bin', `linux-${arch}`, 'livekit-server']],
 })[platform] ?? [];

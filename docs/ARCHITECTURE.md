@@ -92,3 +92,9 @@ DATA PLANE — teacher or peers, chosen per mode; correctness never depends on w
   `PeerAgent` (the desktop `ResourceTransport`). `transports.ts` — the mode-independent boundaries.
 * Mobile (2.6): OPAQUE in an isolated WebView + native pinned TLS module; downloads from peers, does not seed.
 Details: [PEER_ASSISTED_MODE.md](PEER_ASSISTED_MODE.md), [TRANSPORT_MODES.md](TRANSPORT_MODES.md), [MESH_MODE.md](MESH_MODE.md).
+
+## BTC-2D and BTC-2F
+
+RemoteControl and Timetable are independent modules. [RemoteControl](BTC_2D_RESULTS.md) binds explicit short-lived consent to existing meeting identities, leases and actual screen tracks; native Mac/Windows adapters enforce OS permissions and local-input priority. The trusted hosting computer handles control plaintext inside pinned TLS; this is not host-blind E2EE. Phones are controllers only. Existing pinned signaling sockets now recheck current leases instead of depending solely on their initial token check.
+
+[Timetable](BTC_2F_RESULTS.md) is a private aggregate in the modular core, with its own schema/sync provider and deterministic zoned schedule engine. Original images use existing private Files/Resource Store integrity. Mac/iOS Vision is local and optional; Windows/Android manual entry remains fully usable offline. Device-local active selection and alert ledgers do not sync or migrate with CLAN hosting. Neither module imports the other's domain.

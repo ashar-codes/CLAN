@@ -137,6 +137,7 @@ export function MySpace({ h, nearby, beacon, experience, go, quick }: {
       <div className="space-side">
         <div className="space-hello"><span className="eyebrow">My Space · {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</span>
           <h1 className="title world">Hi {h.me.name === 'Me' ? 'there' : h.me.name}</h1></div>
+        <button onClick={()=>goStudy({tab:'timetable'})}>Timetable · current and next class</button>
         {quick}
         <section className="today-list" aria-label="Today" data-testid="today">
           {h.today.slice(0, 8).map((i) => (

@@ -355,3 +355,4 @@ export * from './people.ts';
 export * from './lan-directory.ts';
 export { MeetingAction, type MeetingView, type MeetingState } from './meeting.ts';
 export * from './remote-control.ts';
+export * from './timetable.ts';

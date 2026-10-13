@@ -5,7 +5,7 @@ import type { AgendaItem, StudySession, TopicState } from '../../../shared.ts';
 import { api } from '../../App.tsx';
 import { useRecorder } from '../tape/recorder.tsx';
 
-export type StudyTab = 'campus' | 'board' | 'tasks' | 'exams' | 'cards' | 'notes' | 'tapes' | 'boards' | 'history';
+export type StudyTab = 'timetable' | 'campus' | 'board' | 'tasks' | 'exams' | 'cards' | 'notes' | 'tapes' | 'boards' | 'history';
 export type StudyTarget = { tab: StudyTab; courseId?: string; examId?: string; deckId?: string; noteId?: string; tapeId?: string; tapeAt?: number; boardId?: string };
 export type StudyCtx = {
   target: StudyTarget; go(t: StudyTarget): void;

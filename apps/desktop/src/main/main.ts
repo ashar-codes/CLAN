@@ -1,3 +1,4 @@
+import {registerTimetable} from './timetable.ts';
 import { registerRemoteControl } from './remote-control.ts';
 import { setDirectoryHost, directoryClassrooms, onDirectoryClassrooms } from './lan-directory.ts';
 import { app, BrowserWindow, Notification, dialog, ipcMain, powerMonitor, session, shell, type WebContents } from 'electron';
@@ -481,7 +482,7 @@ app.whenReady().then(async () => {
   clan = registerClan(db(), join(app.getPath('userData'), 'storage'), () => loadProfile().fullName, providerFactory(aiCreds));
   chatHooks = registerChat({ clan, server: () => server, trust, files: studentFiles });
   for (const url of pendingIntakeUrls.splice(0)) void chatHooks.intake(url);
-  registerStudy(clan);
+  registerStudy(clan); registerTimetable(clan);
   registerAI(clan, aiCreds);
   registerBoards(clan);
   registerTapes(clan);

@@ -2,7 +2,9 @@ import { directorySettings } from './people/directory';
 // The phone shell: Home · Study · Inbox · Diary · Me, a bottom bar with large targets, and the CLAN room look
 // (wall, wood, the student's CLANmate). Joining a live CLAN opens the existing pinned-TLS join flow.
 import { useEffect, useState, type ReactNode } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import {syncTimetableNotifications} from './timetable/notifications';
+import { AppState, Alert, Pressable, Text, View } from 'react-native';
 import { dataNotice, phoneClan, me } from './core/clan';
 import { nearby } from './people/nearby';
 import { syncNow } from './sync/phone';
@@ -25,6 +27,10 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
   const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false), [hosting, setHosting] = useState(false);
   useEffect(() => onPeopleNotification(() => { setTab('people'); setJoining(false); setDevices(false); setHosting(false); }), []);
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
+  const timetableRevision=useData(()=>phoneClan().timetable.list(me(),true).map(t=>[t.id,t.updatedAt,t.active,t.archived]))??[];
+  const timetableNotificationPrefs=useData(()=>phoneClan().notifications.prefs(me()).reminders);
+  useEffect(()=>{void syncTimetableNotifications().catch(()=>{});},[JSON.stringify(timetableRevision),timetableNotificationPrefs]);
+  useEffect(()=>{const sub=AppState.addEventListener('change',s=>{if(s==='active')void syncTimetableNotifications().catch(()=>{});});const click=Notifications.addNotificationResponseReceivedListener(r=>{if(r.notification.request.content.data?.timetable===true){setStudyInitial('timetable');setTab('study');setJoining(false);setDevices(false);setHosting(false);}});return()=>{sub.remove();click.remove();};},[]);
   const inboxCount = useData(() => phoneClan().capture.inbox(me()).length) ?? 0;
   // Known contacts reconnect on launch; optional Android availability is restored only after foreground consent.
   useEffect(() => { try { if (phoneClan().people.contacts('all').length || nearby.mode === 'keep' || directorySettings()) void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
@@ -72,7 +78,7 @@ function Home({ onCreate, onJoin, go, onStudy }: { onCreate(): void; onJoin(): v
     <Screen>
       {!!dataNotice() && <Card tone="warn"><Text accessibilityRole="alert" style={{ color: c.text }}>{dataNotice()}</Text></Card>}
       <RoomBand title={`${name.split(' ')[0]}'s desk`} sub={new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} right={<Mate name={name} size={52} />} />
-      <Row><Btn label="Create CLAN" onPress={onCreate} /><Btn primary label="Join a CLAN" onPress={onJoin} /><Btn label={session ? 'Studying…' : 'Start studying'} onPress={() => onStudy('session')} /><Btn label="Capture" onPress={() => go('inbox')} /></Row>
+      <Row><Btn label="Timetable" onPress={()=>onStudy('timetable')}/><Btn label="Create CLAN" onPress={onCreate} /><Btn primary label="Join a CLAN" onPress={onJoin} /><Btn label={session ? 'Studying…' : 'Start studying'} onPress={() => onStudy('session')} /><Btn label="Capture" onPress={() => go('inbox')} /></Row>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }} accessibilityLabel="My Space objects">
         {objects.map(({ title, hint, run, color, glyph }) => <Pressable key={title} accessibilityRole="button" accessibilityLabel={`${title}: ${hint}`} onPress={run} style={({ pressed }) => ({ width: '47%', minHeight: 104, padding: 14, borderRadius: 20, borderWidth: 1, borderColor: c.border, backgroundColor: pressed ? c.bg2 : c.surface })}>
           <Text accessible={false} style={{ color, fontSize: 30 }}>{glyph}</Text><Text style={{ color: c.text, fontWeight: '800', fontSize: 16 }}>{title}</Text><Text style={{ color: c.text2, fontSize: 12 }}>{hint}</Text>

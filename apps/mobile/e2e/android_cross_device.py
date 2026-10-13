@@ -69,11 +69,19 @@ def open_chat():
     raise AssertionError('chat modal did not open')
 
 def type_(label, text, dismiss=True):
-    x, y = find(label, edit=True); adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.3)
+    dimensions=re.findall(r'(\d+)x(\d+)',adb('shell','wm','size').decode());assert dimensions,'cannot determine emulator viewport'
+    height=int(dimensions[-1][1])
+    for _ in range(12):
+        x,y=find(label,edit=True)
+        if height*.06<y<height*.84:break
+        start,end=(int(height*.4),int(height*.75)) if y<=height*.06 else (int(height*.8),int(height*.4))
+        adb('shell','input','swipe','24',str(start),'24',str(end),'300');time.sleep(.4)
+    else:raise AssertionError('field obscured by system/tab bars: '+label)
+    adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.3)
     adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END')
     adb('shell', 'input', 'keyevent', '--delay', '10', *(['KEYCODE_DEL'] * 60))
     adb('shell', 'input', 'text', text.replace(' ', '%s'))
-    if dismiss: adb('shell', 'input', 'keyevent', '111')
+    if dismiss: adb('shell', 'input', 'keyevent', 'KEYCODE_BACK')
     time.sleep(0.3)
     if label in ('Link code', 'Computer address (only if not found)', 'Six digit classroom code', 'Host address'):
         until(lambda: any(n.get('class') == 'android.widget.EditText' and n.get('content-desc') == label and n.get('text') == text for n in nodes()), 'text entered in ' + label)

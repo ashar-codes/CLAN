@@ -17,3 +17,4 @@ Installable Files/
 # Native input helpers are built locally/CI; never commit compiled artifacts.
 native/remote-control/bin/
 native/remote-control/obj/
+native/timetable-ocr/bin/

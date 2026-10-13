@@ -35,4 +35,4 @@ jobs:
       - name: Windows Electron media, networking and Study regressions
         if: runner.os == 'Windows' && !cancelled()
         working-directory: apps/desktop
-        run: pnpm exec vitest run -c vitest.e2e.config.ts e2e/people.test.ts e2e/meeting.test.ts e2e/screen.test.ts e2e/lan-directory.test.ts e2e/study.test.ts
+        run: pnpm exec vitest run -c vitest.e2e.config.ts e2e/people.test.ts e2e/meeting.test.ts e2e/screen.test.ts e2e/lan-directory.test.ts e2e/study.test.ts e2e/timetable.test.ts

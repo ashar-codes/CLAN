@@ -1,3 +1,4 @@
+import {MobileTimetable} from '../timetable/Timetable';
 // Phone Study over @clan/core (the same modules as the desktop, synced by PersonalSync): Courses with topic marks,
 // Notes, Tasks, Exams, Reminders, Flashcards (SM-2 review) and Study Sessions. Dates use the native pickers.
 import { useMemo, useState } from 'react';
@@ -9,9 +10,9 @@ import { act, Btn, Card, Choice, DateField, Err, Field, H1, Muted, Row, Screen, 
 import { AskTab } from './Ask';
 import { MobileBoard, useLocalBoard } from '../board/Board';
 
-type Tab = 'courses' | 'notes' | 'tasks' | 'exams' | 'reminders' | 'cards' | 'session' | 'boards' | 'ask';
+type Tab = 'timetable' | 'courses' | 'notes' | 'tasks' | 'exams' | 'reminders' | 'cards' | 'session' | 'boards' | 'ask';
 export type MobileStudyTab = Tab;
-const TABS: [Tab, string][] = [['courses', 'Courses'], ['notes', 'Notes'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['reminders', 'Reminders'], ['cards', 'Cards'], ['session', 'Session'], ['boards', 'Boards'], ['ask', 'Ask CLAN']];
+const TABS: [Tab, string][] = [['timetable','Timetable'], ['courses', 'Courses'], ['notes', 'Notes'], ['tasks', 'Tasks'], ['exams', 'Exams'], ['reminders', 'Reminders'], ['cards', 'Cards'], ['session', 'Session'], ['boards', 'Boards'], ['ask', 'Ask CLAN']];
 
 export function StudyScreen({ initial = 'courses' }: { initial?: Tab }) {
   const [tab, setTab] = useState<Tab>(initial);
@@ -19,6 +20,7 @@ export function StudyScreen({ initial = 'courses' }: { initial?: Tab }) {
     <Screen>
       <H1>Study</H1>
       <Row gap={6}>{TABS.map(([t, l]) => <Btn key={t} small label={l} on={tab === t} onPress={() => setTab(t)} />)}</Row>
+      {tab === 'timetable' && <MobileTimetable/>}
       {tab === 'courses' && <Courses />}{tab === 'notes' && <Notes />}{tab === 'tasks' && <Tasks />}{tab === 'exams' && <Exams />}
       {tab === 'reminders' && <Reminders />}{tab === 'cards' && <Cards />}{tab === 'session' && <Session />}{tab === 'boards' && <Boards />}{tab === 'ask' && <AskTab />}
     </Screen>

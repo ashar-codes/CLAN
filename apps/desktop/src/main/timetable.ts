@@ -1,0 +1,22 @@
+import {app,dialog,ipcMain,Notification} from 'electron';
+import {readFile,stat} from 'node:fs/promises';
+import {basename,join} from 'node:path';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {z} from 'zod';
+import type {ClanApp} from '@clan/core';
+import {TimetableDraft,timetableReminders,timetableImage} from '@classroom/protocol';
+const binary=()=>join(app.isPackaged?process.resourcesPath:join(app.getAppPath(),'../..','native/timetable-ocr/bin',`${process.platform}-${process.arch}`),'clan-timetable-ocr');
+export function registerTimetable(c:ClanApp){const me={kind:'user' as const,userId:c.me},scope={kind:'personal' as const,ownerId:c.me};
+ const image=async(id:string)=>{const v=c.files.get(me,z.uuid().parse(id));if(!v||v.scope.kind!=='personal'||v.scope.ownerId!==c.me)throw Error('Private original image unavailable.');const ref=c.store.getRef(id),obj=ref&&c.store.object(ref.objectId);if(!obj||obj.size>15*1024*1024||!['image/png','image/jpeg'].includes(obj.mime)||!await c.store.verify(obj.id))throw Error('Original image failed integrity or format validation.');timetableImage(await readFile(obj.location));return obj;};
+ const handle=(name:string,fn:(...args:any[])=>unknown)=>ipcMain.handle('timetable:'+name,(_e,...args)=>fn(...args));
+ handle('list',()=>c.timetable.list(me,true));handle('save',(raw,id)=>c.timetable.save(me,TimetableDraft.parse(raw),id===undefined?undefined:z.uuid().parse(id)));handle('activate',id=>c.timetable.activate(me,z.uuid().parse(id)));handle('archive',(id,on)=>c.timetable.archive(me,z.uuid().parse(id),z.boolean().parse(on)));handle('duplicate',id=>c.timetable.duplicate(me,z.uuid().parse(id)));handle('remove',id=>c.timetable.remove(me,z.uuid().parse(id)));
+ handle('image',async id=>{const obj=await image(id);return `data:${obj.mime};base64,${(await readFile(obj.location)).toString('base64')}`;});
+ handle('import',async()=>{const r=await dialog.showOpenDialog({properties:['openFile'],filters:[{name:'Timetable image or JSON',extensions:['png','jpg','jpeg','json']}]});const path=r.filePaths[0];if(r.canceled||!path)return null;const size=(await stat(path)).size;if(size<=0||size>15*1024*1024)throw Error('Use a nonempty image under 15 MB.');if(path.toLowerCase().endsWith('.json')&&size>120000)throw Error('Timetable JSON must be under 120 KB.');if(path.toLowerCase().endsWith('.json'))return {draft:TimetableDraft.parse(JSON.parse(await readFile(path,'utf8')))};
+ const data=await readFile(path);const {mime}=timetableImage(data);const file=await c.files.add(me,path,basename(path),scope,mime);return {imageId:file.refId};});
+ handle('recognize',async id=>{const obj=await image(id);if(process.platform!=='darwin')return {available:false,text:'',reason:'Local OCR unavailable on this platform. Use manual entry; your original stays private.'};try{const r=await promisify(execFile)(binary(),[obj.location],{timeout:30000,maxBuffer:200000});const rows=(JSON.parse(r.stdout).lines as {text:string;confidence:number;x:number;y:number}[]);let group:{y:number;text:string[]}[]=[];for(const row of rows){let g=group.find(g=>Math.abs(g.y-row.y)<.018);if(!g){g={y:row.y,text:[]};group.push(g);}g.text.push(row.text);}return {available:true,text:group.map(g=>g.text.join(' ')).join('\n'),uncertain:rows.some(r=>r.confidence<.8),reason:'Review every recognized field. Unreadable or ambiguous cells require manual entry.'};}catch{return {available:false,text:'',reason:'Local recognition could not read this image. Use manual entry or a clearer image.'};}});
+ // Persistent occurrence ledger prevents duplicate desktop alerts across app restarts. No private content in notices.
+
+ let planned=new Map<string,number>();const rebuild=()=>{const active=c.timetable.list(me).find(t=>t.active);planned=active&&c.notifications.prefs(me).reminders?new Map(timetableReminders(active,Date.now()-30000).map(r=>[active.id+':'+r.id,r.at])):new Map();};
+ setInterval(()=>{try{rebuild();const now=Date.now();for(const [id,at]of planned)if(at<=now&&now-at<30000&&Notification.isSupported()){const r=c.db.prepare('INSERT OR IGNORE INTO timetable_alerts(owner_id,id,at) VALUES(?,?,?)').run(c.me,id,at);if(r.changes)new Notification({title:'CLAN Timetable',body:'Your next class begins soon. Open Timetable for details.'}).show();}c.db.prepare('DELETE FROM timetable_alerts WHERE owner_id=? AND at<?').run(c.me,now-30*86400000);}catch{/* Alerts may be unavailable; private schedules remain readable. */}},15000).unref();
+}
