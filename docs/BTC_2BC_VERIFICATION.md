@@ -1,8 +1,8 @@
 # BTC-2B+C verification
 
-Status: local native, full unit and complete Electron verification passed; Windows CI repairs under verification. No public-release or physical-hardware completion claim.
+Status: available local software/native verification and Linux/Windows CI PASS. Physical cross-device media and public-release gates remain NOT TESTED / incomplete. No public-release or physical-hardware completion claim.
 
-Application branch: `btc-2bc-media`, baseline `258f657d3ec867878236b38811947cfc9ffbae97`. Application source: `f4a0b26fa97e1083463737d8518c37f5baff82e9`. Subsequent documentation-only checkpoints do not alter the tested application. Remote verification: [CI run](https://github.com/ashar-codes/CLAN/actions/runs/38333055800).
+Application branch: `btc-2bc-media`, baseline `258f657d3ec867878236b38811947cfc9ffbae97`. Feature source: `f4a0b26fa97e1083463737d8518c37f5baff82e9`; verified Windows fixture portability checkpoint: `d99fd40880f6c126902ce714fe8ca5cd7cde1ca7`. Subsequent documentation-only checkpoints do not alter the tested application. Remote verification: [initial CI](https://github.com/ashar-codes/CLAN/actions/runs/38333055800), [portability repeat](https://github.com/ashar-codes/CLAN/actions/runs/38333901909).
 
 ## Evidence already obtained
 
@@ -35,11 +35,11 @@ Use Node 24.19.0 and the existing pinned SFU fetched by `native/livekit/fetch.sh
 - Android: `:app:assembleQa -PreactNativeArchitectures=arm64-v8a --max-workers=2`; install only on a disposable QA emulator, then run `apps/mobile/e2e/android_meeting.py` and `android_cross_device.py` sequentially. Set `ADB` to a wrapper restricted to that emulator. Meeting rendering checks require local `ffmpeg`.
 - iOS: signed native simulator build and native XCTest; see [BUILDING](BUILDING.md). No physical Apple credentials are invented.
 
-Local evidence is in `/tmp/clan-btc2bc-*`; native XCTest result bundles are `/private/tmp/clan-btc2bc-ios-*.xcresult`. These logs and disposable media/profiles stay outside Git. `.github/workflows/btc2bc-media.yml` checks Linux and Windows software/media on this branch; Linux CI passed; Windows results are pending below. Windows CI uses virtual media, not hardware.
+Local evidence is in `/tmp/clan-btc2bc-*`; native XCTest result bundles are `/private/tmp/clan-btc2bc-ios-*.xcresult`. These logs and disposable media/profiles stay outside Git. `.github/workflows/btc2bc-media.yml` checks Linux and Windows software/media on this branch; Linux and Windows CI passed; exact counts are recorded below. Windows CI uses virtual media, not hardware.
 
 ## Hardware distinction and restrictions
 
-PASS software/native/simulator tests never imply physical cameras, microphones, router topology or eight-participant load passed. Physical Mac↔Windows↔Android↔iPhone media, multi-router networking, physical camera switching/permission revocation, battery/background/locked behavior and real screen/window capture are NOT TESTED in this stage. iOS simulator media frames/audio are NOT TESTED; simulator startup and persistence are separate PASS results. No tests are deliberately skipped to make failing assertions green; hardware-unavailable scenarios remain NOT TESTED. The four BTC-1 Desktop installers and installed CLAN TEST remain unchanged. No IPA, installer rebuild or release approval is claimed. All four current installer SHA-256 hashes were rechecked unchanged. Installed CLAN TEST remains intact. Available disk space at the local verification checkpoint: approximately 28 GiB.
+PASS software/native/simulator tests never imply physical cameras, microphones, router topology or eight-participant load passed. Physical Mac↔Windows↔Android↔iPhone media, multi-router networking, physical camera switching/permission revocation, battery/background/locked behavior and real screen/window capture are NOT TESTED in this stage. iOS simulator media frames/audio are NOT TESTED; simulator startup and persistence are separate PASS results. No tests are deliberately skipped to make failing assertions green; hardware-unavailable scenarios remain NOT TESTED. The four BTC-1 Desktop installers and installed CLAN TEST remain unchanged. No IPA, installer rebuild or release approval is claimed. All four current installer SHA-256 hashes were rechecked unchanged. Installed CLAN TEST remains intact. Available disk space at final verification: approximately 27 GiB.
 
 After software checks: verify audio/video on each pair, then 4–8 participants on an authorized LAN without internet; test late join, direct-call upgrades, mute, camera switch/deny, blocks, revocation, stale host, network loss/reconnect and OS capture permissions. Check microphone/camera indicators extinguish immediately on hangup/navigation and camera stays off in background. Recheck existing messaging, queued voice/file delivery and handover. Administrator-authorized UDP routes remain necessary for media across subnets; no firewall bypass or TURN is introduced.
 
@@ -57,7 +57,7 @@ After software checks: verify audio/video on each pair, then 4–8 participants 
 | iOS native build, secure startup and restart persistence | PASS | Simulator; camera/media and physical signing NOT TESTED |
 | Physical Mac microphone/camera capture | PASS | Local capture only; cross-device hardware call NOT TESTED |
 | Linux CI | PASS: typecheck, desktop build, 484 tests; 1 SKIPPED | Apple Security/Swift test requires macOS and passed locally |
-| Windows software | CI running | Physical Windows media NOT TESTED |
+| Windows CI | PASS: typecheck/build, 484 tests; 1 SKIPPED; 12 Electron tests | Virtual media; physical Windows media NOT TESTED |
 
 No test assertion was deliberately skipped or weakened to obtain PASS. The existing platform-gated Apple Security/Swift test is SKIPPED on Linux/Windows, separately counted; it passes on macOS. Earlier failures are retained above; hardware unavailable is NOT TESTED, separate from a failed executed test.
 
@@ -70,3 +70,19 @@ The application commit changes 44 files: shared call/media lifecycle and protoco
 Initial CI `38333055800`: Linux PASS (484 tests, one Apple Security/Swift platform SKIPPED). Windows typecheck/build PASS; unit/integration FAIL (468 PASS, 16 FAIL, one SKIPPED; two additional suite cleanup errors). Windows Electron was initially not run because of the unit failure. Failures included POSIX-only path assertions/source-boundary comparisons, Unix socket mock BLE transport, open fixture SQLite handles blocking Windows deletion, and the final meeting termination state timing out after otherwise successful four-publisher media.
 
 Fixture path handling now uses native separators and normalized source-relative paths without changing containment/authorization assertions. The development-only mock BLE radio now uses Windows named pipes plus disposable advertisement markers and rejects listener errors; production cannot select the mock. Fixture database handles close before removing disposable directories. Seven affected local suites passed **105 tests**. CI runs serial units and collects Windows Electron results even after another check fails. The meeting timeout now reports its condition and states for diagnosis; no media/end assertion was removed.
+
+Linux repeat `38333901909` passed typecheck, desktop build and 484 tests (one Apple Security/Swift SKIPPED), 342.34 seconds. Post-portability local real-SFU/security repeat passed all five scenarios. Across the branch, 51 files changed; the additional seven files repair Windows fixture portability, not new features.
+
+Windows repeat `38333901909`: full unit/integration step passed after portability and serial-execution repairs, including the unchanged meeting-end assertion. Windows Electron media/People regressions passed four files / 12 tests (117.65 seconds). Full Windows units: 65 files / 484 tests PASS, one Apple-only SKIPPED (454.75 seconds). The earlier meeting termination timing failure did not repeat under serial execution; its diagnostic condition remains explicit.
+
+## Final checkpoint and next hardware verification
+
+Final application/fixture source is `d99fd40880f6c126902ce714fe8ca5cd7cde1ca7`; the following evidence-only commit changes no application code. [Final CI](https://github.com/ashar-codes/CLAN/actions/runs/38333901909) is successful on Linux and Windows. Local Mac: 485 unit/integration tests and 44 complete Electron tests PASS. Targeted portability repeat: 105 PASS; real-SFU security/media repeat: five PASS. Android native build, emulator meeting and full integration PASS. iOS signed simulator compilation, strict signature verification and two persistence runs PASS. Executed final failures: none. Platform SKIPPED: one Apple Security/Swift test on each non-Apple CI runner, separately passed locally. Earlier failed runs remain recorded above.
+
+1. On Mac/Windows/Android/iPhones using an authorized desktop CLAN host, test existing audio first, direct video second, then explicit audio-to-video upgrades. Verify audio both ways and visible changing camera frames, deny permissions, toggle/switch cameras and confirm capture indicators extinguish on hangup.
+2. Invite four participants into audio and video rooms without internet. Exercise late join/rejoin, mute, hand/chat, moderator removal, blocks/revocation and room end. Expand to eight only after CPU/bandwidth evidence.
+3. Select a real Mac/Windows screen/window, verify changing frames on phones, switch source, stop and revoke OS capture permission. Phone broadcasting remains unavailable.
+4. Disconnect/roam across permitted routed LANs, reconnect, lock/background each OS and confirm camera stays off; iOS leaves suspended meetings, Android audio follows existing opt-in Keep mode. Check messages/queued voice notes/files and host handover remain correct.
+5. Validate physical iPhone signing/team capabilities through Xcode; simulator signing is not physical provisioning. Existing BTC-1 installers do not contain these new features; package rebuilding remains explicitly deferred to BTC-2E.
+
+PRs #1–#4 remain open draft and unmerged; no release, installer replacement or subsequent BTC-2D/E/F implementation was performed.
