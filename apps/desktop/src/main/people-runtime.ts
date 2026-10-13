@@ -249,7 +249,7 @@ export async function startPeopleRuntime(o: {
     const friend = sv.t ? p.matchPresence(sv.r, sv.t) : null;
     if (friend) {
       if (p.visibility() === 'invisible') return;
-      void cm.connect(addr, { expectKey: friend }).then(() => seen(p.contact(friend), addr, sv.r), () => {});
+      void cm.connect(addr, { expectKey: friend, automatic: true }).then(() => seen(p.contact(friend), addr, sv.r), () => {});
       return;
     }
     void tcpTransport().dial(addr).then((l) => probeAnonymously(l)).then(({ key, profile }) => {
@@ -277,7 +277,7 @@ export async function startPeopleRuntime(o: {
       for (const ep of ad.endpoints) {
         try {
           const addr = `tcp:${ep}`;
-          if (friend) { if (p.visibility() === 'invisible') continue; if (!cm.connected(friend)) await cm.connect(addr, { expectKey: friend }); if (generation !== directoryGeneration || stopped) break; seen(p.contact(friend), addr, `dir:${ad.r}`, 'Internal Network'); }
+          if (friend) { if (p.visibility() === 'invisible') continue; if (!cm.connected(friend)) await cm.connect(addr, { expectKey: friend, automatic: true }); if (generation !== directoryGeneration || stopped) break; seen(p.contact(friend), addr, `dir:${ad.r}`, 'Internal Network'); }
           else { const { key, profile } = await probeAnonymously(await tcpTransport(3000).dial(addr)); if (stopped || generation !== directoryGeneration || key === o.signer.publicKey) break; const c = p.meet({ profile }); if (!p.isBlocked(key)) { p.setLinkAddrs(key, [addr, ...p.linkAddrs(key)].slice(0, 6)); seen(c, addr, `dir:${ad.r}`, 'Internal Network'); } }
           break;
         } catch { /* directory hints cannot override authentication or visibility */ }

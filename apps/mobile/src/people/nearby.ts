@@ -215,7 +215,7 @@ class Nearby {
   private async look(address: string, entry: Omit<NearbyEntry, 'address'> & { address: string | null }, valid = () => true) {
     const cm = this.cm, generation = this.generation; if (!cm) return;
     try {
-      if (entry.key) { if (people().visibility() === 'invisible' || people().isBlocked(entry.key)) return; if (!cm.connected(entry.key)) await cm.connect(address, { expectKey: entry.key }); if (!this.running || generation !== this.generation || !valid()) return; this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); return; }
+      if (entry.key) { if (people().visibility() === 'invisible' || people().isBlocked(entry.key)) return; if (!cm.connected(entry.key)) await cm.connect(address, { expectKey: entry.key, automatic: true }); if (!this.running || generation !== this.generation || !valid()) return; this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); return; }
       const { key, profile } = await probeAnonymously(await nativeLinkTransport.dial(address));
       if (!this.running || generation !== this.generation || !valid()) return;
       const c = people().meet({ profile });

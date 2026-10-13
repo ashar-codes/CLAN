@@ -1,7 +1,6 @@
-// People on a phone. A phone runs no server (iOS/Android cannot accept LAN connections from the background, and CLAN
-// does not open one), so it is always the caller: it reaches computers by their verified code, sends with signed
-// requests over certificate-pinned TLS, keeps one authenticated socket per computer for what they send back, downloads
-// accepted files and pushes its own in chunks. Platform-agnostic: the app passes native transports, tests pass Node ones.
+// Legacy pinned-TLS computer adapter. Native direct-link listeners live in nearby.ts;
+// explicit Android Keep availability can retain those connections while the UI is closed.
+// This adapter shares the same authenticated People store/outbox across both transports.
 import { b64u, parseProfileQr, PeerTlsBinding, peerBindingValid, type PeerEnvelope } from '@classroom/protocol';
 import { peerAuthHeaders, peerSocketAuth, type WebSocketLike } from '@classroom/client';
 import type { People } from '@clan/core';
