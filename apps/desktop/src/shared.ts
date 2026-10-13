@@ -414,7 +414,8 @@ export type DesktopApi = {
   peerProbe(targets: string[]): Promise<{ tried: number; reachable: number }>;
   mediaPermission(): Promise<{ platform: string; screen: string; audio: boolean; testCapture: boolean }>;
   mediaSources(): Promise<{ id: string; kind: 'screen' | 'window'; name: string; thumbnail: string }[]>;
-  mediaChoose(id: string, audio: boolean): Promise<void>;
+  mediaChoose(id: string, audio: boolean, room?:string): Promise<string>;
+  controlScreen(ticket:string,room:string,track:string):Promise<void>;
   meetingNotice(c:{url:string;token:string;sessionId:string}, id:string):Promise<void>;
   timetable:{list():Promise<Timetable[]>;save(draft:TimetableDraft,id?:string):Promise<Timetable>;activate(id:string):Promise<void>;archive(id:string,on:boolean):Promise<void>;duplicate(id:string):Promise<Timetable>;remove(id:string):Promise<void>;import():Promise<{imageId?:string;draft?:TimetableDraft}|null>;image(id:string):Promise<string>;recognize(id:string):Promise<{available:boolean;text:string;reason:string;uncertain?:boolean}>};
   controlCapability():Promise<{available:boolean;platform:string;reason:string}>;

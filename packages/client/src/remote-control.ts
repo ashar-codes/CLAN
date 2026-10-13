@@ -9,3 +9,11 @@ export class ControlSender {
  private async flush(){this.running=true;try{while(!this.closed&&this.queue.length){await this.send(++this.seq,this.queue.shift()!);await new Promise(r=>setTimeout(r,35));}}catch{this.close();this.failed();}finally{this.running=false;}}
  close(){this.closed=true;this.queue=[];}
 }
+
+/** A control grant must refer to the exact local capture, not whichever monitor was most recently picked. */
+export class ControlCapture {
+ private current:{ticket:string;room:string|null;display:string|null;owner:number;screen:string|null}|null=null;
+ picked(ticket:string,room:string|null,display:string|null,owner:number){this.current={ticket,room,display,owner,screen:null};}
+ bind(ticket:string,room:string,screen:string,owner:number){const c=this.current;if(!c||c.ticket!==ticket||c.room!==room||c.owner!==owner)throw Error('This meeting does not own the selected whole-display capture.');c.screen=screen;}
+ display(room:string,screen:string,owner:number){const c=this.current;return c?.room===room&&c.screen===screen&&c.owner===owner?c.display:null;}
+}

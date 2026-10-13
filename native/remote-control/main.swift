@@ -13,7 +13,8 @@ func permissions(_ prompt:Bool=false)->Bool {
 func safe()->Bool { if let target=targetPid,NSWorkspace.shared.frontmostApplication?.processIdentifier != target{return false};if let id=NSWorkspace.shared.frontmostApplication?.bundleIdentifier,Set(["com.apple.loginwindow","com.apple.SecurityAgent","com.apple.systempreferences","com.apple.keychainaccess"]).contains(id){return false};let flags=CGEventSource.flagsState(.combinedSessionState); guard flags.intersection([.maskCommand,.maskControl,.maskAlternate,.maskSecondaryFn]).isEmpty, permissions(),!IsSecureEventInputEnabled(),let s=CGSessionCopyCurrentDictionary() as? [String:Any] else{return false};return s["CGSSessionScreenIsLocked"] as? Bool != true  &&  s["kCGSSessionOnConsoleKey"] as? Bool == true }
 if CommandLine.arguments.contains("--check")  ||  CommandLine.arguments.contains("--request") {output(["available":permissions(CommandLine.arguments.contains("--request")),"platform":"macOS"]);exit(0)}
 var targetPid:pid_t?=nil,displayId:CGDirectDisplayID=0
-var active=false,deadline=Date.distantPast,expires=Date.distantPast,bounds=CGRect.zero,pressed=false,tap:CFMachPort?
+func monotonic()->TimeInterval{ProcessInfo.processInfo.systemUptime}
+var active=false,deadline:TimeInterval=0,expires:TimeInterval=0,bounds=CGRect.zero,pressed=false,tap:CFMachPort?
 func stop(){active=false;if pressed,let e=CGEvent(mouseEventSource:nil,mouseType:.leftMouseUp,mouseCursorPosition:CGEvent(source:nil)?.location ?? .zero,mouseButton:.left){e.setIntegerValueField(.eventSourceUserData,value:tag);e.post(tap:.cghidEventTap)};pressed=false;output(["stopped":true])}
 let mask:CGEventMask = [CGEventType.keyDown,.leftMouseDown,.rightMouseDown,.mouseMoved,.scrollWheel].reduce(0){$0 | (1 << $1.rawValue)}
 tap=CGEvent.tapCreate(tap:.cghidEventTap,place:.headInsertEventTap,options:.listenOnly,eventsOfInterest:mask,callback:{_,type,event,_ in
@@ -32,12 +33,12 @@ func focusedInScope()->Bool {
  guard AXValueGetValue(position as! AXValue,.cgPoint,&point),AXValueGetValue(size as! AXValue,.cgSize,&dimensions) else{return false}
  return bounds.contains(CGRect(origin:point,size:dimensions))
 }
-func post(_ e:CGEvent?){guard active,CGDisplayIsActive(displayId) != 0,CGDisplayBounds(displayId)==bounds,safe(),Date()<deadline,Date()<expires,let e=e else {stop();return};e.setIntegerValueField(.eventSourceUserData,value:tag);e.post(tap:.cghidEventTap)}
+func post(_ e:CGEvent?){guard active,CGDisplayIsActive(displayId) != 0,CGDisplayBounds(displayId)==bounds,safe(),monotonic()<deadline,monotonic()<expires,let e=e else {stop();return};e.setIntegerValueField(.eventSourceUserData,value:tag);e.post(tap:.cghidEventTap)}
 func packet(_ v:[String:Any]){
  guard let kind=v["kind"] as? String else {stop();return}
- if kind=="arm" {guard !active,safe(),let id=v["display"] as? UInt32,let seconds=v["seconds"] as? Double,seconds>0,seconds<=180,CGDisplayIsActive(id) != 0 else{stop();return};displayId=id;targetPid=v["pid"] as? pid_t;bounds=CGDisplayBounds(id);expires=Date().addingTimeInterval(seconds);deadline=Date().addingTimeInterval(1);active=true;output(["armed":true]);return}
- if kind=="stop"{stop();return};guard active,safe(),Date()<deadline,Date()<expires else{stop();return}
- if kind=="heartbeat"{deadline=Date().addingTimeInterval(1);return}
+ if kind=="arm" {guard !active,safe(),let id=v["display"] as? UInt32,let seconds=v["seconds"] as? Double,seconds>0,seconds<=180,CGDisplayIsActive(id) != 0 else{stop();return};displayId=id;targetPid=v["pid"] as? pid_t;bounds=CGDisplayBounds(id);expires=monotonic()+seconds;deadline=monotonic()+1;active=true;output(["armed":true]);return}
+ if kind=="stop"{stop();return};guard active,safe(),monotonic()<deadline,monotonic()<expires else{stop();return}
+ if kind=="heartbeat"{deadline=monotonic()+1;return}
  guard kind=="input",let input=v["input"] as? [String:Any],let type=input["type"] as? String else{stop();return}
  if type=="pointer"{guard let x=input["x"] as? Double,let y=input["y"] as? Double,x.isFinite,y.isFinite,x>=0,x<=1,y>=0,y<=1,let action=input["action"] as? String else{stop();return};let point=CGPoint(x:bounds.minX+x*(bounds.width-1),y:bounds.minY+y*(bounds.height-1));
  let windows=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]] ?? []
@@ -49,5 +50,5 @@ func packet(_ v:[String:Any]){
  else{stop()}
 }
 var pending=Data();FileHandle.standardInput.readabilityHandler={h in let data=h.availableData;if data.isEmpty{DispatchQueue.main.async{stop();exit(0)};return};DispatchQueue.main.async {pending.append(data);if pending.count>8192{stop();exit(1)};while let at=pending.firstIndex(of:10){let line=pending.prefix(upTo:at);pending.removeSubrange(...at);guard let value=(try? JSONSerialization.jsonObject(with:line)) as? [String:Any] else{stop();continue};packet(value)}}}
-Timer.scheduledTimer(withTimeInterval:0.05,repeats:true){_ in if active  &&  (!safe() || Date()>=deadline || Date()>=expires ||  !CGEvent.tapIsEnabled(tap:tap)){stop()}}
+Timer.scheduledTimer(withTimeInterval:0.05,repeats:true){_ in if active  &&  (!safe() || monotonic()>=deadline || monotonic()>=expires ||  !CGEvent.tapIsEnabled(tap:tap)){stop()}}
 RunLoop.main.run()
