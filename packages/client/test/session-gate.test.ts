@@ -58,3 +58,40 @@ it('an unverified host cannot grow an unbounded message queue', async () => {
   await Promise.all(tasks);
   expect(failed).toHaveBeenCalledOnce(); expect(message).not.toHaveBeenCalled(); expect(gate.confirmed).toBe(false);
 });
+
+it('pauses permission controls and coalesces completion telemetry until current authority is verified', async () => {
+  let finish!: () => void;
+  let slow = false;
+  const readiness: boolean[] = [], reports: string[] = [];
+  const gate = new SessionGate({ verify: () => slow ? new Promise<void>(r => finish = r) : Promise.resolve(), message: () => {}, failed: () => {}, readyChanged: ready => readiness.push(ready) });
+  await gate.push(hello()); expect(gate.confirmed).toBe(true);
+  slow = true; const changing = gate.push({ t: 'class.state', classroom: hello().classroom }); await Promise.resolve();
+  expect(readiness.at(-1)).toBe(false);
+  gate.afterVerified('transfer:one', () => reports.push('downloading'));
+  gate.afterVerified('transfer:one', () => reports.push('completed'));
+  expect(reports).toEqual([]); finish(); await changing;
+  expect(reports).toEqual(['completed']); expect(readiness.at(-1)).toBe(true);
+});
+
+it('stale authority discards deferred telemetry instead of sending it to an unverified host', async () => {
+  let reject!: (error: Error) => void;
+  const action = vi.fn(), failed = vi.fn();
+  const gate = new SessionGate({ verify: () => new Promise<void>((_, r) => reject = r), message: () => {}, failed });
+  const pending = gate.push(hello()); await Promise.resolve();
+  expect(gate.afterVerified('transfer:one', action)).toBe(true);
+  reject(new Error('stale host')); await pending;
+  expect(action).not.toHaveBeenCalled(); expect(gate.afterVerified('transfer:two', action)).toBe(false);
+  expect(failed).toHaveBeenCalledOnce();
+});
+
+it('bounds deferred telemetry and discards it on stop', async () => {
+  let finish!: () => void;
+  const action = vi.fn();
+  const gate = new SessionGate({ verify: () => new Promise<void>(r => finish = r), message: () => {}, failed: () => {} });
+  const pending = gate.push(hello()); await Promise.resolve();
+  for (let i = 0; i < 64; i++) expect(gate.afterVerified(`transfer:${i}`, action)).toBe(true);
+  expect(gate.afterVerified('transfer:overflow', action)).toBe(false);
+  expect(gate.afterVerified('transfer:0', action)).toBe(true);
+  gate.stop(); finish(); await pending;
+  expect(action).not.toHaveBeenCalled();
+});

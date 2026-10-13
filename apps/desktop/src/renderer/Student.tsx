@@ -122,6 +122,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   const [handRaised, setHandRaised] = useState(false), [handError, setHandError] = useState('');
   /** Persistent hosting: this host paused/handed over, or its session failed the CLAN's host check. */
   const [hostWarning, setHostWarning] = useState('');
+  const [controlsVerified, setControlsVerified] = useState(false);
   const [hostConfirmed, setHostConfirmed] = useState(false), [hostFailure, setHostFailure] = useState('');
   const [leaving, setLeaving] = useState(false), [leaveError, setLeaveError] = useState('');
   const [teacherWarn, setTeacherWarn] = useState(joined.teacherTrust === 'changed');
@@ -153,6 +154,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
     let retried = false;
     setHostConfirmed(false);
     const gate = new SessionGate({
+      readyChanged: setControlsVerified,
       verify: async (hello) => {
         if (hello.status !== 'approved') return;
         const i = hello.classroom;
@@ -199,7 +201,10 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
   }, [session]);
   const infoRef = useRef(joined.classroom);
   const connOf = () => ({ url: session.url, token: session.token, sessionId: session.classroom.sessionId, classTitle: session.classroom.title });
-  const send = useCallback((m: ClientMessage) => { if (gateRef.current?.confirmed) connRef.current?.send(m); }, []);
+  const send = useCallback((m: ClientMessage) => {
+    if (m.t === 'transfer.state') gateRef.current?.afterVerified(`transfer:${m.resourceId}`, () => connRef.current?.send(m));
+    else if (gateRef.current?.confirmed) connRef.current?.send(m);
+  }, []);
   const conn = useMemo(() => ({ url: session.url, token: session.token, sessionId: session.classroom.sessionId, classTitle: session.classroom.title }), [session]);
 
   const L = clanLabels(info.clanType);
@@ -231,6 +236,7 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
 
   return (
     <div className="dash">
+      {!controlsVerified && <p role="status" className="muted">Checking current host permissions…</p>}
       {banner}
       {offlineSince !== null ? (
         <div className="warning-banner" role="status" data-testid="teacher-offline">{L.host} temporarily disconnected. Previously published resources remain available.</div>
@@ -255,10 +261,10 @@ function InClass({ joined, onLeave }: { joined: Joined; onLeave(): void }) {
       {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
       <div className="room-with-chat">
         {experience !== 'minimal' && <MemberRoom kind={info.clanType} board={boardNode} pres={pres} presenterName={pres.live?.presenterName ?? null} hostName={info.hostName} hostLabel={L.host} people={can.includes('VIEW_MEMBERS') ? people : chat.host ? [{ name: info.hostName ?? L.host, host: true, connected: true, handle: chat.host }] : null} resources={resources}
-          actions={{ ...personSender(chat, (handle) => setDm({ handle, n: Date.now() }), can.includes('SEND_FILES')), me: chat.me }} onToast={toast}
-          onTableDrop={can.includes('SEND_FILES') ? async (files) => { const r = await api.chat.sendDropped(chat.conn, files, 'clan'); if (r.some((f) => 'pending' in f)) return 'File sent for teacher approval.'; return r.length ? `Shared ${r.length === 1 ? r[0]!.name : `${r.length} files`} with everyone in the ${L.session}` : 'Nothing was shared.'; } : undefined} />}
+          actions={{ ...personSender(chat, (handle) => setDm({ handle, n: Date.now() }), controlsVerified && can.includes('SEND_FILES')), me: chat.me }} onToast={toast}
+          onTableDrop={controlsVerified && can.includes('SEND_FILES') ? async (files) => { const r = await api.chat.sendDropped(chat.conn, files, 'clan'); if (r.some((f) => 'pending' in f)) return 'File sent for teacher approval.'; return r.length ? `Shared ${r.length === 1 ? r[0]!.name : `${r.length} files`} with everyone in the ${L.session}` : 'Nothing was shared.'; } : undefined} />}
         <Suspense fallback={<section className="card chat"><p className="muted">Loading chat…</p></section>}>
-          <ChatPanel chat={chat} role="member" clanName={info.title} canSendFiles={can.includes('SEND_FILES')} conn={conn} request={dm}
+          <ChatPanel chat={chat} role="member" clanName={info.title} canSendFiles={controlsVerified && can.includes('SEND_FILES')} conn={conn} request={dm}
             people={can.includes('VIEW_MEMBERS') ? people.map((p) => ({ handle: p.handle, name: p.name, host: p.host, connected: p.connected })) : []} />
         </Suspense>
       </div>
