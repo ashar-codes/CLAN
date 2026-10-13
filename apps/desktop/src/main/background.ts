@@ -1,4 +1,4 @@
-// Opt-in window-close availability. Quit always stops networking; no login/boot registration.
+// Explicit opt-in window-close and packaged-app login availability. Quit always stops networking.
 import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +13,8 @@ export function backgroundWindow(win: BrowserWindow) {
     const menu = () => tray!.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open CLAN', click: show },
       { label: 'Keep CLAN Available when window closes', type: 'checkbox', checked: enabled, click: (item) => { enabled = item.checked; writeFileSync(path, JSON.stringify({ enabled })); menu(); } },
+      { label: 'Start CLAN at login', type: 'checkbox', enabled: app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32'), checked: app.isPackaged && app.getLoginItemSettings().openAtLogin, click: (item) => { app.setLoginItemSettings({ openAtLogin: item.checked }); menu(); } },
+      { label: enabled ? 'Background availability enabled while CLAN runs' : 'Closing the window quits CLAN', enabled: false },
       { type: 'separator' }, { label: 'Quit CLAN', click: () => app.quit() },
     ]));
     menu(); tray.on('click', show); app.on('before-quit', () => { quitting = true; });

@@ -209,9 +209,10 @@ export class ConnectionManager {
   private readonly working = new Map<string, string>();
   private readonly connects = new Map<string, Promise<LinkSession>>();
   private readonly networks: () => RouteNetwork[];
+  private readonly maintainFriends: () => boolean;
 
-  constructor(o: { people: People; signer: LinkSigner; files: LinkFiles; onLive?(e: PeerEnvelope): void; onChange?(what: string): void; myAddrs?(): string[]; tickMs?: number; networks?(): RouteNetwork[] }) {
-    this.p = o.people; this.signer = o.signer; this.files = o.files; this.networks = o.networks ?? (() => []);
+  constructor(o: { people: People; signer: LinkSigner; files: LinkFiles; onLive?(e: PeerEnvelope): void; onChange?(what: string): void; myAddrs?(): string[]; tickMs?: number; networks?(): RouteNetwork[]; maintainFriends?(): boolean }) {
+    this.p = o.people; this.signer = o.signer; this.files = o.files; this.networks = o.networks ?? (() => []); this.maintainFriends = o.maintainFriends ?? (() => false);
     this.hooks = { onLive: o.onLive, onChange: (w) => { o.onChange?.(w); }, myAddrs: o.myAddrs ?? (() => []) };
     this.timer = setInterval(() => void this.tick(), o.tickMs ?? 3000);
     (this.timer as { unref?(): void }).unref?.();
@@ -292,8 +293,10 @@ export class ConnectionManager {
     if (this.stopped) return;
     const now = Date.now();
     for (const [key, s] of this.sessions) if (s.open) { if (this.p.isBlocked(key)) s.link.close('blocked'); else void s.flush(); }
-    const keys = new Set([...this.p.due(Number.MAX_SAFE_INTEGER, 1000).map((d) => d.to), ...this.p.pendingDownloads().map((t) => t.peerKey)]);
+    const availableFriends = this.maintainFriends() && this.p.visibility() !== 'invisible' ? this.p.contacts('friends').slice(0, 100).map(c => c.key) : [];
+    const keys = new Set([...this.p.due(Number.MAX_SAFE_INTEGER, 1000).map((d) => d.to), ...this.p.pendingDownloads().map((t) => t.peerKey), ...availableFriends]);
     for (const key of keys) {
+      if (this.dialing.size >= 4) break; // bound native sockets, prioritize queued work before idle friends
       if (this.session(key) || this.dialing.has(key) || this.p.isBlocked(key)) continue;
       const addrs = orderLanRoutes(this.p.linkAddrs(key).filter((a) => this.transports.some((t) => t.handles(a))), this.networks(), this.working.get(key));
       if (!addrs.length) continue;

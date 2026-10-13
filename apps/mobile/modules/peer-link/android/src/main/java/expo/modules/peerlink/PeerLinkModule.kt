@@ -75,6 +75,11 @@ class PeerLinkModule : Module() {
     }
     Function("availabilityStop") { PeerLinkService.stop(ctx) }
     Function("availabilityRunning") { PeerLinkService.running }
+    Function("availabilityHealth") {
+      val power = ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+      val activity = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+      mapOf("running" to PeerLinkService.running, "batteryOptimized" to !power.isIgnoringBatteryOptimizations(ctx.packageName), "backgroundRestricted" to (Build.VERSION.SDK_INT >= 28 && activity.isBackgroundRestricted))
+    }
 
     OnDestroy {
       ring?.stop(); ring = null; PeerLinkService.onPulse = null; PeerLinkService.onStopRequested = null; PeerLinkService.stop(ctx); sockets.closeAll(); radios.stopAll(); io.shutdown() }

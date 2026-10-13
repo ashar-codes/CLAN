@@ -89,7 +89,7 @@ export async function startPeopleRuntime(o: {
   };
   let linkPort = 0;
   const linkAddrs = () => o.endpoints(server.port).map((e) => `tcp:${e.slice(0, e.lastIndexOf(':'))}:${linkPort}`);
-  const cm = new ConnectionManager({ people: p, signer: o.signer, files, onLive: (e) => o.onLive?.(e), onChange: changed, myAddrs: linkAddrs, tickMs: o.tickMs ?? 3000, networks: () => Object.values(networkInterfaces()).flatMap((v) => v ?? []).filter((v) => v.family === 'IPv4' && !v.internal).map((v) => ({ address: v.address, netmask: v.netmask })) }).use(tcpTransport());
+  const cm = new ConnectionManager({ people: p, signer: o.signer, files, onLive: (e) => o.onLive?.(e), onChange: changed, myAddrs: linkAddrs, tickMs: o.tickMs ?? 3000, maintainFriends: () => o.discover && !stopped, networks: () => Object.values(networkInterfaces()).flatMap((v) => v ?? []).filter((v) => v.family === 'IPv4' && !v.internal).map((v) => ({ address: v.address, netmask: v.netmask })) }).use(tcpTransport());
   const links = await listenLinks({ port: o.linkPort, bind: o.bind, onLink: (l) => void cm.accept(l) })
     .catch((e: NodeJS.ErrnoException) => { if (o.linkPort && e.code === 'EADDRINUSE') return listenLinks({ bind: o.bind, onLink: (l) => void cm.accept(l) }); throw e; });
   linkPort = links.port;
@@ -220,7 +220,7 @@ export async function startPeopleRuntime(o: {
     return { binding: b, contact };
   };
   const seen = (c: { key: string; name: string; profile: ProfileView | null; relation: string; verified: boolean } | null, endpoint: string, r: string, network = 'Same LAN') => {
-    if (!c?.profile || p.isBlocked(c.key)) return;
+    if (stopped || !c?.profile || p.isBlocked(c.key)) return;
     if (!nearby.has(c.key)) p.friendReachable(c.key);
     byAdvert.set(r, c.key);
     nearby.set(c.key, { key: c.key, name: c.name, profile: c.profile, endpoint, relation: c.relation, seenAt: now(), verified: c.verified, network });
@@ -229,24 +229,26 @@ export async function startPeopleRuntime(o: {
   const byAdvert = new Map<string, string>(); // advert id -> key
   const lost = (r: string) => { const k = byAdvert.get(r); byAdvert.delete(r); if (k && ![...byAdvert.values()].includes(k) && nearby.delete(k)) changed('nearby'); };
   const tried = new Map<string, number>();
-  const fresh = (r: string) => { if ((tried.get(r) ?? 0) > now() - 60_000) return false; tried.set(r, now()); return true; };
-  const stopBrowse = o.discover ? browsePeople((s) => {
+  const fresh = (r: string) => { if ((tried.get(r) ?? 0) > now() - 60_000) return false; if (tried.size >= 256) tried.delete(tried.keys().next().value!); tried.set(r, now()); return true; };
+  const makeBrowse = () => o.discover ? browsePeople((s) => {
     const endpoint = `${s.addr}:${s.port}`;
     if (endpoint === `${o.bind ?? ''}:${server.port}` || s.port === server.port && o.endpoints(server.port).includes(endpoint)) return;
-    if (!fresh(s.r)) return;
+    if (!fresh(`${s.r}|${endpoint}`)) return;
     const friend = s.t ? p.matchPresence(s.r, s.t) : null;
+    if (friend && p.visibility() === 'invisible') return;
     void probe(endpoint, undefined, friend ? o.signer : nodeSigner(newEd25519().privatePkcs8)).then(({ contact }) => {
       if (friend && contact.key !== friend) return; // a presence tag copied by someone else: ignored
       seen(contact, endpoint, s.r); void tick();
     }, () => { /* hidden or not reachable: never shown */ });
   }, lost) : () => {};
   // link-only devices (phones) too
-  const stopLinkBrowse = o.discover ? browseLinks((sv) => {
+  const makeLinkBrowse = () => o.discover ? browseLinks((sv) => {
     const addr = `tcp:${sv.addr}:${sv.port}`;
     if (sv.port === linkPort && linkAddrs().includes(addr)) return;
-    if (!fresh(sv.r)) return;
+    if (!fresh(`${sv.r}|${addr}`)) return;
     const friend = sv.t ? p.matchPresence(sv.r, sv.t) : null;
     if (friend) {
+      if (p.visibility() === 'invisible') return;
       void cm.connect(addr, { expectKey: friend }).then(() => seen(p.contact(friend), addr, sv.r), () => {});
       return;
     }
@@ -254,6 +256,7 @@ export async function startPeopleRuntime(o: {
       try { seen(p.meet({ profile }), addr, sv.r); try { p.setLinkAddrs(key, [addr]); } catch { /* unusual address */ } } catch { /* no valid public profile */ }
     }, () => { /* hidden or not reachable */ });
   }, lost) : () => {};
+  let stopBrowse = makeBrowse(), stopLinkBrowse = makeLinkBrowse();
   void advertise();
   const adTimer = setInterval(() => void advertise(), 30_000); adTimer.unref?.();
 
@@ -274,7 +277,7 @@ export async function startPeopleRuntime(o: {
       for (const ep of ad.endpoints) {
         try {
           const addr = `tcp:${ep}`;
-          if (friend) { if (!cm.connected(friend)) await cm.connect(addr, { expectKey: friend }); if (generation !== directoryGeneration || stopped) break; seen(p.contact(friend), addr, `dir:${ad.r}`, 'Internal Network'); }
+          if (friend) { if (p.visibility() === 'invisible') continue; if (!cm.connected(friend)) await cm.connect(addr, { expectKey: friend }); if (generation !== directoryGeneration || stopped) break; seen(p.contact(friend), addr, `dir:${ad.r}`, 'Internal Network'); }
           else { const { key, profile } = await probeAnonymously(await tcpTransport(3000).dial(addr)); if (stopped || generation !== directoryGeneration || key === o.signer.publicKey) break; const c = p.meet({ profile }); if (!p.isBlocked(key)) { p.setLinkAddrs(key, [addr, ...p.linkAddrs(key)].slice(0, 6)); seen(c, addr, `dir:${ad.r}`, 'Internal Network'); } }
           break;
         } catch { /* directory hints cannot override authentication or visibility */ }
@@ -313,7 +316,7 @@ export async function startPeopleRuntime(o: {
       throw last;
     },
     probe, configureDirectory, directory: () => ({ config: directory, status: directoryMessage }),
-    networkChanged: () => { cm.networkChanged(); adAt = 0; void advertise(); void agent.refresh(true); void tick(); },
+    networkChanged: () => { if (stopped) return; stopBrowse(); stopLinkBrowse(); tried.clear(); nearby.clear(); byAdvert.clear(); stopBrowse = makeBrowse(); stopLinkBrowse = makeLinkBrowse(); cm.networkChanged(); adAt = 0; void advertise(); void agent.refresh(true); void tick(); },
     nearby: () => [...nearby.values()].filter((n) => now() - n.seenAt < 10 * 60_000 && !p.isBlocked(n.key)).map((n) => ({ ...n, relation: p.contact(n.key)?.relation ?? 'none', connection: cm.status(n.key)?.state ?? 'nearby' })),
     refreshDiscovery: () => { adAt = 0; void agent.refresh(true); return advertise(); },
     sendLive, tick, server, links: cm, linkPort,

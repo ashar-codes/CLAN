@@ -78,6 +78,7 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
   private var nsdDisc: NsdManager.DiscoveryListener? = null
   private val resolveQueue = ArrayDeque<NsdServiceInfo>()
   private var resolving = false
+  private var nsdGeneration = 0
 
   fun nsdAdvertise(r: String, t: String, port: Int) {
     require(R_RE.matches(r) && (t.isEmpty() || T_RE.matches(t))) { "bad id" }
@@ -96,13 +97,14 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
 
   fun nsdBrowse() {
     nsdStopBrowse()
+    val generation = nsdGeneration
     val l = object : NsdManager.DiscoveryListener {
       override fun onDiscoveryStarted(t: String) {}
       override fun onDiscoveryStopped(t: String) {}
       override fun onStartDiscoveryFailed(t: String, code: Int) { emit("radio", mapOf("type" to "error", "via" to "nsd", "message" to "browse failed ($code)")) }
       override fun onStopDiscoveryFailed(t: String, code: Int) {}
-      override fun onServiceFound(i: NsdServiceInfo) { if (i.serviceName.startsWith("clan-")) main.post { resolveQueue.add(i); nextResolve() } }
-      override fun onServiceLost(i: NsdServiceInfo) { emit("radio", mapOf("type" to "lost", "via" to "nsd", "name" to i.serviceName)) }
+      override fun onServiceFound(i: NsdServiceInfo) { if (i.serviceName.startsWith("clan-")) main.post { if (generation == nsdGeneration && resolveQueue.size < 64) { resolveQueue.add(i); nextResolve() } } }
+      override fun onServiceLost(i: NsdServiceInfo) { if (generation == nsdGeneration) emit("radio", mapOf("type" to "lost", "via" to "nsd", "name" to i.serviceName)) }
     }
     nsdDisc = l
     nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l)
@@ -113,18 +115,19 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
     if (resolving) return
     val i = resolveQueue.removeFirstOrNull() ?: return
     resolving = true
+    val generation = nsdGeneration
     nsd.resolveService(i, object : NsdManager.ResolveListener {
-      override fun onResolveFailed(s: NsdServiceInfo, code: Int) { main.post { resolving = false; nextResolve() } }
+      override fun onResolveFailed(s: NsdServiceInfo, code: Int) { main.post { if (generation == nsdGeneration) { resolving = false; nextResolve() } } }
       override fun onServiceResolved(s: NsdServiceInfo) {
         val r = s.attributes["r"]?.let { String(it) } ?: ""
         val t = s.attributes["t"]?.let { String(it) }?.takeIf { T_RE.matches(it) } ?: ""
         val host = s.host?.hostAddress
-        if (host != null && R_RE.matches(r)) emit("radio", mapOf("type" to "found", "via" to "nsd", "r" to r, "t" to t, "host" to host, "port" to s.port, "name" to s.serviceName))
-        main.post { resolving = false; nextResolve() }
+        if (generation == nsdGeneration && host != null && R_RE.matches(r)) emit("radio", mapOf("type" to "found", "via" to "nsd", "r" to r, "t" to t, "host" to host, "port" to s.port, "name" to s.serviceName))
+        main.post { if (generation == nsdGeneration) { resolving = false; nextResolve() } }
       }
     })
   }
-  fun nsdStopBrowse() { nsdDisc?.let { runCatching { nsd.stopServiceDiscovery(it) } }; nsdDisc = null; resolveQueue.clear() }
+  fun nsdStopBrowse() { nsdGeneration++; resolving = false; nsdDisc?.let { runCatching { nsd.stopServiceDiscovery(it) } }; nsdDisc = null; resolveQueue.clear() }
 
   // ---------------- Wi-Fi Direct ----------------
   private var p2p: WifiP2pManager? = null

@@ -4,7 +4,7 @@ import { directoryHost, setDirectoryClassrooms } from './lan-directory.ts';
 // Identity: this computer's keystore-held device key (the key that proves identity when joining a CLAN). The people
 // endpoint's TLS certificate is long-lived (keystore) and vouched for by that key. Rules live in @clan/core People;
 // transport in people-runtime.ts; WebRTC media runs in the renderer with signaling relayed here (signed, live-only).
-import { BrowserWindow, Notification, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, Notification, dialog, ipcMain, powerMonitor, shell } from 'electron';
 import { constants } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -96,6 +96,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   handle('people:nearby', () => rt.nearby());
   handle('people:directory', async (raw) => { if (raw !== undefined) { const config = raw === null ? null : directoryConfig(raw); const previous = rt.directory().config; rt.configureDirectory(config); try { await writeFile(directoryFile, JSON.stringify(config), { mode: 0o600 }); } catch (e) { rt.configureDirectory(previous); throw e; } } return rt.directory(); });
   let addresses = candidateInterfaces().map((i) => i.address).sort().join(',');
+  powerMonitor.on('resume', () => rt.networkChanged());
   const networkTimer = setInterval(() => { const current = candidateInterfaces().map((i) => i.address).sort().join(','); if (current !== addresses) { addresses = current; rt.networkChanged(); } }, 5000); networkTimer.unref();
   handle('people:contacts', (f) => p.contacts(z.enum(['friends', 'requests', 'blocked', 'all']).parse(f ?? 'all')));
   handle('people:contact', (k) => { const key = Key.parse(k); const x = p.contact(key); return x && { ...x, safetyNumber: safetyNumber(signer.publicKey, key) }; });

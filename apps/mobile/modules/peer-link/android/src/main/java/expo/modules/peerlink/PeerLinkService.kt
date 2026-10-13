@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.LinkProperties
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -39,9 +40,14 @@ class PeerLinkService : Service() {
   private var recording = false
   private var wake: PowerManager.WakeLock? = null
   private var pulses: java.util.concurrent.ScheduledExecutorService? = null
+  private val links = java.util.concurrent.ConcurrentHashMap<Network, String>()
   private val network = object : ConnectivityManager.NetworkCallback() {
     override fun onAvailable(n: Network) { onPulse?.invoke(true) }
-    override fun onLost(n: Network) { onPulse?.invoke(true) }
+    override fun onLost(n: Network) { links.remove(n); onPulse?.invoke(true) }
+    override fun onLinkPropertiesChanged(n: Network, p: LinkProperties) {
+      val signature = p.linkAddresses.map { it.toString() }.sorted().joinToString(",") + "|" + p.routes.map { it.toString() }.sorted().joinToString(",")
+      if (links.put(n, signature) != signature) onPulse?.invoke(true)
+    }
   }
   private var networkRegistered = false
 

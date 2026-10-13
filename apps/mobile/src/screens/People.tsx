@@ -17,6 +17,7 @@ import { phoneClan, me } from '../core/clan';
 import { allowPeopleNotifications, takePeopleChat, onPeopleNotification, setPeopleViewing } from '../people/notifications';
 import { phonePeople } from '../people/native';
 import { verify } from '../FileActions';
+import { PeerLink } from '../../modules/peer-link';
 import { nearby, parseWifiQr, wifiQr } from '../people/nearby';
 import { QrImage, QrScanner } from '../ui/qr';
 import { OpticalScreen } from './Optical';
@@ -59,6 +60,7 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
   const [scan, setScan] = useState(false), [show, setShow] = useState<null | 'profile' | 'friend' | 'chat'>(null);
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string | null>(null), [ok, setOk] = useState<string | null>(null);
   const [directoryText, setDirectoryText] = useState('');
+  const [manualCode, setManualCode] = useState('');
   const [pendingWifi, setPendingWifi] = useState<{ ssid: string; passphrase: string } | null>(null);
   const [connected, setConnected] = useState<{ key: string; intent: string } | null>(null);
   const met = useData(() => people().contacts('all').filter((x) => x.relation === 'none').slice(0, 20)) ?? [];
@@ -105,7 +107,16 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
         <Muted small>{Platform.OS === 'android' ? 'Keep CLAN Available receives local messages with a persistent notification, even without an open chat. Uses more battery; Android/MIUI battery restrictions or force-stop can interrupt it. Stop from the notification or select While using CLAN.' : 'iPhone keeps a session only while CLAN is open (plus a short moment after you leave, and during a call). Nobody can reach you while CLAN is closed.'}</Muted>
       </Card>
 
+      <Card title="Connectivity diagnostics">
+        <Muted>{nearby.mode === 'off' ? 'Discovery disabled' : nearby.port ? 'Local listener active; discovery is separate from authenticated reachability' : 'Local listener unavailable'}</Muted>
+        <Muted>{Platform.OS === 'android' ? PeerLink?.availabilityRunning() ? 'Background service active' : 'Background service disabled' : 'Limited by iOS: reopen CLAN to reconnect after suspension'}</Muted>
+        {Platform.OS === 'android' && <Muted small>{PeerLink?.availabilityHealth?.().backgroundRestricted ? 'Android restricts background operation. Review CLAN battery settings.' : PeerLink?.availabilityHealth?.().batteryOptimized ? 'Battery optimization is enabled; Android or manufacturer policies may interrupt availability.' : 'Android battery optimization exemption is enabled; force-stop still prevents incoming calls.'}</Muted>}
+        <Muted small>Network isolation and firewall rules can prevent connection even when discovery works. No media starts until you accept. Keep mode does not survive force-stop or a terminated app process.</Muted>
+      </Card>
+
       <Card title="Connect with a code">
+        <Field label="CLAN profile code" value={manualCode} onChange={setManualCode} maxLength={2000} />
+        <Btn label="Connect using profile code" disabled={busy || !manualCode.trim()} onPress={() => { const code = manualCode.trim(); if (!parseProfileQr(code)) { setErr('Enter a valid CLAN profile code from the other person.'); return; } onCode(code); }} />
         <Row gap={6}>
           <Btn primary label="Scan a code" onPress={() => { setScan(true); setShow(null); }} />
           <Btn label="Show my code" onPress={() => { setShow('profile'); setScan(false); }} />

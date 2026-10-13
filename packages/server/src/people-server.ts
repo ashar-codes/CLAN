@@ -185,13 +185,14 @@ export function advertisePeople(o: { port: number; r: string; t?: string }) {
   return () => new Promise<void>((r) => bonjour.unpublishAll(() => { bonjour.destroy(); r(); }));
 }
 export function browsePeople(onUp: (s: { addr: string; port: number; r: string; t: string }) => void, onDown?: (r: string) => void, type: string = PEER_SERVICE) {
-  const bonjour = new Bonjour({}, () => {});
+  const bonjour = new Bonjour({ bind: '0.0.0.0' } as object, () => {});
   const b = bonjour.find({ type });
-  b.on('up', (s) => {
+  const observed = (s: import('bonjour-service').Service) => {
     const txt = (s.txt ?? {}) as { v?: string; r?: string; t?: string }; const addr = s.addresses?.find((a) => a.includes('.')) ?? s.referer?.address;
     if (txt.v === '1' && addr && txt.r && /^[A-Za-z0-9_-]{8,24}$/.test(txt.r)) onUp({ addr, port: s.port, r: txt.r, t: typeof txt.t === 'string' && /^[A-Za-z0-9_-]{16}$/.test(txt.t) ? txt.t : '' });
-  });
+  };
+  b.on('up', observed); b.on('srv-update', observed); b.on('txt-update', observed);
   b.on('down', (s) => { const r = (s.txt as { r?: string } | undefined)?.r; if (r) onDown?.(r); });
-  const t = setInterval(() => b.update(), 4000);
+  const t = setInterval(() => { b.expire(); b.update(); }, 4000);
   return () => { clearInterval(t); b.stop(); bonjour.destroy(); };
 }

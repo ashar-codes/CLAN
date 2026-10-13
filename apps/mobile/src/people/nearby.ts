@@ -74,7 +74,7 @@ class Nearby {
   /** The connection manager exists whenever CLAN is open (even with Nearby off, for codes the person scans). */
   manager(signer: { publicKey: string; sign(b: Uint8Array): string }) {
     if (!this.cm) {
-      this.cm = new ConnectionManager({ people: people(), signer, files: linkFiles, onLive: (e) => this.live?.(e), onChange: () => bump(), myAddrs: () => this.myAddrs() }).use(nativeLinkTransport);
+      this.cm = new ConnectionManager({ people: people(), signer, files: linkFiles, onLive: (e) => this.live?.(e), onChange: () => bump(), myAddrs: () => this.myAddrs(), maintainFriends: () => this.running }).use(nativeLinkTransport);
       initializeDirectory(signer, () => {
         const p = people(), r = b64u.encode(getRandomBytes(12));
         if (p.visibility() === 'invisible' || !this.running) return [];
@@ -148,6 +148,13 @@ class Nearby {
     void refreshDirectory(true);
     this.keepAlive();
   }
+  /** Native network changes invalidate DNS-SD hints, not authenticated identities or durable queues. */
+  networkChanged() {
+    if (!PeerLink || !this.running) return;
+    this.generation++; this.directoryGeneration++; this.probed.clear(); this.entries.clear();
+    try { PeerLink.browse(); } catch { this.status = 'Discovery could not restart. Try a trusted QR or address.'; }
+    this.advertise(true); this.cm?.networkChanged(); void refreshDirectory(true); bump();
+  }
   /** Rotated hourly and whenever visibility changes; nothing while Invisible. */
   advertise(force = false) {
     if (!PeerLink || !this.running) return;
@@ -191,6 +198,7 @@ class Nearby {
     if (this.r && e.r === this.r) return;
     const last = this.probed.get(e.r) ?? 0;
     if (Date.now() - last < 60_000) return;
+    if (this.probed.size >= 256) this.probed.delete(this.probed.keys().next().value!);
     this.probed.set(e.r, Date.now());
     const friend = e.t ? people().matchPresence(e.r, e.t) : null;
     const base = { id: `${e.via}:${e.r}`, key: friend, name: friend ? people().contact(friend)?.name ?? 'Friend' : 'Someone nearby', profile: friend ? people().contact(friend)?.profile ?? null : null, friend: !!friend, seenAt: Date.now() };
@@ -203,7 +211,7 @@ class Nearby {
   private async look(address: string, entry: Omit<NearbyEntry, 'address'> & { address: string | null }, valid = () => true) {
     const cm = this.cm, generation = this.generation; if (!cm) return;
     try {
-      if (entry.key) { if (!cm.connected(entry.key)) await cm.connect(address, { expectKey: entry.key }); if (!this.running || generation !== this.generation || !valid()) return; this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); return; }
+      if (entry.key) { if (people().visibility() === 'invisible' || people().isBlocked(entry.key)) return; if (!cm.connected(entry.key)) await cm.connect(address, { expectKey: entry.key }); if (!this.running || generation !== this.generation || !valid()) return; this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); return; }
       const { key, profile } = await probeAnonymously(await nativeLinkTransport.dial(address));
       if (!this.running || generation !== this.generation || !valid()) return;
       const c = people().meet({ profile });

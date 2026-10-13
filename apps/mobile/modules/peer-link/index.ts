@@ -33,6 +33,7 @@ type NativeApi = {
   awareStart(r: string, t: string, port: number): Promise<void>; awareConnect(peer: string): Promise<void>; awareStop(): void;
   hotspotStart(): Promise<{ ssid: string; passphrase: string }>; hotspotStop(): void;
   joinWifi(ssid: string, passphrase: string): Promise<void>; leaveWifi(): void;
+  availabilityHealth?(): { running: boolean; batteryOptimized: boolean; backgroundRestricted: boolean };
   availabilityStart(text: string): void;
   availabilityMicrophone?(active: boolean): void;
   ring?(active: boolean): void; availabilityStop(): void; availabilityRunning(): boolean;

@@ -30,12 +30,12 @@ const nodeFiles = (dir: string): LinkFiles => ({
 const memNet = new Map<string, (l: ByteLink) => void>();
 const memTransport = { name: 'mem', handles: (a: string) => a.startsWith('mem:'), dial: async (a: string) => { const accept = memNet.get(a); if (!accept) throw new Error('gone'); const [x, y] = bytePipe(); accept(y); return x; } };
 
-async function device(name: string) {
+async function device(name: string, maintainFriends = () => false) {
   const d = setup(), signer = nodeSigner(newEd25519().privatePkcs8);
   d.app.people.setSigner(signer); d.app.people.updateProfile({ name });
   const live: PeerEnvelope[] = [];
   let addr = '';
-  const cm = new ConnectionManager({ people: d.app.people, signer, files: nodeFiles(d.storageDir), onLive: (e) => live.push(e), myAddrs: () => [addr], tickMs: 150 }).use(tcpTransport()).use(memTransport);
+  const cm = new ConnectionManager({ people: d.app.people, signer, files: nodeFiles(d.storageDir), onLive: (e) => live.push(e), myAddrs: () => [addr], maintainFriends, tickMs: 150 }).use(tcpTransport()).use(memTransport);
   const l = await listenLinks({ bind: '127.0.0.1', onLink: (link) => void cm.accept(link) });
   addr = `tcp:127.0.0.1:${l.port}`;
   memNet.set(`mem:${name}`, (link) => void cm.accept(link));
@@ -44,6 +44,25 @@ async function device(name: string) {
 }
 
 describe('people over clan-link/1 (no TLS server, no router needed)', () => {
+  it('restores an idle authenticated friend for incoming calls without an outbox, respecting availability and blocking', async () => {
+    let keep = false;
+    const a = await device('IdleA', () => keep), b = await device('IdleB');
+    await a.cm.connect(b.addr(), { expectKey: b.key, invite: b.p.inviteToken() });
+    a.p.sendFriendRequest(b.key); await a.cm.tick();
+    await wait(() => b.p.contacts('requests').length === 1);
+    b.p.acceptFriend(a.key); await b.cm.tick(); await wait(() => a.p.isFriend(b.key));
+    await wait(() => a.p.due(Number.MAX_SAFE_INTEGER, 1000).length === 0);
+    a.cm.session(b.key)!.link.close('roaming'); await wait(() => !a.cm.connected(b.key));
+    await new Promise(r => setTimeout(r, 350)); expect(a.cm.connected(b.key)).toBe(false);
+    keep = true; a.cm.networkChanged(); await wait(() => a.cm.connected(b.key), 3000);
+    expect(a.cm.session(b.key)!.link.peerKey).toBe(b.key);
+    a.p.setVisibility('invisible'); a.cm.session(b.key)!.link.close('privacy');
+    await wait(() => !a.cm.connected(b.key)); a.cm.networkChanged();
+    await new Promise(r => setTimeout(r, 350)); expect(a.cm.connected(b.key)).toBe(false);
+    a.p.setVisibility('friends'); a.p.block(b.key); a.cm.networkChanged();
+    await new Promise(r => setTimeout(r, 350)); expect(a.cm.connected(b.key)).toBe(false);
+  });
+
   it('coalesces identical dials and rejects a handshake that completes after shutdown', async () => {
     const a = await device('CoalesceA'), b = await device('CoalesceB');
     const options = { expectKey: b.key, invite: b.p.inviteToken() };

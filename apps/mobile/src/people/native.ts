@@ -55,7 +55,7 @@ const env: PhoneEnv = {
 let devicesTimer: ReturnType<typeof setInterval> | null = null;
 if (Platform.OS === 'android') PeerLink?.addListener('availabilityTick', (e) => {
   if (!nearby.keepInBackground()) return;
-  if (e.networkChanged) { rt?.reconnect(); nearby.cm?.networkChanged(); void refreshDirectory(true); }
+  if (e.networkChanged) { rt?.reconnect(); nearby.networkChanged(); }
   void refreshDirectory(); void rt?.tick(); void nearby.cm?.tick(); nearby.advertise();
 });
 let rt: PhonePeople | null = null, starting: Promise<PhonePeople> | null = null, wanted = false;
@@ -63,7 +63,7 @@ let rt: PhonePeople | null = null, starting: Promise<PhonePeople> | null = null,
 PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser && AppState.currentState !== 'active') { rt?.stop(); rt = null; if (devicesTimer) clearInterval(devicesTimer); devicesTimer = null; } });
 AppState.addEventListener('change', (st) => {
   if (st !== 'active' && !nearby.keepInBackground()) { rt?.stop(); rt = null; if (devicesTimer) clearInterval(devicesTimer); devicesTimer = null; } // the computer path; direct links follow the Nearby setting (nearby.ts)
-  else if (wanted) void phonePeople().catch(() => {});
+  else if (wanted) { nearby.networkChanged(); rt?.reconnect(); void phonePeople().catch(() => {}); }
 });
 /** Starts people networking for this app session (idempotent). */
 export function phonePeople(): Promise<PhonePeople> {
