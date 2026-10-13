@@ -10,9 +10,9 @@ it('mobile canvas renders thousands of strokes, preserves marks, culls and clear
   writeFileSync(join(dir, 'board.html'), BOARD_CANVAS_HTML);
   const app = await electron.launch({ args: [join(import.meta.dirname, 'fixtures/bridge-host.cjs')], env: { ...process.env, BRIDGE_FILE: join(dir, 'board.html') } });
   try {
-    const p = await app.firstWindow(); await p.waitForLoadState();
+    const p = await app.firstWindow(); await p.waitForLoadState(); await p.bringToFront();
     const result = await p.evaluate(async () => {
-      const send = async (frame: object) => { window.postMessage(JSON.stringify(frame), '*'); await new Promise((r) => setTimeout(r, 60)); };
+      const send = async (frame: object) => { window.postMessage(JSON.stringify(frame), '*'); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); };
       const base = { vp: { x: 0, y: 0, z: 1 }, selected: null, erased: [], moving: null, draft: null };
       const objects = Array.from({ length: 5000 }, (_, i) => ({ id: String(i), kind: 'stroke', page: 0, x: (i % 100) * 30, y: Math.floor(i / 100) * 30, w: 0, h: 0, color: '#17233b', width: 3, z: i, points: [[0, 0], [20, 10], [25, 0]] }));
       await send({ ...base, objects });

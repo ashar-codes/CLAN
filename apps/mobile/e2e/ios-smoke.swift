@@ -72,7 +72,7 @@ final class CLANQASmoke: XCTestCase {
     func reveal(_ element:XCUIElement){for _ in 0..<12{if element.isHittable{return};app.swipeUp()};XCTAssertTrue(element.isHittable)}
     func enter(_ label:String,_ text:String){let f=app.textFields[label];reveal(f);f.tap();for ch in text{f.typeText(String(ch))};XCTAssertEqual(f.value as? String,text)}
     let name="iOS lifecycle "+String(Int(Date().timeIntervalSince1970))
-    enter("Course name",name);let add=app.buttons["Add course"];reveal(add);add.tap()
+    enter("Course name",name);app.staticTexts["New course"].firstMatch.tap();let add=app.buttons["Add course"];reveal(add);add.tap()
     let edit=app.buttons["Edit "+name];for _ in 0..<8{if edit.isHittable{break};app.swipeDown()};XCTAssertTrue(edit.waitForExistence(timeout:10));edit.tap()
     let instructor=app.textFields["Instructor"];XCTAssertTrue(instructor.waitForExistence(timeout:10));instructor.tap();instructor.typeText("QA teacher");app.buttons["Save"].tap()
     let archive=app.buttons["Archive "+name];XCTAssertTrue(archive.waitForExistence(timeout:10));archive.tap();app.buttons["Archived courses"].tap()

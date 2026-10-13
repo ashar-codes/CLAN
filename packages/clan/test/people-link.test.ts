@@ -59,7 +59,14 @@ describe('people over clan-link/1 (no TLS server, no router needed)', () => {
     a.p.setVisibility('invisible'); a.cm.session(b.key)!.link.close('privacy');
     await wait(() => !a.cm.connected(b.key)); a.cm.networkChanged();
     await new Promise(r => setTimeout(r, 350)); expect(a.cm.connected(b.key)).toBe(false);
-    a.p.setVisibility('friends'); a.p.block(b.key); a.cm.networkChanged();
+    a.p.setVisibility('friends');
+    let release!: () => void;
+    a.cm.use({ name: 'availability-race', handles: x => x === 'availability:race', dial: async () => {
+      await new Promise<void>(resolve => release = resolve); const [x,y] = bytePipe(); void b.cm.accept(y); return x;
+    } });
+    const late = a.cm.connect('availability:race', { expectKey: b.key, automatic: true }); keep = false; release();
+    await expect(late).rejects.toThrow(); expect(a.cm.connected(b.key)).toBe(false);
+    keep = true; a.p.block(b.key); a.cm.networkChanged();
     await new Promise(r => setTimeout(r, 350)); expect(a.cm.connected(b.key)).toBe(false);
   });
 

@@ -9,8 +9,17 @@ import { afterAll, expect, it } from 'vitest';
 
 const apps: ElectronApplication[] = [];
 const dirs: string[] = [];
+// Windows crash termination can precede OS/AV handle release. Wait for that actual precondition;
+// corruption/recovery assertions remain unchanged and every non-lock error still fails immediately.
+async function removeReleased(path: string, recursive = false) {
+  const deadline = Date.now() + 5000;
+  for (;;) { try { rmSync(path, { recursive, force: true }); return; } catch (e) {
+    if (!['EPERM', 'EBUSY'].includes((e as NodeJS.ErrnoException).code ?? '') || Date.now() >= deadline) throw e;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } }
+}
 const tmp = (p = 'clan-data-') => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
-afterAll(async () => { await Promise.all(apps.map((a) => a.close().catch(() => {}))); for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+afterAll(async () => { await Promise.all(apps.map((a) => a.close().catch(() => {}))); for (const d of dirs) await removeReleased(d, true); });
 
 async function launch(userData = tmp()) {
   const app = await electron.launch({ args: ['.'], cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData } });
@@ -69,7 +78,7 @@ it('export → import, local feedback without private text, and recovery from a 
   await new Promise<void>((resolve) => { killed.once('exit', () => resolve()); killed.kill('SIGKILL'); });
   apps.splice(apps.indexOf(a.app), 1); // Playwright cannot close a process already killed by this crash test.
   const dbPath = join(a.userData, 'teacher.db');
-  for (const ext of ['-wal', '-shm']) rmSync(dbPath + ext, { force: true });
+  for (const ext of ['-wal', '-shm']) await removeReleased(dbPath + ext);
   const fd = openSync(dbPath, 'r+'), size = statSync(dbPath).size;
   for (let off = 0; off < size; off += 4096) writeSync(fd, Buffer.alloc(512, 0xa5), 0, 512, off);
   closeSync(fd);

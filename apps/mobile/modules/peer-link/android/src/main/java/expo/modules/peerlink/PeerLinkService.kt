@@ -17,6 +17,8 @@ import android.os.PowerManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.LinkProperties
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -49,6 +51,13 @@ class PeerLinkService : Service() {
       if (links.put(n, signature) != signature) onPulse?.invoke(true)
     }
   }
+  // Local Wi-Fi can remain usable while cellular is the default internet route.
+  private val wifiNetwork = object : ConnectivityManager.NetworkCallback() {
+    override fun onAvailable(n: Network) { network.onAvailable(n) }
+    override fun onLost(n: Network) { network.onLost(n) }
+    override fun onLinkPropertiesChanged(n: Network, p: LinkProperties) { network.onLinkPropertiesChanged(n, p) }
+  }
+  private var wifiRegistered = false
   private var networkRegistered = false
 
   override fun onBind(intent: Intent?): IBinder? = null
@@ -75,6 +84,7 @@ class PeerLinkService : Service() {
       wake = (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "CLAN:availability").apply { setReferenceCounted(false); acquire() }
       pulses = Executors.newSingleThreadScheduledExecutor().also { it.scheduleWithFixedDelay({ try { onPulse?.invoke(false) } catch (_: Exception) { } }, 0, 4, TimeUnit.SECONDS) }
       try { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).registerDefaultNetworkCallback(network); networkRegistered = true } catch (_: Exception) { }
+      try { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), wifiNetwork); wifiRegistered = true } catch (_: Exception) { }
     }
     running = true
     return START_NOT_STICKY
@@ -83,6 +93,7 @@ class PeerLinkService : Service() {
   override fun onDestroy() {
     pulses?.shutdownNow(); pulses = null
     if (networkRegistered) { try { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(network) } catch (_: Exception) { }; networkRegistered = false }
+    if (wifiRegistered) { try { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(wifiNetwork) } catch (_: Exception) { }; wifiRegistered = false }; links.clear()
     wake?.let { if (it.isHeld) it.release() }; wake = null
     running = false; super.onDestroy()
   }

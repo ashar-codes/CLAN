@@ -36,7 +36,11 @@ async function joinClan(p: Page, name: string, code: string, host: Page) {
   await p.getByLabel('Full name').fill(name); await p.getByLabel('Student / roll number').fill(`R-${name}`); await p.getByLabel('Device name').fill(`${name}-Mac`);
   await p.getByRole('button', { name: 'Save' }).click();
   await p.locator('.code-input').fill(code); await p.getByRole('button', { name: 'Join', exact: true }).click();
-  await host.getByRole('button', { name: 'Approve', exact: true }).click({ timeout: 25_000 });
+  try { await host.getByRole('button', { name: 'Approve', exact: true }).click({ timeout: 25_000 }); }
+  catch (error) {
+    console.error('Bounded join failure', { fixtureMember: name, approvalButtons: await host.getByRole('button', { name: 'Approve', exact: true }).count(), authenticatedPendingScreen: await p.getByText(/Waiting for .* to let you in/).count(), joinErrors: await p.getByRole('alert').count(), hostWaitingSection: await host.getByRole('heading', { name: /Waiting to join/ }).count() });
+    throw error;
+  }
   await p.getByTestId('secure-state').waitFor({ timeout: 15_000 });
 }
 

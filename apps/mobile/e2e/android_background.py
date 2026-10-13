@@ -2,8 +2,9 @@
 """Disposable-emulator background acceptance through actual authenticated native TCP.
 No profile clearing. The peer's synthetic SDP tests ringing only, never media transmission.
 """
-import json, os, subprocess, time, urllib.request
+import json, os, shlex, subprocess, time, urllib.request
 import android_cross_device as ui
+ui.SCROLL_X = '100'  # inside the People scroll view, outside Android's system edge gesture
 
 def api(path, body=None):
     request = urllib.request.Request('http://127.0.0.1:47598'+path, data=None if body is None else json.dumps(body).encode(), headers={'Content-Type':'application/json'})
@@ -29,18 +30,21 @@ def main():
     ui.tap('People')
     for _ in range(12): ui.adb('shell','input','swipe','100','600','100','1500','150')
     ui.tap('Nearby')
-    x,y=ui.find('CLAN profile code',edit=True); ui.adb('shell','input','tap',str(x),str(y))
+    x,y=ui.find('CLAN profile code',edit=True,tries=40); ui.adb('shell','input','tap',str(x),str(y))
     ui.adb('shell','input','keycombination','KEYCODE_CTRL_LEFT','KEYCODE_A'); ui.adb('shell','input','keyevent','KEYCODE_DEL')
-    code=api('/state')['qr']; ui.type_('CLAN profile code',code)
+    code=api('/state')['qr']
+    ui.adb('shell','input','keyevent','KEYCODE_MOVE_END'); ui.adb('shell','input','keyevent','--delay','1',*(['KEYCODE_DEL']*200))
+    for char in code: ui.adb('shell','input','text',shlex.quote(char)); time.sleep(.06)
+    ui.adb('shell','input','keyevent','KEYCODE_BACK'); time.sleep(.5)
     assert any(n.get('content-desc')=='CLAN profile code' and n.get('text')==code for n in ui.nodes()), 'exact authenticated code entry'
     print('PASS exact profile code entry',flush=True); ui.tap('Connect using profile code')
-    ui.find('Connected to BTC-2R QA Mac. Their identity matched the code.'); ui.tap('Send friend request')
+    ui.find('Connected to BTC-2R QA Mac. Their identity matched the code.',tries=40); ui.tap('Send friend request')
     ui.until(lambda:api('/state')['requests']>0,'signed friend request',secs=30); api('/approve',{})
     ui.until(lambda:api('/state')['friends']==1,'authorized friendship')
     api('/invite',{}); ui.tap('Chats'); ui.tap('Open chat with BTC-2R QA Mac'); ui.tap('Accept')
     ui.until(lambda:any(c['state']=='active' for c in api('/state')['conversations']),'accepted chat')
     deliver('BTC2R foreground')
-    ui.tap('← Chats'); ui.tap('Nearby'); ui.tap('Keep CLAN Available'); allow()
+    ui.tap('← Chats'); ui.tap('Nearby'); ui.tap('Enable message and call notifications'); allow(); ui.tap('Keep CLAN Available'); allow()
     # Permission prompts can interrupt the first action; the user must explicitly select again.
     if 'PeerLinkService' not in ui.adb('shell','dumpsys','activity','services',ui.PKG).decode(): ui.tap('Keep CLAN Available'); allow()
     ui.until(lambda:'isForeground=true' in ui.adb('shell','dumpsys','activity','services',ui.PKG).decode(),'foreground service',secs=20)

@@ -89,31 +89,6 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
   const intended = connected && people().contact(connected.key);
   return (
     <>
-      <Card title="Notifications"><Row>{(['direct', 'files', 'previews'] as const).map((key) => <Btn small key={key} label={`${key === 'direct' ? 'Messages & calls' : key === 'files' ? 'Files' : 'Notification previews'}: ${prefs?.[key] ? 'On' : 'Off'}`} on={!!prefs?.[key]} onPress={() => { phoneClan().notifications.setPrefs(me(), { [key]: !prefs?.[key] }); bump(); }} />)}</Row><Btn label={`Friend nearby alerts: ${people().nearbyAlerts() ? 'On' : 'Off'}`} on={people().nearbyAlerts()} onPress={() => void run(async () => { const on = !people().nearbyAlerts(); if (on && !await allowPeopleNotifications()) throw new Error('Allow notifications first.'); people().nearbyAlerts(on); })} /><Btn label="Enable message and call notifications" onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are denied. Allow them in system settings.'); }, 'Notifications enabled.')} /><Muted small>Notification previews follow your privacy preferences. Files still require acceptance.</Muted></Card>
-      <Card title="Who can find you">
-        <Row gap={6}>
-          <Btn small label="Everyone nearby (1 h)" on={vis === 'everyone'} onPress={() => setErr(act(() => people().setVisibility('everyone', 3_600_000)))} />
-          <Btn small label="Friends only" on={vis === 'friends'} onPress={() => setErr(act(() => people().setVisibility('friends')))} />
-          <Btn small label="Invisible" on={vis === 'invisible'} onPress={() => setErr(act(() => people().setVisibility('invisible')))} />
-        </Row>
-        <Muted small>Everyone Nearby shows only fields you mark for everyone and switches back by itself. Avoid it on public networks. Others only ever see a random id unless you let them in.</Muted>
-        <Muted>Nearby on this phone</Muted>
-        <Row gap={6}>
-          <Btn small label="Off" on={nearby.mode === 'off'} onPress={() => nearby.setMode('off')} />
-          <Btn small label="While using CLAN" on={nearby.mode === 'app'} onPress={() => nearby.setMode('app')} />
-          {Platform.OS === 'android' && <Btn small label="Keep CLAN Available" on={nearby.mode === 'keep'} onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are required for visible background availability.'); if (!await nearby.permissions()) throw new Error('Allow Nearby devices and notifications in Settings.'); nearby.setMode('keep'); await phonePeople(); })} />}
-          <Btn small label="Stay available in a session" on={nearby.mode === 'session'} onPress={() => void run(async () => { if (Platform.OS === 'android' && !await allowPeopleNotifications()) throw new Error('Allow notifications for a visible background session.'); nearby.setMode('session'); })} />
-        </Row>
-        <Muted small>{Platform.OS === 'android' ? 'Keep CLAN Available receives local messages with a persistent notification, even without an open chat. Uses more battery; Android/MIUI battery restrictions or force-stop can interrupt it. Stop from the notification or select While using CLAN.' : 'iPhone keeps a session only while CLAN is open (plus a short moment after you leave, and during a call). Nobody can reach you while CLAN is closed.'}</Muted>
-      </Card>
-
-      <Card title="Connectivity diagnostics">
-        <Muted>{nearby.mode === 'off' ? 'Discovery disabled' : nearby.port ? 'Local listener active; discovery is separate from authenticated reachability' : 'Local listener unavailable'}</Muted>
-        <Muted>{Platform.OS === 'android' ? PeerLink?.availabilityRunning() ? 'Background service active' : 'Background service disabled' : 'Limited by iOS: reopen CLAN to reconnect after suspension'}</Muted>
-        {Platform.OS === 'android' && <Muted small>{PeerLink?.availabilityHealth?.().backgroundRestricted ? 'Android restricts background operation. Review CLAN battery settings.' : PeerLink?.availabilityHealth?.().batteryOptimized ? 'Battery optimization is enabled; Android or manufacturer policies may interrupt availability.' : 'Android battery optimization exemption is enabled; force-stop still prevents incoming calls.'}</Muted>}
-        <Muted small>Network isolation and firewall rules can prevent connection even when discovery works. No media starts until you accept. Keep mode does not survive force-stop or a terminated app process.</Muted>
-      </Card>
-
       <Card title="Connect with a code">
         <Field label="CLAN profile code" autoCapitalize="none" autoCorrect={false} value={manualCode} onChange={setManualCode} maxLength={2000} />
         <Btn label="Connect using profile code" disabled={busy || !manualCode.trim()} onPress={() => { const code = manualCode.trim(); if (!parseProfileQr(code)) { setErr('Enter a valid CLAN profile code from the other person.'); return; } onCode(code); }} />
@@ -138,6 +113,32 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
         </View>}
         {ok && <Text accessibilityLiveRegion="polite" style={{ color: c.text }}>{ok}</Text>}<Err msg={err} />
       </Card>
+      <Card title="Notifications"><Row>{(['direct', 'files', 'previews'] as const).map((key) => <Btn small key={key} label={`${key === 'direct' ? 'Messages & calls' : key === 'files' ? 'Files' : 'Notification previews'}: ${prefs?.[key] ? 'On' : 'Off'}`} on={!!prefs?.[key]} onPress={() => { phoneClan().notifications.setPrefs(me(), { [key]: !prefs?.[key] }); bump(); }} />)}</Row><Btn label={`Friend nearby alerts: ${people().nearbyAlerts() ? 'On' : 'Off'}`} on={people().nearbyAlerts()} onPress={() => void run(async () => { const on = !people().nearbyAlerts(); if (on && !await allowPeopleNotifications()) throw new Error('Allow notifications first.'); people().nearbyAlerts(on); })} /><Btn label="Enable message and call notifications" onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are denied. Allow them in system settings.'); phoneClan().notifications.setPrefs(me(), { direct: true }); }, 'Message and call notifications enabled.')} /><Muted small>Notification previews follow your privacy preferences. Files still require acceptance.</Muted></Card>
+      <Card title="Who can find you">
+        <Row gap={6}>
+          <Btn small label="Everyone nearby (1 h)" on={vis === 'everyone'} onPress={() => setErr(act(() => people().setVisibility('everyone', 3_600_000)))} />
+          <Btn small label="Friends only" on={vis === 'friends'} onPress={() => setErr(act(() => people().setVisibility('friends')))} />
+          <Btn small label="Invisible" on={vis === 'invisible'} onPress={() => setErr(act(() => people().setVisibility('invisible')))} />
+        </Row>
+        <Muted small>Everyone Nearby shows only fields you mark for everyone and switches back by itself. Avoid it on public networks. Others only ever see a random id unless you let them in.</Muted>
+        <Muted>Nearby on this phone</Muted>
+        <Row gap={6}>
+          <Btn small label="Off" on={nearby.mode === 'off'} onPress={() => nearby.setMode('off')} />
+          <Btn small label="While using CLAN" on={nearby.mode === 'app'} onPress={() => nearby.setMode('app')} />
+          {Platform.OS === 'android' && <Btn small label="Keep CLAN Available" on={nearby.mode === 'keep'} onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are required for visible background availability.'); if (!await nearby.permissions()) throw new Error('Allow Nearby devices and notifications in Settings.'); nearby.setMode('keep'); await phonePeople(); })} />}
+          <Btn small label="Stay available in a session" on={nearby.mode === 'session'} onPress={() => void run(async () => { if (Platform.OS === 'android' && !await allowPeopleNotifications()) throw new Error('Allow notifications for a visible background session.'); nearby.setMode('session'); })} />
+        </Row>
+        <Muted small>{Platform.OS === 'android' ? 'Keep CLAN Available receives local messages with a persistent notification, even without an open chat. Uses more battery; Android/MIUI battery restrictions or force-stop can interrupt it. Stop from the notification or select While using CLAN.' : 'iPhone keeps a session only while CLAN is open (plus a short moment after you leave, and during a call). Nobody can reach you while CLAN is closed.'}</Muted>
+      </Card>
+
+      <Card title="Connectivity diagnostics">
+        <Muted>{nearby.mode === 'off' ? 'Discovery disabled' : nearby.port ? 'Local listener active; discovery is separate from authenticated reachability' : 'Local listener unavailable'}</Muted>
+        <Muted>{Platform.OS === 'android' ? PeerLink?.availabilityRunning() ? 'Background service active' : 'Background service disabled' : 'Limited by iOS: reopen CLAN to reconnect after suspension'}</Muted>
+        {Platform.OS === 'android' && <Muted small>{PeerLink?.availabilityHealth?.().backgroundRestricted ? 'Android restricts background operation. Review CLAN battery settings.' : PeerLink?.availabilityHealth?.().batteryOptimized ? 'Battery optimization is enabled; Android or manufacturer policies may interrupt availability.' : 'Android battery optimization exemption is enabled; force-stop still prevents incoming calls.'}</Muted>}
+        <Muted small>Network isolation and firewall rules can prevent connection even when discovery works. No media starts until you accept. Keep mode does not survive force-stop or a terminated app process.</Muted>
+      </Card>
+
+
 
       <Card title="No Wi-Fi network?">
         {Platform.OS === 'ios' ? <Muted>iPhones with CLAN open find each other directly (Apple peer-to-peer Wi-Fi) — keep Wi-Fi and Bluetooth on; no network needed. For Android or a computer, join their hotspot by scanning its Wi-Fi code, or turn on Settings › Personal Hotspot.</Muted>

@@ -240,19 +240,19 @@ export class ConnectionManager {
     } catch { return null; }
   }
   /** Dial an address. `expectKey` when we know who should answer; `invite` from their code. */
-  connect(address: string, o: { expectKey?: string; invite?: string } = {}): Promise<LinkSession> {
-    if (this.stopped || o.expectKey && this.p.isBlocked(o.expectKey)) return Promise.reject(new Error('Connection is stopped or this person is blocked.'));
-    const id = `${o.expectKey ?? ''}|${address}|${o.invite ?? ''}`;
+  connect(address: string, o: { expectKey?: string; invite?: string; automatic?: boolean } = {}): Promise<LinkSession> {
+    if (this.stopped || o.automatic && !this.idleAvailable() || o.expectKey && this.p.isBlocked(o.expectKey)) return Promise.reject(new Error('Connection is stopped or this person is blocked.'));
+    const id = `${o.expectKey ?? ''}|${address}|${o.invite ?? ''}|${!!o.automatic}`;
     const current = this.connects.get(id); if (current) return current;
     const next = this.dial(address, o).finally(() => this.connects.delete(id)); this.connects.set(id, next); return next;
   }
-  private async dial(address: string, o: { expectKey?: string; invite?: string }) {
+  private async dial(address: string, o: { expectKey?: string; invite?: string; automatic?: boolean }) {
     const t = this.transports.find((x) => x.handles(address));
     if (!t) throw new Error('No way to reach that address from this device.');
     if (o.expectKey && !this.session(o.expectKey)) this.set(o.expectKey, this.state.get(o.expectKey)?.s === 'reconnecting' ? 'reconnecting' : 'connecting');
     try {
       const sl = await linkInitiate(await t.dial(address), { signer: this.signer, expectKey: o.expectKey, invite: o.invite });
-      if (this.stopped || this.p.isBlocked(sl.peerKey)) { sl.close('stopped or blocked'); throw new Error('Connection stopped or person blocked.'); }
+      if (this.stopped || this.p.isBlocked(sl.peerKey) || o.automatic && !this.idleAvailable()) { sl.close('stopped or blocked'); throw new Error('Connection stopped or person blocked.'); }
       const s = this.adopt(sl); if (s.link === sl) this.working.set(sl.peerKey, address);
       if (address.startsWith('tcp:')) { const known = this.p.linkAddrs(sl.peerKey); if (!known.includes(address)) { try { this.p.setLinkAddrs(sl.peerKey, [address, ...known].slice(0, 6)); } catch { /* not a storable address */ } } }
       return s;
@@ -283,6 +283,7 @@ export class ConnectionManager {
     });
     return s;
   }
+  private idleAvailable() { return this.maintainFriends() && this.p.visibility() !== 'invisible'; }
   private wanted(key: string) {
     return this.p.due(Number.MAX_SAFE_INTEGER, 1000).some((d) => d.to === key) || this.p.pendingDownloads().some((t) => t.peerKey === key);
   }
@@ -293,7 +294,7 @@ export class ConnectionManager {
     if (this.stopped) return;
     const now = Date.now();
     for (const [key, s] of this.sessions) if (s.open) { if (this.p.isBlocked(key)) s.link.close('blocked'); else void s.flush(); }
-    const availableFriends = this.maintainFriends() && this.p.visibility() !== 'invisible' ? this.p.contacts('friends').slice(0, 100).map(c => c.key) : [];
+    const availableFriends = this.idleAvailable() ? this.p.contacts('friends').slice(0, 100).map(c => c.key) : [];
     const keys = new Set([...this.p.due(Number.MAX_SAFE_INTEGER, 1000).map((d) => d.to), ...this.p.pendingDownloads().map((t) => t.peerKey), ...availableFriends]);
     for (const key of keys) {
       if (this.dialing.size >= 4) break; // bound native sockets, prioritize queued work before idle friends
@@ -305,7 +306,7 @@ export class ConnectionManager {
       this.dialing.add(key);
       void (async () => {
         let ok = false;
-        for (const a of addrs) { if (this.stopped || this.p.isBlocked(key)) break; try { await this.connect(a, { expectKey: key }); ok = true; break; } catch { /* next address */ } }
+        for (const a of addrs) { if (this.stopped || this.p.isBlocked(key)) break; try { await this.connect(a, { expectKey: key, automatic: !this.wanted(key) }); ok = true; break; } catch { /* next address */ } }
         if (this.stopped) return;
         const tries = ok ? 0 : st.tries + 1, live = !!this.session(key);
         this.state.set(key, { ...(this.state.get(key) ?? st), s: live ? 'connected' : 'offline', retryAt: live ? 0 : Date.now() + Math.min(60_000, 2000 * 2 ** Math.min(tries, 5)), tries: live ? 0 : tries });
