@@ -1,0 +1,49 @@
+# BTC-2E feature matrix
+
+Baseline `843edef`; branch `btc-2e-ux-completeness`. Source audit distinguishes an implemented UI path from runtime PASS. Mac/Windows share Electron UI; Android/iOS share React Native UI, with native capability differences below. Current-phase verification is in BTC_2E_VERIFICATION.md. No physical result is inferred from shared source.
+
+| Feature | macOS | Windows | Android | iOS | UI sources (desktop / phone) | CRUD / lifecycle at audit | Permission | Offline | Sync | Existing evidence / gap |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Home | Electron UI path | Electron UI path | RN UI path | RN UI path | MySpace / Shell.Home | read + shortcuts | private account; no Diary text | offline | local projections | actual schedule engine summaries; runtime checks in verification |
+| CLAN ownership | Electron UI path | Electron UI path | RN UI path | RN UI path | Clans / Hosting | create, archive/restore, leave, cleanup | owner deletion vs local member copy | offline ownership; computer hosts live server | host authority, not personal sync | hosting/lifecycle tests |
+| Classroom hosting | Electron UI path | Electron UI path | RN UI path | RN UI path | Teacher / ClassContent | desktop host; mobile join/handover | host/member capabilities | permitted LAN | authoritative session | hosting/media tests |
+| Discovery / Radar | Electron UI path | Electron UI path | RN UI path | RN UI path | NearbyPeople,Radar / People,Radar | real discovery + QR/manual | advertisement is untrusted | LAN; optional pinned directory | rotating public hints | directory/discovery/Electron tests |
+| People / Friends | Electron UI path | Electron UI path | RN UI path | RN UI path | people/* / screens.People | profile, request, accept, remove/block | verified identity + consent | LAN/offline queue | People durable store | People regression tests |
+| Personal chats | Electron UI path | Electron UI path | RN UI path | RN UI path | people.Chats / People.ChatView | invite, search, local clear/remove, end | peer retains independent copy | durable encrypted outbox | recipient receipts | People + chat E2E |
+| CLAN chat | Electron UI path | Electron UI path | RN UI path | RN UI path | chat.ChatPanel / ChatSection | send/read/reply/authorized removal | session permissions | live LAN + saved history | host store | chat/security E2E |
+| Files / attachments | Electron UI path | Electron UI path | RN UI path | RN UI path | Files,Saved / ClassContent,Inbox | upload/read/export; scoped guarded delete/cleanup | acceptance + safe canonical store | local copies | SHA + personal resource sync | transfer/integrity tests |
+| Voice notes / direct calls | Electron UI path | Electron UI path | RN UI path | RN UI path | people.Voice,Call / people.Voice,Call | record/play/call/hangup | mic/camera + verified contact | reachable LAN; bounded attempts | signed signaling | media + People tests; physical pending |
+| Meetings | Electron UI path | Electron UI path | RN UI path | RN UI path | Meeting / media.Meeting | join/chat/raise hand/moderate/end | current membership/epoch/lease | desktop local SFU required | room authority | actual SFU fixtures |
+| Screen sharing | Electron UI path | Electron UI path | RN UI path | RN UI path | Meeting,Presentation / media.Watch,Meeting | desktop selected capture; mobile receive | explicit capture permission | local SFU | media subscriptions | changing frame tests |
+| Remote control | Electron UI path | Electron UI path | RN UI path | RN UI path | media.RemoteControl / media.RemoteControl | Mac/Windows hosts; phones controllers | per-session native consent | authorized meeting | scoped input, no file/clipboard | 8 policy + native Mac input |
+| Courses / topics | Electron UI path | Electron UI path | RN UI path | RN UI path | study.Course / Study.Courses | edit/archive/restore/delete; topic rename/removal | personal owner; Course != CLAN | offline | aggregate personal sync | Study/core tests; lifecycle domain + Electron/native checks |
+| Notes | Electron UI path | Electron UI path | RN UI path | RN UI path | Study.Notes / Study.Notes | create/edit/delete; named confirmation and retained editor errors | owner/shared scope | offline | preserve conflicts/tombstones | core/sync/Study tests |
+| Diary | Electron UI path | Electron UI path | RN UI path | RN UI path | MySpace / screens.Diary | select previous date, edit and confirmed delete | owner-only, opt-in sensitive sync | offline | preserve by day | privacy/sync tests |
+| Timetable | Electron UI path | Electron UI path | RN UI path | RN UI path | study.Timetable / timetable.Timetable | create/edit/duplicate/archive/restore/delete | private; referenced original files retained | offline | private version sync, active selection local | domain/OCR/Electron/native persistence |
+| Tasks | Electron UI path | Electron UI path | RN UI path | RN UI path | study.Tasks / Study.Tasks | create/edit/status/delete | personal owner | offline | task + checklist aggregate | Study/core tests |
+| Exams | Electron UI path | Electron UI path | RN UI path | RN UI path | study.Exams / Study.Exams | create/update/status/delete | personal owner; Course reference | offline | exam aggregate | Study/core tests |
+| Reminders | Electron UI path | Electron UI path | RN UI path | RN UI path | MySpace,study.Reminders / Study.Reminders | create/update/done/snooze/delete | owner; native notification permission | bounded local schedules | personal records; alerts local | notification/core tests |
+| Flashcards / decks | Electron UI path | Electron UI path | RN UI path | RN UI path | study.Cards / Study.Cards | create/review/edit; deck rename/delete and card delete | personal owner | offline | decks/cards/reviews | SM2/core tests |
+| Study sessions / history | Electron UI path | Electron UI path | RN UI path | RN UI path | study.History / Study.Session | plan/start/end/cancel; edit/delete non-active records | owner; active device-local | offline | finished/planned personal sync | Study/core tests |
+| Boards / whiteboard | Electron UI path | Electron UI path | RN UI path | RN UI path | board/* / board/* | create/edit/rename/archive/restore/delete local boards; authorized shared content actions | board owner/capabilities | local boards offline | board protocol + personal sync | board/security tests |
+| Study tapes | Electron UI path | Electron UI path | Unavailable | Unavailable | tape/* / no mobile entry | desktop recording/bookmarks/archive | consent; no silent recording | saved local playback | recording policy | recording tests; mobile unavailable |
+| Saved / collections | Electron UI path | Electron UI path | RN UI path | RN UI path | Saved / Inbox | create/edit/move/share/delete; custom collection rename/delete | personal owner/shared references | offline; metadata fetch optional | personal aggregate | capture/Saved tests |
+| Resources / assignments | Electron UI path | Electron UI path | RN UI path | RN UI path | Files,Assignments / ClassContent | upload/read/submit/review | teacher/member capabilities | saved copies offline | host authoritative | authorization/integrity tests |
+| Personal Sync / Devices | Electron UI path | Electron UI path | RN UI path | RN UI path | devices.Devices / screens.Devices | link/revoke/sync/conflict resolution | signed verified personal devices | authorized LAN | encrypted authenticated personal sync | sync/link tests |
+| Settings / Notifications | Electron UI path | Electron UI path | RN UI path | RN UI path | MySpace / Shell.Me,People | preferences/OS permissions/background opt-in | OS-protected identity; no reset | local preferences | device-local | prefs/availability tests |
+| Capture / Inbox | Electron UI path | Electron UI path | RN UI path | RN UI path | Inbox,QuickCapture / Inbox,Intake | import/file; lifecycle gaps | explicit private/shared destination | offline | canonical domain records | capture tests |
+| AI / proposals | Electron UI path | Electron UI path | RN UI path | RN UI path | ai/* / screens.Ask | existing optional opt-in provider | no Diary/Timetable automatic disclosure | local provider capability dependent | no content upload by this phase | AI authorization tests; no expansion |
+
+## Native differences
+
+| Capability | macOS | Windows | Android | iOS |
+| --- | --- | --- | --- | --- |
+| Shared core UI | Electron path | Electron path; CI results in verification | Native build + emulator lifecycle PASS | Native build + 3 simulator UI PASS |
+| Live CLAN/SFU host | Desktop server | Desktop server | Ownership/handover; no embedded desktop SFU | Ownership/handover; no embedded desktop SFU |
+| Remote controlled host | Permission-gated native CGEvent | Non-elevated SendInput/UIPI | Unsupported; controller only | Unsupported; controller only |
+| Timetable local OCR | Vision helper | Unavailable/manual | Unavailable/manual | Native Vision; physical photographs unverified |
+| Background LAN availability | Opt-in tray | Opt-in tray | Opt-in native foreground service; OS/battery limits | Suspended apps cannot promise continuous local listening |
+| Mobile screen broadcasting | N/A | N/A | Not advertised without native tested permission path | Not advertised without native tested permission path |
+| Physical media/router/permission verification | NOT TESTED; actual Mac Electron UI tests separately PASS | NOT TESTED; CI UI separately recorded | NOT TESTED; emulator UI separately PASS | NOT TESTED; simulator UI separately PASS, provisioning pending |
+
+“UI path” means implemented source, not a physical/native PASS. Current software/runtime results are in BTC_2E_VERIFICATION.md. Comprehensive per-workflow native parity is incomplete; e.g. mobile study tapes, rich reference editing and complete legacy editor race handling. Windows CI does not establish physical camera/input/router behavior.
