@@ -115,7 +115,7 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
       </Card>
 
       <Card title="Connect with a code">
-        <Field label="CLAN profile code" value={manualCode} onChange={setManualCode} maxLength={2000} />
+        <Field label="CLAN profile code" autoCapitalize="none" autoCorrect={false} value={manualCode} onChange={setManualCode} maxLength={2000} />
         <Btn label="Connect using profile code" disabled={busy || !manualCode.trim()} onPress={() => { const code = manualCode.trim(); if (!parseProfileQr(code)) { setErr('Enter a valid CLAN profile code from the other person.'); return; } onCode(code); }} />
         <Row gap={6}>
           <Btn primary label="Scan a code" onPress={() => { setScan(true); setShow(null); }} />

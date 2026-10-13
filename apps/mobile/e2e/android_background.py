@@ -23,10 +23,17 @@ def deliver(label):
 
 def main():
     assert ui.adb('shell','getprop','ro.kernel.qemu').strip()==b'1', 'Disposable emulator only'
-    ui.adb('shell','settings','put','global','animator_duration_scale','0');
+    ui.adb('shell','settings','put','global','transition_animation_scale','0');
     ui.adb('shell','input','keyevent','KEYCODE_WAKEUP'); ui.adb('shell','wm','dismiss-keyguard')
     ui.adb('shell','am','start','-n',ui.ACTIVITY); time.sleep(3)
-    ui.tap('People'); ui.tap('Nearby'); ui.type_('CLAN profile code',api('/state')['qr']); ui.tap('Connect using profile code')
+    ui.tap('People')
+    for _ in range(12): ui.adb('shell','input','swipe','100','600','100','1500','150')
+    ui.tap('Nearby')
+    x,y=ui.find('CLAN profile code',edit=True); ui.adb('shell','input','tap',str(x),str(y))
+    ui.adb('shell','input','keycombination','KEYCODE_CTRL_LEFT','KEYCODE_A'); ui.adb('shell','input','keyevent','KEYCODE_DEL')
+    code=api('/state')['qr']; ui.type_('CLAN profile code',code)
+    assert any(n.get('content-desc')=='CLAN profile code' and n.get('text')==code for n in ui.nodes()), 'exact authenticated code entry'
+    print('PASS exact profile code entry',flush=True); ui.tap('Connect using profile code')
     ui.find('Connected to BTC-2R QA Mac. Their identity matched the code.'); ui.tap('Send friend request')
     ui.until(lambda:api('/state')['requests']>0,'signed friend request',secs=30); api('/approve',{})
     ui.until(lambda:api('/state')['friends']==1,'authorized friendship')
@@ -61,4 +68,5 @@ if __name__=='__main__':
     try: main()
     finally:
         ui.adb('shell','cmd','connectivity','airplane-mode','disable')
+        ui.adb('shell','settings','put','global','transition_animation_scale','1.0')
         ui.adb('shell','input','keyevent','KEYCODE_WAKEUP'); ui.adb('shell','wm','dismiss-keyguard')

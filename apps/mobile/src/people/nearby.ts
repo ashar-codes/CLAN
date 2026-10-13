@@ -50,6 +50,7 @@ class Nearby {
   private r = '';
   private rAt = 0;
   private running = false;
+  private starting: Promise<void> | null = null;
   private generation = 0;
   private directoryGeneration = 0;
   private directoryRound = 0;
@@ -128,15 +129,18 @@ class Nearby {
     return r[required] === PermissionsAndroid.RESULTS.GRANTED;
   }
 
-  async start() {
+  start(): Promise<void> { return this.starting ??= this.startNow().finally(() => { this.starting = null; }); }
+  private async startNow() {
     if (!PeerLink || !this.cm || this.settings.mode === 'off' || AppState.currentState !== 'active' && !this.keepInBackground()) return;
     if (!this.running) {
+      const generation = this.generation;
       try {
         this.port = await listen(this.settings.port, (l) => void this.cm!.accept(l));
         if (this.port !== this.settings.port) { this.settings = { ...this.settings, port: this.port }; saveSettings(this.settings); }
       } catch {
         this.port = await listen(0, (l) => void this.cm!.accept(l)).catch(() => 0);
       }
+      if (generation !== this.generation) { stopListening(); this.port = 0; return; }
       if (!this.port) { this.status = 'Nearby could not start on this phone.'; bump(); return; }
       this.running = true;
       try { PeerLink.browse(); } catch { /* reported by radio events */ }
@@ -178,7 +182,7 @@ class Nearby {
   }
   stop(closeSessions = true) {
     if (!PeerLink) return;
-    this.running = false; this.generation++; this.directoryGeneration++;
+    this.running = false; this.port = 0; this.generation++; this.directoryGeneration++;
     for (const t of this.timers) clearInterval(t); this.timers = [];
     try { PeerLink.stopAdvertise(); PeerLink.stopBrowse(); PeerLink.p2pStop(); PeerLink.awareStop(); stopListening(); PeerLink.availabilityStop(); } catch { /* not fatal */ }
     if (closeSessions) for (const c of people().contacts('all')) this.cm?.session(c.key)?.link.close('Nearby turned off');

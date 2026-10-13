@@ -1,5 +1,19 @@
 import XCTest
 final class CLANQASmoke: XCTestCase {
+  func testForegroundResume() throws {
+    let app = XCUIApplication(bundleIdentifier: "app.classroomlan.student"); app.launch()
+    XCTAssertTrue(app.buttons["Join a CLAN"].waitForExistence(timeout: 45))
+    app.descendants(matching: .any).matching(identifier: "People").firstMatch.tap()
+    XCTAssertTrue(app.buttons["Nearby"].waitForExistence(timeout: 15))
+    XCUIDevice.shared.press(.home); app.activate()
+    XCTAssertTrue(app.buttons["Nearby"].waitForExistence(timeout: 15))
+    // Actual native resume/navigation; this does not claim a remote LAN peer or suspended listening.
+    app.buttons["Nearby"].tap()
+    let limitation = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Limited by iOS")).firstMatch
+    for _ in 0..<12 { if limitation.isHittable { break }; app.swipeUp() }
+    XCTAssertTrue(limitation.exists)
+  }
+
   func testProfileNoteAndRestart() throws {
     let app = XCUIApplication(bundleIdentifier: "app.classroomlan.student")
     app.launch()

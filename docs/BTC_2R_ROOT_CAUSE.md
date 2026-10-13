@@ -17,3 +17,5 @@ These are verified defects, not proven explanations of the user's Windows↔Mac 
 ## Remaining hypotheses
 
 Windows multicast interface/VPN choice, local-network permission, actual client isolation/firewall, old peer identity binding, stale older-package endpoints and Xiaomi battery termination require physical diagnostics. Windows installer permits program-scoped local-subnet inbound traffic; routed peers need explicitly approved scoped rules, not global firewall disable. No automatic firewall modification was added.
+
+Follow-up source audit: concurrent mobile listener starts were not coalesced, and late listener completion could resurrect discovery after Stop. Startup is now coalesced and generation-fenced; two deterministic native-adapter lifecycle unit tests PASS. Stop clears the displayed listener port. Manual profile-code entry disables capitalization/autocorrection; the native driver now shell-quotes codes containing `&` rather than losing QR parameters. These follow-ups do not establish the original physical failure's cause.

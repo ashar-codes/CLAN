@@ -9,7 +9,7 @@ through accessibility labels (uiautomator) and real Android intents:
   file download (SHA-256 verified). Phone file picking/upload remains a separate device test.
 Run from the repo root:  python3 apps/mobile/e2e/android_cross_device.py
 Emulator, not a physical device: real-hardware Wi-Fi, BLE, camera and performance are not covered here."""
-import json, os, re, subprocess, sys, time, urllib.request, xml.etree.ElementTree as ET
+import json, os, re, shlex, subprocess, sys, time, urllib.request, xml.etree.ElementTree as ET
 
 ADB = os.path.expanduser(os.environ.get('ADB', '~/Library/Android/sdk/platform-tools/adb'))
 SCROLL_X = os.environ.get('CLAN_QA_SCROLL_X', '24')
@@ -98,7 +98,7 @@ def type_(label, text, dismiss=True):
     adb('shell', 'input', 'tap', str(x), str(y)); time.sleep(0.3)
     adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END')
     adb('shell', 'input', 'keyevent', '--delay', '10', *(['KEYCODE_DEL'] * 60))
-    adb('shell', 'input', 'text', text.replace(' ', '%s'))
+    adb('shell', 'input', 'text', shlex.quote(text.replace(' ', '%s')))
     if dismiss: adb('shell', 'input', 'keyevent', 'KEYCODE_BACK')
     time.sleep(0.3)
     if label in ('Link code', 'Computer address (only if not found)', 'Six digit classroom code', 'Host address'):
