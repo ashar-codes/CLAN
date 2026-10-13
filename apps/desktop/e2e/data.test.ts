@@ -26,9 +26,10 @@ async function launch(userData = tmp(), recovery = false) {
   const args = recovery ? ['-r', join(import.meta.dirname, 'fixtures/accept-recovery-dialog.cjs'), '.'] : ['.'];
   const app = await electron.launch({ args, cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLASSROOM_USER_DATA: userData } });
   apps.push(app);
+  const launchedProcess = app.process();
   const startupFailures: string[] = [];
   let stderrTail = '';
-  app.process().stderr?.on('data', chunk => {
+  launchedProcess.stderr?.on('data', chunk => {
     stderrTail = (stderrTail + String(chunk)).slice(-8192);
     const lines = stderrTail.split('\n'); stderrTail = lines.pop() ?? '';
     for (const line of lines) if (line.startsWith('QA bootstrap failure') || line.startsWith('QA recovery startup failure')) {
@@ -44,7 +45,7 @@ async function launch(userData = tmp(), recovery = false) {
       app.evaluate(({ app, BrowserWindow }) => ({ ready: app.isReady(), ownsLock: app.hasSingleInstanceLock(), windows: BrowserWindow.getAllWindows().length, warningPresented: !!(globalThis as { __qaRecoveryWarning?: boolean }).__qaRecoveryWarning })).catch(() => ({ evaluationFailed: true })),
       new Promise(resolve => setTimeout(() => resolve({ mainUnresponsive: true }), 3000)),
     ]);
-    console.error('Disposable recovery launch diagnostic', { recovery, exited: app.process().exitCode !== null, diagnostic, startupFailures });
+    console.error('Disposable recovery launch diagnostic', { recovery, exited: launchedProcess.exitCode !== null, diagnostic, startupFailures });
     throw error;
   }
 }

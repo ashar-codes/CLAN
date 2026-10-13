@@ -31,7 +31,12 @@ jobs:
         run: sh native/livekit/fetch.sh
       - run: pnpm typecheck
       - run: pnpm build:desktop
+      - name: Windows recovery diagnostic
+        if: runner.os == 'Windows' && !cancelled()
+        working-directory: apps/desktop
+        run: pnpm exec vitest run -c vitest.e2e.config.ts e2e/data.test.ts
       - run: pnpm exec vitest run --maxWorkers=1
+        if: '!cancelled()'
       - name: Complete Windows Electron regression
         if: runner.os == 'Windows' && !cancelled()
         working-directory: apps/desktop
