@@ -5,6 +5,7 @@ import { _electron as electron, type ElectronApplication, type Page } from 'play
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, openSync, writeSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterAll, expect, it } from 'vitest';
 
 const apps: ElectronApplication[] = [];
@@ -75,7 +76,15 @@ it('export → import, local feedback without private text, and recovery from a 
   expect(existsSync(backups) && readdirSync(backups).length).toBeGreaterThan(0);
   // Wait for the killed instance to release Electron's single-instance lock before relaunching.
   const killed = a.app.process();
-  await new Promise<void>((resolve) => { killed.once('exit', () => resolve()); killed.kill('SIGKILL'); });
+  await new Promise<void>((resolve, reject) => {
+    killed.once('exit', () => resolve());
+    try {
+      // Windows does not propagate main-process termination to Electron's child tree.
+      // Crash the entire disposable instance before manipulating its database files.
+      if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(killed.pid), '/T', '/F'], { windowsHide: true });
+      else killed.kill('SIGKILL');
+    } catch (error) { reject(error); }
+  });
   apps.splice(apps.indexOf(a.app), 1); // Playwright cannot close a process already killed by this crash test.
   const dbPath = join(a.userData, 'teacher.db');
   for (const ext of ['-wal', '-shm']) await removeReleased(dbPath + ext);
