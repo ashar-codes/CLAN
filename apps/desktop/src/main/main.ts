@@ -157,7 +157,7 @@ function registerIpc() {
     const carriers = candidates.length ? await Promise.race([bleP, new Promise<[]>((r) => setTimeout(() => r([]), 500))]) : await bleP;
     await opaque.ready;
     const r = await pairAndJoin({
-      candidates, code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName }, device: trust.device(),
+      candidates, candidatesNow: manual ? undefined : () => discovered, discoveryWindowMs: Math.max(0, 10000-(Date.now()-t0)), code: c, profile: { fullName: p.fullName, rollNo: p.rollNo, deviceName: p.deviceName }, device: trust.device(),
       opaque: opaque.client, transportFor: (b) => pinnedTransport(b), carriers, associate: direct.associator(),
     }).catch((e) => { logError('join', (e as { cause?: unknown }).cause ?? e); throw joinError(e); });
     trust.remember({ sessionId: r.classroom.sessionId, clanId: r.classroom.clanId ?? r.classroom.sessionId, url: r.url, title: r.classroom.title, binding: r.binding, savedAt: Date.now() });

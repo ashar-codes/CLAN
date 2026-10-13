@@ -181,12 +181,14 @@ export async function pairAndJoin(o: {
   opaque: OpaqueClient; plainFetch?: (u: string, i?: RequestInit) => Promise<Response>; transportFor(binding: TlsBinding): Transport;
   /** Extra bootstrap carriers (BLE hosts found nearby). Tried in parallel with the LAN candidates; OPAQUE picks ours. */
   carriers?: BootstrapCarrier[]; associate?: DirectAssociator;
+  /** Fresh observed advertisements only; no address scanning, no retry of the same endpoint. */
+  candidatesNow?: () => Candidate[]; discoveryWindowMs?: number;
 }): Promise<PairedJoin> {
   if (!/^\d{6}$/.test(o.code)) throw new TransferError('invalid', 'Enter the 6-digit classroom code.');
-  if (o.candidates.length === 0 && !o.carriers?.length) throw new TransferError('none_found', 'No classrooms found on this network yet. Make sure you are on the same Wi-Fi as the teacher.');
+  if (o.candidates.length === 0 && !o.carriers?.length && !o.candidatesNow) throw new TransferError('none_found', 'No classrooms found on this network yet. Make sure you are on the same Wi-Fi as the teacher.');
   const f = o.plainFetch ?? ((u, i) => fetch(u, i));
   const errors: TransferError[] = [];
-  const carriers = [...o.candidates.map((c) => lanCarrier([c.url, ...(c.alt ?? [])], c.sid, f)), ...(o.carriers ?? [])];
+  const carriers = [...o.candidates.slice(0, 32).map((c) => lanCarrier([c.url, ...(c.alt ?? [])], c.sid, f)), ...(o.carriers ?? [])];
   const attempts = carriers.map(async (carrier) => {
     try {
       const sid = await carrier.sessionId();
@@ -198,6 +200,23 @@ export async function pairAndJoin(o: {
       throw err;
     }
   });
+  let searching = true;
+  if (o.candidatesNow) {
+    const key = (c: Candidate) => JSON.stringify([c.sid ?? '', [...new Set([c.url, ...(c.alt ?? [])])].sort()]);
+    const seen = new Set(o.candidates.slice(0, 32).map(key));
+    const deadline = performance.now() + Math.min(10000, Math.max(0, o.discoveryWindowMs ?? 10000));
+    attempts.push((async () => {
+      while (searching && performance.now() < deadline && seen.size < 32) {
+        const fresh = o.candidatesNow!().filter(c => { const k = key(c); if (seen.has(k) || seen.size >= 32) return false; seen.add(k); return true; });
+        if (fresh.length) {
+          try { return await pairAndJoin({ ...o, candidates: fresh, carriers: [], candidatesNow: undefined }); }
+          catch (e) { if (e instanceof TransferError) errors.push(e); }
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+      throw new TransferError('none_found', 'No additional reachable CLAN was discovered. Use the host address or QR fallback.');
+    })());
+  }
   try {
     return await Promise.any(attempts);
   } catch {
@@ -207,7 +226,7 @@ export async function pairAndJoin(o: {
     const meaningful = errors.find((e) => e.code !== 'bad_code' && e.code !== 'unreachable');
     throw meaningful ?? Object.assign(new TransferError('bad_code', errors.some((e) => e.code === 'bad_code') ? 'No CLAN matches that code.' : 'Could not reach any CLAN.'),
       { cause: errors.find((e) => e.cause)?.cause });
-  }
+  } finally { searching = false; }
 }
 
 /** Rejoin an already-paired session without the code: prove the device key over the pinned TLS channel. */

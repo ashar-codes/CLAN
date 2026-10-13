@@ -42,7 +42,13 @@ async function joinClan(p: Page, name: string, code: string, host: Page, first =
   }
   if (first) { await p.getByLabel('Full name').fill(name); await p.getByLabel('Student / roll number').fill(`R-${name}`); await p.getByLabel('Device name').fill(`${name}-Mac`); await p.getByRole('button', { name: 'Save' }).click(); }
   await p.locator('.code-input').fill(code); await p.getByRole('button', { name: 'Join', exact: true }).click();
-  await host.getByRole('button', { name: 'Approve', exact: true }).first().click({ timeout: 25_000 });
+  try { await host.getByRole('button', { name: 'Approve', exact: true }).first().click({ timeout: 25_000 }); }
+  catch (error) {
+    const message = (await p.locator('.error').allTextContents()).join(' | ').slice(0, 600);
+    const joining = await p.getByRole('button', { name: 'Joining…', exact: true }).count();
+    const secure = await p.getByTestId('secure-state').count();
+    throw new Error(`Approval did not appear: studentError=${message || '(none)'} joining=${joining} secure=${secure}`, { cause: error });
+  }
   await p.getByTestId('secure-state').waitFor({ timeout: 15_000 });
 }
 const say = async (p: Page, text: string) => { await p.getByTestId('chat-input').fill(text); await p.getByTestId('chat-input').press('Enter'); };

@@ -127,6 +127,7 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
 
   const join = async () => {
     setBusy(true); setError(''); setManual(null);
+    const discoveryStarted = performance.now();
     try {
       let candidates = foundRef.current;
       // a typed host address (as the host's screen shows it) when this Wi-Fi blocks discovery
@@ -140,7 +141,7 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
       const carriers = qr || candidates.length ? [] : (await bleAllowed()) ? await bleCarriers() : [];
       for (let i = 0; i < 12 && candidates.length === 0 && carriers.length === 0; i++) { await new Promise((r) => setTimeout(r, 250)); candidates = foundRef.current; }
       // Same secure flow as desktop: OPAQUE (official WASM in the isolated WebView) -> MACed binding -> pinned native TLS.
-      onJoined(await pairAndJoin({ candidates, carriers, associate: associator, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
+      onJoined(await pairAndJoin({ candidates, candidatesNow: qr || address.trim() ? undefined : () => foundRef.current, discoveryWindowMs: Math.max(0, 3000-(performance.now()-discoveryStarted)), carriers, associate: associator, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
     } catch (e) {
       const d = (e as { code?: string; direct?: DirectPackage }).direct;
       if ((e as { code?: string }).code === 'direct_manual' && d) setManual({ ssid: d.ssid, passphrase: d.passphrase });

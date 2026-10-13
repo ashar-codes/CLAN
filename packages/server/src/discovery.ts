@@ -42,19 +42,22 @@ export function browse(onChange: (list: DiscoveredClassroom[]) => void): () => v
   const browser = bonjour.find({ type: SERVICE_TYPE });
   dlog('browse start');
   const emit = () => onChange([...found.values()]);
-  browser.on('up', (s) => {
+  const up = (s: (typeof browser.services)[number]) => {
     const txt = (s.txt ?? {}) as Partial<Advertisement>;
     const [url, ...alt] = lanUrls(s.port, s.addresses ?? [], [txt.a, s.referer?.address]);
     if (!txt.sid || !url || txt.v !== '1') return;
     dlog('browse up', { sid: txt.sid, url, alt, port: s.port });
     found.set(txt.sid, { sid: txt.sid, title: String(txt.title ?? 'CLAN'), type: /^[A-Z_]{3,20}$/.test(String(txt.type)) ? String(txt.type) : 'CLASSROOM', url, alt });
     emit();
-  });
+  };
+  browser.on('up', up);
+  browser.on('srv-update', up);
+  browser.on('txt-update', up);
   browser.on('down', (s) => {
     const sid = (s.txt as Partial<Advertisement> | undefined)?.sid;
     if (sid && found.delete(sid)) emit();
   });
   // Re-query periodically: phones and laptops drop multicast packets on busy classroom Wi-Fi.
-  const t = setInterval(() => browser.update(), 3000);
+  const t = setInterval(() => { browser.expire(); browser.update(); }, 3000);
   return () => { clearInterval(t); browser.stop(); bonjour.destroy(); };
 }
