@@ -403,14 +403,19 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
         if(!await authorizeMedia(req)) return ws.close(1008, 'media access revoked or invalid');
         if (media?.state !== 'ready') return ws.close(1013, 'media unavailable');
         if (mediaSockets >= MEDIA_MAX_SOCKETS) return ws.close(1013, 'too many media connections');
+        const token=new URL(req.url,'https://localhost').searchParams.get('access_token') ?? req.headers.authorization?.replace(/^Bearer /,'');
+        const claims=await media.verifyToken(token!);
+        const live=()=>{try{fence();return !classroom.info().ended && media?.state==='ready' && (claims.sub==='host'||classroom.status(claims.sub!)==='approved') && (claims.video?.room===media.room || meetings.authorized(claims.video?.room??'',claims.sub!,claims.metadata));}catch{return false;}};
+        if(!live())return ws.close(1008,'media access revoked');
         mediaSockets++;
         const up = new UpstreamSocket(media.signalUrl + req.url.slice('/media'.length));
         const queue: Buffer[] = [];
-        up.on('open', () => { for (const m of queue.splice(0)) up.send(m); });
+        up.on('open', () => { if(!live())return end();for (const m of queue.splice(0)) up.send(m); });
         up.on('message', (d, bin) => { if (ws.readyState === ws.OPEN) ws.send(d, { binary: bin }); });
-        ws.on('message', (d: Buffer, bin: boolean) => { if (up.readyState === up.OPEN) up.send(d, { binary: bin }); else if (queue.length < MEDIA_MAX_QUEUED) queue.push(d); else ws.close(1008, 'too much before connect'); });
+        ws.on('message', (d: Buffer, bin: boolean) => { if(!live())return end();if (up.readyState === up.OPEN) up.send(d, { binary: bin }); else if (queue.length < MEDIA_MAX_QUEUED) queue.push(d); else ws.close(1008, 'too much before connect'); });
         let ended = false;
-        const end = () => { if (!ended) { ended = true; mediaSockets--; } if (up.readyState <= 1) up.close(); if (ws.readyState <= 1) ws.close(); };
+        const leaseTimer=setInterval(()=>{if(!live())end();},250);leaseTimer.unref();
+        const end = () => { clearInterval(leaseTimer);if (!ended) { ended = true; mediaSockets--; } if (up.readyState <= 1) up.close(); if (ws.readyState <= 1) ws.close(); };
         up.on('close', end); up.on('error', end); ws.on('close', end); ws.on('error', end);
       },
     });

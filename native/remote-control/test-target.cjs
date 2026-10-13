@@ -1,0 +1,2 @@
+const {app,BrowserWindow}=require('electron');
+app.whenReady().then(()=>{const w=new BrowserWindow({width:500,height:350,x:50,y:50,show:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});w.loadURL('data:text/html,'+encodeURIComponent('<html><body><h1>CLAN disposable input target</h1><input id="field" autofocus><button id="button" onclick="document.querySelector(\'#result\').textContent=\'Clicked\'">QA button</button><p id="result"></p></body></html>')).then(()=>{w.show();w.focus();w.webContents.focus();});});

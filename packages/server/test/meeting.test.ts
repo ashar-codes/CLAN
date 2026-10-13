@@ -28,6 +28,13 @@ async function publish(room:Room,video:boolean,source:TrackSource=TrackSource.SO
  stops.push(()=>{alive=false;a.clearQueue();});return audio;
 }
 describe.skipIf(!lan || !existsSync(binary))('authorized local meetings with real SFU media',()=>{
+ it('pinned media proxy rechecks leases on existing sockets and closes revoked signaling',async()=>{
+  const {s,members}=await fixture(1),h=s.classroom.teacherToken,who=members[0]!;
+  const m=(await request(s,h,{action:'create',mode:'audio',title:'Proxy revocation'})).body as MeetingView;
+  await request(s,h,{action:'invite',identity:who.memberId},m.id);const credential=await token(s,who.token,m.id);
+  const ws=trFor(s.url).openWebSocket(s.url.replace('https:','wss:')+'/media/rtc?access_token='+encodeURIComponent(credential.token)+'&auto_subscribe=1&protocol=15&sdk=js&version=2.22.3');let closed=false;
+  try{await new Promise<void>((resolve,reject)=>{ws.onopen=()=>resolve();ws.onerror=()=>reject(Error('Pinned signaling failed'));});ws.onclose=()=>{closed=true;};await request(s,h,{action:'end'},m.id);await until(()=>closed,3000);expect((await request(s,who.token,{action:'join'},m.id)).status).toBe(403);}finally{ws.close();}
+ },15000);
  it('remote input requires authenticated live screens, consent and current participant leases',async()=>{
   const {s,members}=await fixture(1),h=s.classroom.teacherToken,who=members[0]!;
   const m=(await request(s,h,{action:'create',mode:'video',title:'Control security'})).body as MeetingView;

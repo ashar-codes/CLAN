@@ -128,7 +128,7 @@ export class MediaService extends EventEmitter {
   async meetingParticipants(room:string) { return this.state==='ready' ? this.api().listParticipants(room) : []; }
   async meetingRemove(room:string,identity:string) { if(this.state==='ready') await this.api().removeParticipant(room,identity).catch(async e=>{if(String(e?.code)==='not_found')return;await this.close();throw e;}); }
   async meetingMute(room:string,identity:string) { for(const track of (await this.meetingParticipants(room)).find(p=>p.identity===identity)?.tracks ?? []) if(track.source===TrackSource.MICROPHONE) await this.api().mutePublishedTrack(room,identity,track.sid,true); }
-  async meetingEnd(room:string) { if(this.state==='ready') await this.api().deleteRoom(room).catch(async e=>{if(String(e?.code)==='not_found')return;await this.close();throw e;}); }
+  async meetingEnd(room:string) { if(this.state==='ready'){const participants=await this.api().listParticipants(room).catch(()=>[]);await Promise.all(participants.map(p=>this.meetingRemove(room,p.identity)));} if(this.state==='ready') await this.api().deleteRoom(room).catch(async e=>{if(String(e?.code)==='not_found')return;await this.close();throw e;}); }
 
   /** Grant/revoke publishing on the SFU itself (revocation unpublishes immediately). */
   async setPublish(identity: string, allowed: boolean) {
