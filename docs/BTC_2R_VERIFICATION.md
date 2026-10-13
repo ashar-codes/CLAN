@@ -1,6 +1,21 @@
 # BTC-2R verification
 
-Branch `btc-2r-always-reachable`, baseline `7db61c7`. Software/physical completion remains **BLOCKED** by Windows recovery/sharing-policy failures and unavailable physical cross-device acceptance. No BTC-1 package, active installed app, user profile/key or draft PR replaced.
+Branch `btc-2r-always-reachable`, baseline `7db61c7`. Physical completion remains **BLOCKED** by unavailable cross-device acceptance. Final available software regressions PASS at 3eab423; historical failures remain in this document. No BTC-1 package, active installed app, user profile/key or draft PR replaced.
+
+
+## Current evidence and remaining gate
+
+Application source: `3eab42359a874dcc710f9cdc6e62f806e228fb2e`. Final documentation checkpoint may follow without changing application code.
+
+| Platform | PASS | FAIL / SKIPPED | NOT TESTED |
+| --- | --- | --- | --- |
+| macOS | 539 unit/integration; four-project typecheck/build; 45 Electron; authenticated sockets and virtual changing media | 0 final FAIL; 2 existing PERF SKIPPED; interrupted earlier failures retained below | Physical cross-device calls, permissions/revocation, login reboot, routed routers |
+| Windows CI | Typecheck/build/native input; 538 unit/integration; 45 Electron; early and full-suite native crash recovery | 0 final FAIL; 1 Apple Security platform SKIPPED; 2 existing PERF SKIPPED | Physical Windows↔Mac/Android, installed firewall/network profile, real hardware media |
+| Android | Native Gradle builds; two emulator background/native authenticated TCP runs at a57da38 | No successful final physical pairing inferred; synthetic call notification is not real media | Redmi locked/OEM delivery/calls/roaming; autonomous headless process restart unsupported |
+| iOS | Native compilation after a33c977; four simulator UI/resume tests at a57da38 | No provisioned IPA; suspended LAN listening unsupported | Physical signed iPhone peer/media; APNs/PushKit/CallKit absent |
+| Linux CI | 538 unit/integration, typecheck/build | 1 existing platform SKIPPED | Electron intentionally Windows-only in this workflow |
+
+The physical cross-device acceptance gate and BTC-2G remain **BLOCKED**. Android partial wake lock/native pulses require a live app process; Keep is not immunity to force-stop or OEM termination. No public-release readiness claim. Inherited two high/two moderate advisories and desktop at-rest encryption limits remain unresolved. Protected BTC-1 packages are unchanged and do not contain these BTC-2R repairs.
 
 Initial focused real TCP idle-friend/privacy/blocking and Bonjour update regressions: **10 PASS**, repeated **10 PASS** (12.16 s). Initial four-project typecheck exposed missing diagnostic import; repaired, subsequent typechecks PASS. Initial full unit/integration **522 PASS**, 72 files (396.01 s); source changed during execution, so final frozen-source repetition is required.
 
@@ -69,3 +84,27 @@ Frozen 8d995d1 serial Mac Electron **45 PASS, 0 FAIL, 2 existing PERF SKIPPED**,
 8d995d1 final local unit run: **535 PASS, 2 FAIL** (2142.41 s), discovery late-query and matching-classroom network tests. Power log confirms lid sleep 23:56:42–00:24:28, including 993-second and 671-second sleep intervals, matching the failed tests' elapsed times. Tests were not skipped or deadlines changed. After AC power/wake, both affected files **11 PASS** (13.04 s). Complete controlled repetition remains required after the Windows durability candidate.
 
 546bfba Windows full Electron **44 PASS, 1 FAIL, 2 existing PERF SKIPPED** (487.57 s); early recovery test passed but full recovery failed. 8d995d1 early recovery **FAIL** (14.14 s), full Electron **44 PASS, 1 FAIL, 2 existing PERF SKIPPED** (544.51 s). Both report the same preserved-identity decryption failure. New wrapping-metadata durability candidate: keystore/rename **7 PASS**, four-project typecheck and desktop build PASS; real Mac damaged-database recovery **1 PASS** (7.75 s). Windows native verification pending.
+
+## Frozen application checkpoint 3eab423
+
+Final controlled local unit/integration: **539 PASS, 0 FAIL**, 75 files, 341.74 s. AC power confirmed after the interrupted lid-sleep run. Four-project typecheck and desktop build PASS. Windows early actual Electron crash/recovery diagnostic at this checkpoint PASS (35 s); complete Windows and Mac Electron results pending. This native diagnostic uses the real OS-protected identity store and abrupt process termination; metadata unit mocks alone are not acceptance evidence.
+
+All four protected BTC-1 Desktop installer sizes/hashes reverified unchanged. Installed CLAN TEST app.asar SHA-256 remains `756424eecd7e388ab6388b65e18eec9ec42db7542f9b49ec26a251969ca4a69e`. No active application, user profile, identity or installer replaced. Separate Android candidate remains source-specific a57da38; later desktop repairs are not present in that APK.
+
+Linux final CI at 3eab423: **538 PASS, 1 existing platform SKIPPED**, 390.18 s; native input/Electron execution intentionally Windows-only. Linux typecheck/build PASS. Windows full unit step PASS; exact counts/full Electron final evidence pending.
+
+Final frozen 3eab423 complete Mac Electron **45 PASS, 0 FAIL, 2 existing PERF SKIPPED**, 28 files, 487.63 s. Runs are serial with disposable profiles and unchanged assertions/deadlines. Virtual capture verifies actual changing media frames; physical cameras, microphones and OS permission/revocation remain separate gates.
+
+Existing skips: Electron `PERF whiteboard render` and `PERF Study Tape recording 720p / 1080p` require explicit PERF=1; Linux/Windows omit the Apple Security native Swift pinned-trust test because it requires macOS/swiftc. That native trust test is included in the 539-PASS Mac unit run. No new functional skip was introduced.
+
+## Final Windows acceptance and delivery checkpoint
+
+[CI 38455975750](https://github.com/ashar-codes/CLAN/actions/runs/38455975750), frozen application **3eab42359a874dcc710f9cdc6e62f806e228fb2e**: both jobs **PASS**. Windows native input adapter compilation, four-project typecheck and desktop build PASS. Complete Windows unit/integration **538 PASS, 0 FAIL, 1 existing Apple Security platform SKIPPED**, 453.76 s. Early actual native damaged-database/abrupt-crash recovery **1 PASS**, 33.81 s; full Windows Electron **45 PASS, 0 FAIL, 2 existing PERF SKIPPED**, 1285.75 s. The full suite independently repeats the recovery fixture. All original identity/data, join approval, file integrity, media and permission assertions remain required. Fresh profiles wait for real protected-key metadata; only the CI job's overall budget increased, not test/assertion deadlines.
+
+Mac final **539 unit/integration PASS** and **45 Electron PASS / 2 existing PERF SKIPPED**; Linux **538 PASS / 1 existing platform SKIPPED**. Actual Electron sockets/SFU and virtual changing media are verified separately on Mac and Windows; this is **not a simultaneous physical Windows↔Mac network test**. Historical discovery, teardown, recovery and interrupted-test failures are retained above; a successful controlled final run is not a guarantee against all environment-specific intermittency.
+
+Native Android/iOS evidence remains at the stated mobile checkpoints: later changes are desktop-only or fixture/documentation changes. No final mobile native/hardware claim is inferred from a desktop CI pass. Android background, screen-asleep reception, native authenticated receipt/queued recovery and synthetic fresh-call notification passed twice in the disposable emulator. Actual audible ringing/audio/video, Redmi secure-lock/OEM policies, physical Windows↔Mac and routed routers remain NOT TESTED. iOS suspended incoming calls remain blocked by absent authorized/provisioned push infrastructure.
+
+Final source-history scan through 3eab423: **14 commits, no secrets found**. Dependency audit **0 critical / 2 high / 2 moderate**, inherited unresolved findings (node-forge, braces, uuid, sprintf-js); desktop data-at-rest limitations unchanged. No secrets/raw testing logs committed. PRs #1–#4 remain open drafts, unmerged. Current four BTC-1 installers and installed CLAN TEST hashes are unchanged. Final measured free space **5.19 GiB**; no further large build initiated.
+
+**Decision:** available controlled software checks PASS; complete BTC-2R physical acceptance and BTC-2G readiness **BLOCKED**. Follow [network/hardware checklist](BTC_2R_NETWORK_MATRIX.md). No final packages, protected replacements, provisioning credentials or internet services introduced. Separate source-specific debug QA APK path/hash/signing are recorded above and in its local README.
