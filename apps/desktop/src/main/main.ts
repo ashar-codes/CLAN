@@ -462,6 +462,7 @@ registerMediaScheme(); // privileged scheme must be declared before ready
 app.whenReady().then(async () => {
   if (!ownsProfile) return;
   keystore = new Keystore(); // initialise OS key storage under the legacy storage identity…
+  await keystore.ready(); // Windows wrapping metadata must survive a crash before identity ciphertext is created.
   app.setName(PRODUCT_NAME); // …then present as CLAN
   trust = new Trust(keystore, app.getPath('userData'));
   trust.installVerifyProc(session.defaultSession);
