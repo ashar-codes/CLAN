@@ -28,6 +28,24 @@ async function publish(room:Room,video:boolean,source:TrackSource=TrackSource.SO
  stops.push(()=>{alive=false;a.clearQueue();});return audio;
 }
 describe.skipIf(!lan || !existsSync(binary))('authorized local meetings with real SFU media',()=>{
+ it('remote input requires authenticated live screens, consent and current participant leases',async()=>{
+  const {s,members}=await fixture(1),h=s.classroom.teacherToken,who=members[0]!;
+  const m=(await request(s,h,{action:'create',mode:'video',title:'Control security'})).body as MeetingView;
+  await request(s,h,{action:'invite',identity:who.memberId},m.id);
+  const host=await connect(s,(await token(s,h,m.id)).token),peer=await connect(s,(await token(s,who.token,m.id)).token);
+  await publish(host,true,TrackSource.SOURCE_SCREENSHARE);
+  const control=async(t:string,body?:unknown)=>{const r=await trFor(s.url).fetch(s.url+'/api/control/'+m.id,{method:body?'POST':'GET',headers:{authorization:'Bearer '+t,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json() as any};};
+  let track='';await until(async()=>{const v=await control(who.token);track=v.body.screens?.[0]?.screen??'';return !!track;});
+  expect((await control('forged')).status).toBe(401);
+  await control(who.token,{action:'request',target:'host',screen:track});const r=(await control(h)).body.requests[0];
+  expect((await control(who.token,{action:'approve',request:r.id})).status).not.toBe(200);
+  const grant=(await control(h,{action:'approve',request:r.id})).body.grant.id;
+  const input={action:'input',grant,seq:1,input:{type:'pointer',x:.2,y:.7,action:'click'}};
+  expect((await control(who.token,input)).status).toBe(200);expect((await control(who.token,input)).status).not.toBe(200);
+  expect((await control(h)).body.inputs).toHaveLength(0);expect((await control(h,{action:'pull'})).body.inputs).toHaveLength(1);
+  await request(s,h,{action:'remove',identity:who.memberId},m.id);
+  expect((await control(who.token,{...input,seq:2})).status).not.toBe(200);expect((await control(h,{action:'pull'})).body.grant).toBeNull();
+ },30000);
  it('removal invalidates in-flight credentials even after reinvitation; closed SFU cannot revive',async()=>{
   const {s,members}=await fixture(1),h=s.classroom.teacherToken,who=members[0]!;
   const m=(await request(s,h,{action:'create',mode:'video',title:'Racing invitation'})).body as MeetingView;

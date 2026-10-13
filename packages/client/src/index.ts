@@ -186,3 +186,4 @@ export { pushClan, type PushSource } from './hosting-push.ts';
 export { peerAuthHeaders, peerSocketAuth, type PeerKeySigner } from './people-auth.ts';
 export * from './lan-directory.ts';
 export { MeetingRoom, type MeetingMedia } from './meeting-room.ts';
+export * from './remote-control.ts';

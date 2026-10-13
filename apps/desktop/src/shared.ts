@@ -415,6 +415,10 @@ export type DesktopApi = {
   mediaSources(): Promise<{ id: string; kind: 'screen' | 'window'; name: string; thumbnail: string }[]>;
   mediaChoose(id: string, audio: boolean): Promise<void>;
   meetingNotice(c:{url:string;token:string;sessionId:string}, id:string):Promise<void>;
+  controlCapability():Promise<{available:boolean;platform:string;reason:string}>;
+  controlPermission():Promise<boolean>;
+  controlStop():Promise<void>;
+  controlApprove(c:{url:string;token:string;sessionId:string},room:string,request:string):Promise<void>;
   meetingRequest(c: {url:string;token:string;sessionId:string}, path:string, body?:unknown): Promise<unknown>;
   mediaToken(c: { url: string; token: string; sessionId: string }): Promise<{ token: string }>;
   stopClassroom(): Promise<void>;

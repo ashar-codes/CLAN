@@ -1,3 +1,4 @@
+import { MeetingControl } from './remote-control.ts';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { createReadStream } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
@@ -152,6 +153,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
   const peers = new PeerRegistry(classroom, signer);
   const media = opts.media ? new MediaService({ binary: opts.media.binary, host: opts.host, workDir: opts.media.workDir }) : null;
   const meetings = new Meetings(classroom,media,fence,opts.mediaBlocked,opts.mediaHostKey);
+  const control = new MeetingControl(meetings,media,fence);
   const presentations = new Presentations(db, classroom, media, { hostName: opts.hostName, graceMs: opts.media?.presenterGraceMs });
   const assignments = new Assignments(db, classroom, storage, limits, signer);
   const chat = opts.chat ? new ChatRelay({ store: opts.chat, classroom, resources, teacherPublicKey, hostName: opts.hostName ?? null }) : null;
@@ -369,6 +371,8 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
       return { token: t.token, identity, expiresAt: t.expiresAt, codec: media.codec };
     } catch (e) { throw new ApiError(503, 'media_unavailable', (e as Error).message); }
   });
+  app.get('/api/control/:room', req=>control.request(auth(req),parse(z.object({room:z.string().regex(/^m-[a-f0-9-]{36}$/)}),req.params).room));
+  app.post('/api/control/:room', {bodyLimit:2048}, req=>control.request(auth(req),parse(z.object({room:z.string().regex(/^m-[a-f0-9-]{36}$/)}),req.params).room,req.body));
   app.get('/api/meetings', req=>meetings.state(auth(req)));
   app.post('/api/meetings', req=>meetings.action(auth(req),undefined,req.body));
   app.post('/api/meetings/:room', req=>meetings.action(auth(req),parse(z.object({room:z.string().regex(/^m-[a-f0-9-]{36}$/)}),req.params).room,req.body));
@@ -778,7 +782,7 @@ export async function startClassroomServer(opts: ServerOptions): Promise<Running
     teacherPublicKey,
     async close() {
       await stopAdvertising?.();
-      clearInterval(mediaFenceTimer); await meetings.end();
+      clearInterval(mediaFenceTimer); control.clear(); await meetings.end();
       await presentations.end();
       classroom.end();
       shuttingDown = true;

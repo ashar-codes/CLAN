@@ -1,3 +1,4 @@
+import { registerRemoteControl } from './remote-control.ts';
 import { setDirectoryHost, directoryClassrooms, onDirectoryClassrooms } from './lan-directory.ts';
 import { app, BrowserWindow, Notification, dialog, ipcMain, powerMonitor, session, shell, type WebContents } from 'electron';
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -210,16 +211,18 @@ function registerIpc() {
     const key=c.sessionId+room;if(meetingNotices.has(key))return;if(meetingNotices.size>=256)meetingNotices.clear();meetingNotices.add(key);
     const n=new Notification({title:'CLAN',body:'You are invited to a local meeting. Open your CLAN to join.'});n.on('click',()=>{const w=BrowserWindow.getAllWindows()[0];w?.show();w?.focus();});n.show();
   });
-  ipcMain.handle('meetings:request',async(_e,raw:unknown,path:unknown,body:unknown)=>{
+  const mediaRequest=async(raw:unknown,path:unknown,body?:unknown)=>{
     const c=z.object({url:z.string().regex(/^https:\/\/[\w.:[\]-]+$/),token:z.string().min(16).max(128),sessionId:z.uuid()}).parse(raw);
-    const route=z.string().regex(/^\/api\/meetings(?:\/m-[a-f0-9-]{36})?$/).parse(path);
+    const route=z.string().regex(/^\/api\/(?:meetings(?:\/m-[a-f0-9-]{36})?|control\/m-[a-f0-9-]{36})$/).parse(path);
     const own=server && server.url===c.url && server.classroom.id===c.sessionId;
     const tr=own?pinnedTransport(server!.tls):trust.session(c.sessionId)?.transport;
     const base=own?server!.url:trust.session(c.sessionId)?.url;if(!tr || !base)throw new Error('Not connected to that CLAN.');
     const text=body===undefined?undefined:JSON.stringify(body);if(text && text.length>4096)throw new Error('Meeting request too large.');
     const r=await tr.fetch(base+route,{method:text?'POST':'GET',headers:{authorization:`Bearer ${c.token}`,'content-type':'application/json'},body:text});
     const result=await r.json() as {message?:string};if(!r.ok)throw new Error(result.message ?? 'Meeting unavailable.');return result;
-  });
+  };
+  ipcMain.handle('meetings:request',(_e,raw,path,body)=>mediaRequest(raw,path,body));
+  registerRemoteControl(mediaRequest);
   ipcMain.handle('direct:availability', () => direct.availability());
   ipcMain.handle('direct:status', async () => (server && direct.net?.active ? { ...(await direct.net.status()), connected: server.classroom.roster().filter((m) => m.connected).length, p2p: server.classroom.p2p } : null));
   ipcMain.handle('direct:qr', async () => { if (!server) throw new Error('No active CLAN.'); return direct.qr(server); });

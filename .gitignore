@@ -14,3 +14,6 @@ apps/mobile/modules/*/android/.cxx/
 apps/mobile/e2e/.tmp-*
 __pycache__/
 Installable Files/
+# Native input helpers are built locally/CI; never commit compiled artifacts.
+native/remote-control/bin/
+native/remote-control/obj/

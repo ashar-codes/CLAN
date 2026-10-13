@@ -1,0 +1,19 @@
+import { ControlAction, type ControlPerson, type ControlView, type ControlInput } from '@classroom/protocol';
+/** Independent bounded consent state machine. The adapter supplies authenticated identities/live screen leases. */
+export class RemoteControl {
+ private requests=new Map<string,{id:string;controller:ControlPerson;target:string;screen:string;binding:string;expiresAt:number}>();
+ private grants=new Map<string,{id:string;controller:ControlPerson;target:string;screen:string;binding:string;expiresAt:number;seq:number;inputs:{seq:number;input:ControlInput}[];controllerAt:number;targetAt:number}>();
+ private budgets=new Map<string,{at:number;n:number}>();
+ constructor(privateDeps:{id:()=>string;now:()=>number}) {this.id=privateDeps.id;this.now=privateDeps.now;}
+ private id:()=>string;private now:()=>number;
+ private sweep(live:(target:string,controller:string,screen:string)=>string|null){const t=this.now();for(const [id,r]of this.requests)if(r.expiresAt<=t || live(r.target,r.controller.identity,r.screen)!==r.binding)this.requests.delete(id);for(const [id,g]of this.grants)if(g.expiresAt<=t || t-g.targetAt>1500 || t-g.controllerAt>1500 || live(g.target,g.controller.identity,g.screen)!==g.binding)this.grants.delete(id);for(const [id,b]of this.budgets)if(t-b.at>60000)this.budgets.delete(id);}
+ state(me:string,screens:ControlView['screens'],live:(t:string,c:string,s:string)=>string|null,consume=false):ControlView {this.sweep(live);const g=[...this.grants.values()].find(g=>g.target===me||g.controller.identity===me);if(g){if(g.target===me){if(consume)g.targetAt=this.now();}else g.controllerAt=this.now();}const inputs=g?.target===me&&consume?g.inputs.splice(0):[];return {me,screens,requests:[...this.requests.values()].filter(r=>r.target===me||r.controller.identity===me).map(({binding,...r})=>r),grant:g?{id:g.id,controller:g.controller,target:g.target,screen:g.screen,expiresAt:g.expiresAt}:null,inputs};}
+ action(person:ControlPerson,raw:unknown,live:(t:string,c:string,s:string)=>string|null){const a=ControlAction.parse(raw),me=person.identity,t=this.now();this.sweep(live);const b=this.budgets.get(me);if(!b || t-b.at>=1000)this.budgets.set(me,{at:t,n:1});else if(++b.n>45)throw Error('Control rate limit.');
+ if(a.action==='pull')return;
+ if(a.action==='revoke'){for(const [id,g]of this.grants)if((g.target===me||g.controller.identity===me)&&(!a.grant||a.grant===g.id))this.grants.delete(id);for(const [id,r]of this.requests)if(r.target===me||r.controller.identity===me)this.requests.delete(id);return;}
+ if(a.action==='request'){const binding=live(a.target,me,a.screen);if(!binding||a.target===me)throw Error('An authorized live shared screen is required.');if(this.requests.size>=16)throw Error('Too many pending requests.');if([...this.requests.values()].some(r=>r.controller.identity===me && r.target===a.target))return;const id=this.id();this.requests.set(id,{id,controller:person,target:a.target,screen:a.screen,binding,expiresAt:t+30000});return;}
+ if(a.action==='approve'||a.action==='reject'){const r=this.requests.get(a.request);if(!r||r.target!==me)throw Error('Only the sharing computer can answer this request.');this.requests.delete(r.id);if(a.action==='reject')return;for(const [id,g]of this.grants)if(g.target===me||g.controller.identity===r.controller.identity)this.grants.delete(id);const id=this.id();this.grants.set(id,{id,controller:r.controller,target:me,screen:r.screen,binding:r.binding,expiresAt:t+180000,seq:0,inputs:[],targetAt:t,controllerAt:t});return;}
+ const g=this.grants.get(a.grant);if(!g||g.controller.identity!==me||a.seq!==g.seq+1)throw Error('Invalid, stale or replayed control input.');if(g.inputs.length>=32){this.grants.delete(g.id);throw Error('Control receiver unavailable.');}g.seq=a.seq;g.controllerAt=t;g.inputs.push({seq:a.seq,input:a.input});
+ }
+ clear(){this.requests.clear();this.grants.clear();this.budgets.clear();}
+}

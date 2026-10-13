@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { MediaService } from '@classroom/server';
 
+let capturedDisplay: string | null = null;
+export const controlDisplay = () => capturedDisplay;
 /** Bundled SFU (dev: native/livekit/bin/<platform>-<arch>; packaged: resources). */
 export const mediaBinary = () => app.isPackaged
   ? join(process.resourcesPath, process.platform === 'win32' ? 'livekit-server.exe' : 'livekit-server')
@@ -52,6 +54,7 @@ export function registerScreen() {
     const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } });
     const src = sources.find((x) => x.id === pick.id);
     if (!src) return cb({});
+    capturedDisplay = src.id.startsWith('screen:') ? src.display_id : null;
     cb(pick.audio ? { video: src, audio: 'loopback' } : { video: src });
   }, { useSystemPicker: false });
 }
