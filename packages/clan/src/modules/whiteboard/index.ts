@@ -158,7 +158,7 @@ export class Whiteboard {
     return this.perms.canRead(p, { kind: 'clan', clanId: b.owner.id });
   }
   get(p: Principal, id: string) { const r = this.row(id); const b = r && toBoard(r); return b && this.may(p, b) ? b : null; }
-  list(p: Principal, owner: BoardOwner) { return (this.db.prepare('SELECT * FROM wb_boards WHERE owner_kind = ? AND owner_id = ? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 100').all(owner.kind, owner.id) as Row[]).map(toBoard).filter((b) => this.may(p, b)); }
+  list(p: Principal, owner: BoardOwner, archived = false) { return (this.db.prepare('SELECT * FROM wb_boards WHERE owner_kind = ? AND owner_id = ? AND (archived_at IS NOT NULL)=? ORDER BY updated_at DESC LIMIT 100').all(owner.kind, owner.id,archived?1:0) as Row[]).map(toBoard).filter((b) => this.may(p, b)); }
   create(p: Principal, owner: BoardOwner, title: string): Board {
     if (p.kind !== 'user') throw new Error('Only you can create a board.');
     if (owner.kind === 'clan') throw new Error('CLAN boards live with the CLAN’s host.');
@@ -176,8 +176,10 @@ export class Whiteboard {
     return this.append(boardId, p.userId, ops);
   }
   read(p: Principal, boardId: string, since = 0) { if (!this.get(p, boardId)) throw new Error('Not found.'); return this.since(boardId, since); }
-  rename(p: Principal, boardId: string, title: string) { if (!this.get(p, boardId)) throw new Error('Not found.'); this.db.prepare('UPDATE wb_boards SET title = ? WHERE id = ?').run(z.string().trim().min(1).max(120).parse(title), boardId); }
+  rename(p: Principal, boardId: string, title: string) { const b=this.get(p,boardId);if (!b || b.owner.kind==='clan') throw new Error('Not found.'); this.db.prepare('UPDATE wb_boards SET title = ? WHERE id = ?').run(z.string().trim().min(1).max(120).parse(title), boardId); }
   remove(p: Principal, boardId: string) { const b = this.get(p, boardId); if (!b || b.owner.kind === 'clan') throw new Error('Not found.'); this.db.prepare('UPDATE wb_boards SET archived_at = ? WHERE id = ?').run(this.now(), boardId); }
+  restore(p: Principal, boardId: string) {const r=this.db.prepare('SELECT * FROM wb_boards WHERE id=? AND archived_at IS NOT NULL').get(boardId) as Row|undefined;if(!r||r.owner_kind==='clan'||!this.may(p,toBoard(r)))throw new Error('Archived board not found.');this.db.prepare('UPDATE wb_boards SET archived_at=NULL,updated_at=? WHERE id=?').run(this.now(),boardId);}
+  discard(p: Principal, boardId: string) {const r=this.db.prepare('SELECT * FROM wb_boards WHERE id=?').get(boardId) as Row|undefined;if(!r||r.owner_kind==='clan'||!this.may(p,toBoard(r)))throw new Error('Board not found.');tx(this.db,()=>this.purgeBoard(boardId));}
   /** Applies ops to a state the caller holds (renderers do this too); exported for symmetry with the protocol reducer. */
   static apply(s: WbState, l: WbLogged) { return applyOp(s, l.author, l.op, l.seq); }
 }

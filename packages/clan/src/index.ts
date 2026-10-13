@@ -66,7 +66,6 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   const courses = new Courses(db, bus, { clans, notes, files, saved, identity }, now);
   const tasks = new Tasks(db, bus, courses, (c, u) => clans.isActiveMember(c, u), now);
   const exams = new Exams(db, bus, courses, now);
-  files.guardReferences((id) => [courses, timetable, tasks, exams].some((m) => m.hasFileReference(id)));
   const flashcards = new Flashcards(db, bus, courses, now);
   const study = new Study(db, bus, courses, now);
   const assignments = new Assignments(db, clans, now);
@@ -83,6 +82,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
   for (const m of [courses, tasks, exams, flashcards]) search.register(m.searchProvider());
   const whiteboard = new Whiteboard(db, bus, permissions, { courseOwner: (id) => courses.ownerOf(id), sessionOwner: (id) => study.ownerOf(id) }, now);
   const recordings = new Recordings(db, bus, { courses, files, notes }, now);
+  files.guardReferences((id) => [courses,timetable,tasks,exams,recordings].some(m=>m.hasFileReference(id)));
   // Nearby people, friends, private conversations, direct files/voice notes and call logs (Phase 14.3 A+B).
   const people = new People(db, bus, store, now, local);
   search.register(recordings.searchProvider());
@@ -124,7 +124,7 @@ export function openClan(db: Db, opts: { storageDir: string; now?: () => number;
     const intent = clans.cleanup(clanId);
     if (!intent || intent.userId !== me) throw new Error('Authorized cleanup intent is required.');
     return tx(db, () => {
-      const candidates = files.forgetClan(clanId, { ownerId: me, refIds: [...courses.fileReferences(me), ...timetable.fileReferences(me)] });
+      const candidates = files.forgetClan(clanId, { ownerId: me, refIds: [...courses.fileReferences(me), ...timetable.fileReferences(me), ...tasks.fileReferences(me), ...exams.fileReferences(me)] });
       clans.recordCleanupObjects(clanId, candidates);
       notes.forgetClan(clanId); saved.forgetClan(clanId);
       notifications.forgetThreads(chat.forgetClan(clanId));

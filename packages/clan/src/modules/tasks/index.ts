@@ -79,8 +79,9 @@ export class Tasks {
     const pos = (this.db.prepare('SELECT coalesce(max(position), -1) + 1 n FROM tasks_checklist WHERE task_id = ?').get(taskId) as { n: number }).n;
     this.db.prepare('INSERT INTO tasks_checklist (id, task_id, text, position) VALUES (?, ?, ?, ?)').run(randomUUID(), taskId, z.string().trim().min(1).max(200).parse(text), pos);
   }
-  attach(p: Principal, taskId: string, module: 'notes' | 'files' | 'saved', entityId: string) { this.owner(p); this.must(p, taskId); this.db.prepare('INSERT OR IGNORE INTO tasks_refs (task_id, module, entity_id) VALUES (?, ?, ?)').run(taskId, module, entityId); }
+  attach(p: Principal, taskId: string, module: 'notes' | 'files' | 'saved', entityId: string) { this.owner(p); this.must(p, taskId); if(!this.courses.canReference(p,module,entityId))throw new Error('Attachment not found or not allowed.'); this.db.prepare('INSERT OR IGNORE INTO tasks_refs (task_id, module, entity_id) VALUES (?, ?, ?)').run(taskId, module, entityId); }
 
+  fileReferences(owner: string): string[] { return (this.db.prepare("SELECT r.entity_id id FROM tasks_refs r JOIN tasks_tasks e ON e.id=r.task_id WHERE e.owner_id=? AND r.module='files'").all(owner) as {id:string}[]).map(r=>r.id); }
   hasFileReference(id: string) { return !!this.db.prepare("SELECT 1 FROM tasks_refs WHERE module='files' AND entity_id=? LIMIT 1").get(id); }
   remove(p: Principal, id: string) { const owner=this.owner(p); this.must(p,id); tx(this.db,()=>{this.db.prepare('DELETE FROM tasks_refs WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_checklist WHERE task_id = ?').run(id);this.db.prepare('DELETE FROM tasks_tasks WHERE id = ? AND owner_id = ?').run(id,owner);}); }
 

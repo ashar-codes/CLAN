@@ -226,6 +226,10 @@ describe('sync', () => {
     expect(b.app.reminders.get(b.me,r2.id)?.text).toBe('Quiz');
   });
 
+  it('a concurrent drawing cannot resurrect a deleted personal board',async()=>{
+    const {a,b}=pair(),board=a.app.whiteboard.create(a.me,{kind:'personal',id:a.app.me},'Disposable');await sync(b,a);a.app.whiteboard.discard(a.me,board.id);a.app.sync.refresh();b.app.whiteboard.rename(b.me,board.id,'Offline edit');b.app.sync.refresh();await sync(b,a);await sync(a,b);expect(a.app.whiteboard.get(a.me,board.id)).toBeNull();expect(b.app.whiteboard.get(b.me,board.id)).toBeNull();expect(b.app.sync.conflicts().some(c=>c.entityId===board.id)).toBe(true);
+  });
+
   it('Diary syncs only when turned on; the same day written on both is kept for comparison', async () => {
     const { a, b } = pair();
     a.app.diary.write(a.me, { day: '2026-10-02', body: 'laptop entry' });

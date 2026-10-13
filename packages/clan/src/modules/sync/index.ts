@@ -260,7 +260,6 @@ export class PersonalSync {
     if (!m || rec.history.includes(m.hash)) return this.applyRemote(p, fromFp, rec, m, false);
     if (m.history.includes(rec.hash)) return false; // stale: we already moved on from it
     // concurrent edits
-    if (p.policy === 'union') return this.applyRemote(p, fromFp, rec, m, true);
     const local = m.deleted ? null : p.one(owner, rec.id);
     // Concurrent deletion wins; preserve the edit for explicit recovery instead of silently resurrecting content.
     // A causally later explicit restore was already handled by rec.history.includes(m.hash) above.
@@ -274,6 +273,7 @@ export class PersonalSync {
       if (p.one(owner, rec.id) === null) this.conflict(rec, fromFp, 'preserve', 'Deleted on another device; choose the retained edit only to explicitly restore it.', null, local, false);
       return applied;
     }
+    if (p.policy === 'union') return this.applyRemote(p, fromFp, rec, m, true);
     if (p.policy === 'lww') {
       const remoteWins = rec.version > m.version;
       this.conflict(rec, fromFp, 'lww', remoteWins ? 'Edited on two devices — the newer edit was kept; the other is here.' : 'Edited on two devices — this device’s newer edit was kept.', remoteWins ? local : rec.payload, remoteWins ? rec.payload : local, true);

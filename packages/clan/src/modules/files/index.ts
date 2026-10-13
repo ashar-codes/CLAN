@@ -136,7 +136,7 @@ export class Files {
     if (!ref || ref.module !== 'files') return;
     this.assertWrite(p, ref.scope);
     if (ref.createdBy !== userOf(p) && !(ref.scope.kind === 'clan' && this.clans.members(ref.scope.clanId).some((m) => m.userId === userOf(p) && m.role !== 'member'))) throw new Error('Only the person who added it or a CLAN owner can remove it.');
-    if (this.referenced(refId)) throw new Error('This file is still used by a course, timetable, task or exam. Remove those references first.');
+    if (this.referenced(refId)) throw new Error('This file is still used by a course, timetable, task, exam or recording. Remove those references first.');
     this.store.unref(refId);
   }
 

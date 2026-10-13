@@ -87,6 +87,8 @@ export class Courses {
     if (!r) throw new Error('Course not found.');
     return toCourse(r);
   }
+  /** Read-only historical context for independent exams/tasks; never authorizes editing a removed course. */
+  context(p: Principal, id: string): Course | null { if(p.kind!=='user')return null;const r=this.db.prepare('SELECT * FROM courses_courses WHERE id=? AND owner_id=?').get(id,p.userId) as CRow|undefined;return r?toCourse(r):null; }
   /** Owner of a course (for modules that attach their own data to it, e.g. a Course board). */
   ownerOf(courseId: string) { return (this.db.prepare('SELECT owner_id o FROM courses_courses WHERE id = ?').get(courseId) as { o: string } | undefined)?.o ?? null; }
   /** Lifecycle retention includes archived personal courses; their file links must keep working. */
@@ -146,7 +148,7 @@ export class Courses {
 
   // ---- topics (explicit order) ----
   topics(p: Principal, courseId: string): Topic[] {
-    this.mine(p, courseId);
+    if(!this.context(p,courseId))throw new Error('Course not found.');
     return (this.db.prepare('SELECT id, course_id courseId, title, position, confidence state, confidence_at stateAt FROM courses_topics WHERE course_id = ? ORDER BY position, created_at').all(courseId) as Topic[]);
   }
   addTopic(p: Principal, courseId: string, title: string): Topic {
@@ -212,6 +214,10 @@ export class Courses {
     this.db.prepare('UPDATE courses_lectures SET status = ?, title = ?, at = ? WHERE id = ?').run(z.enum(['planned', 'held', 'cancelled']).parse(o.status ?? l.status), Text(160).min(1).parse(o.title ?? l.title), o.at === undefined ? l.at : o.at, l.id);
   }
 
+  removeLecture(p: Principal, id: string) {
+    this.owner(p);const r=this.db.prepare('SELECT l.course_id FROM courses_lectures l JOIN courses_courses c ON c.id=l.course_id WHERE l.id=? AND c.owner_id=? AND c.deleted_at IS NULL').get(id,userOf(p)) as {course_id:string}|undefined;if(!r)throw Error('Lecture not found.');
+    tx(this.db,()=>{this.db.prepare('DELETE FROM courses_lecture_topics WHERE lecture_id=?').run(id);this.db.prepare('UPDATE courses_links SET lecture_id=NULL WHERE lecture_id=? AND NOT EXISTS(SELECT 1 FROM courses_links x WHERE x.course_id=courses_links.course_id AND x.module=courses_links.module AND x.entity_id=courses_links.entity_id AND x.topic_id IS courses_links.topic_id AND x.lecture_id IS NULL)').run(id);this.db.prepare('DELETE FROM courses_links WHERE lecture_id=?').run(id);this.db.prepare('DELETE FROM courses_lectures WHERE id=?').run(id);this.bus.publish(CourseChanged,'courses',{courseId:r.course_id,ownerId:userOf(p)});});
+  }
   // ---- references into other modules ----
   /** Links an existing note / file (Resource Store ref) / saved item the person can read. Idempotent per placement. */
   link(p: Principal, courseId: string, o: { module: CourseLink['module']; entityId: string; topicId?: string | null; lectureId?: string | null; kind?: ResourceKind | null }): CourseLink {
@@ -235,7 +241,7 @@ export class Courses {
     return l;
   }
   links(p: Principal, courseId: string, o: { module?: CourseLink['module']; topicId?: string; lectureId?: string; limit?: number } = {}): CourseLink[] {
-    this.mine(p, courseId);
+    if(!this.context(p,courseId))throw new Error('Course not found.');
     const rows = this.db.prepare(`SELECT * FROM courses_links WHERE course_id = ? ${o.module ? 'AND module = ?' : ''} ${o.topicId ? 'AND topic_id = ?' : ''} ${o.lectureId ? 'AND lecture_id = ?' : ''} ORDER BY created_at DESC LIMIT ?`)
       .all(...[courseId, ...(o.module ? [o.module] : []), ...(o.topicId ? [o.topicId] : []), ...(o.lectureId ? [o.lectureId] : []), o.limit ?? 200]) as { id: string; module: CourseLink['module']; entity_id: string; topic_id: string | null; lecture_id: string | null; kind: ResourceKind | null }[];
     return rows.map((r) => {
@@ -243,6 +249,7 @@ export class Courses {
       return { id: r.id, module: r.module, entityId: r.entity_id, topicId: r.topic_id, lectureId: r.lecture_id, kind: r.kind, title: it?.title ?? 'No longer available', detail: it?.detail ?? '', missing: !it, provenance: it?.provenance ?? null };
     });
   }
+  canReference(p:Principal,module:CourseLink['module'],id:string){return !!this.resolve(p,module,id);}
   /** Through the owning module, with its own permission rules. */
   private resolve(p: Principal, module: CourseLink['module'], id: string): { title: string; detail: string; provenance: CourseLink['provenance'] } | null {
     if (module === 'notes') { const n = this.m.notes.get(p, id); return n && { title: n.title, detail: n.body.slice(0, 120), provenance: n.ownerId === userOf(p) ? null : { clan: n.sharedWith.map((c) => this.m.clans.get(c)?.name).find(Boolean) ?? 'a CLAN', sharedBy: this.m.identity.displayName(n.ownerId) } }; }

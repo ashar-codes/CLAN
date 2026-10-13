@@ -76,7 +76,8 @@ export class Reminders {
   update(p: Principal, id: string, raw: {text?: string; dueAt?: number; recurrence?: Recurrence}) {
     const r=this.must(p,id), edit=z.object({text:z.string().trim().min(1).max(300).optional(),dueAt:z.number().int().positive().optional(),recurrence:z.enum(RECURRENCES).optional()}).strict().parse(raw);
     if(r.done_at!==null) throw new Error('That reminder is closed.');
-    this.db.prepare('UPDATE reminders_reminders SET text=?,due_at=?,anchor_at=?,recurrence=?,snoozed_until=NULL,fired_at=NULL WHERE id=?').run(edit.text??r.text,edit.dueAt??r.due_at,edit.dueAt??r.anchor_at??r.due_at,edit.recurrence??r.recurrence,id);
+    const changedSchedule=(edit.dueAt!==undefined&&edit.dueAt!==r.due_at)||(edit.recurrence!==undefined&&edit.recurrence!==r.recurrence);
+    this.db.prepare('UPDATE reminders_reminders SET text=?,due_at=?,anchor_at=?,recurrence=?,snoozed_until=?,fired_at=? WHERE id=?').run(edit.text??r.text,edit.dueAt??r.due_at,changedSchedule?edit.dueAt??r.due_at:r.anchor_at??r.due_at,edit.recurrence??r.recurrence,changedSchedule?null:r.snoozed_until,changedSchedule?null:r.fired_at,id);
     return this.get(p,id)!;
   }
   remove(p: Principal, id: string) { this.must(p, id); this.db.prepare('DELETE FROM reminders_reminders WHERE id = ?').run(id); }

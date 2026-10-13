@@ -101,8 +101,8 @@ export class Recordings {
     this.touch(tapeId, u);
     return this.events(p, tapeId).find((e) => e.id === id)!;
   }
-  editEvent(p: Principal, eventId: string, text: string) { const e = this.event(p, eventId); this.db.prepare('UPDATE rec_events SET text = ? WHERE id = ?').run(z.string().max(4000).parse(text), e.id); this.touch(e.tapeId, userOf(p)); }
-  removeEvent(p: Principal, eventId: string) { const e = this.event(p, eventId); this.db.prepare('DELETE FROM rec_events WHERE id = ?').run(e.id); this.touch(e.tapeId, userOf(p)); }
+  editEvent(p: Principal, eventId: string, text: string) { this.owner(p); const e = this.event(p, eventId); this.db.prepare('UPDATE rec_events SET text = ? WHERE id = ?').run(z.string().max(4000).parse(text), e.id); this.touch(e.tapeId, userOf(p)); }
+  removeEvent(p: Principal, eventId: string) { this.owner(p); const e = this.event(p, eventId); this.db.prepare('DELETE FROM rec_events WHERE id = ?').run(e.id); this.touch(e.tapeId, userOf(p)); }
   private event(p: Principal, eventId: string) {
     const e = this.db.prepare('SELECT e.* FROM rec_events e JOIN rec_tapes t ON t.id = e.tape_id WHERE e.id = ? AND t.owner_id = ?').get(eventId, userOf(p)) as { id: string; tape_id: string; at_ms: number; text: string; kind: string } | undefined;
     if (!e) throw new Error('Event not found.');
@@ -140,9 +140,12 @@ export class Recordings {
     return (this.db.prepare(`SELECT * FROM rec_tapes WHERE owner_id = ? ${o.courseId ? 'AND course_id = ?' : ''} ${o.lectureId ? 'AND lecture_id = ?' : ''} ORDER BY started_at DESC LIMIT ?`)
       .all(...[userOf(p), ...(o.courseId ? [o.courseId] : []), ...(o.lectureId ? [o.lectureId] : []), o.limit ?? 100]) as Raw[]).map(toTape);
   }
+  hasFileReference(id: string) {return !!this.db.prepare('SELECT 1 FROM rec_tapes WHERE ref_id=? UNION ALL SELECT 1 FROM rec_events WHERE ref_id=? LIMIT 1').get(id,id);}
   /** Deletes the tape and its timeline; the media/screenshot refs are removed from Personal Space (bytes freed when unreferenced). */
   remove(p: Principal, id: string) {
+    this.owner(p);
     const r = this.must(p, id);
+    if(r.status==='recording')throw new Error('Stop the recording before deleting it.');
     const refs = [r.ref_id, ...(this.db.prepare('SELECT ref_id r FROM rec_events WHERE tape_id = ? AND ref_id IS NOT NULL').all(id) as { r: string }[]).map((x) => x.r)].filter(Boolean) as string[];
     tx(this.db, () => { this.db.prepare('DELETE FROM rec_events WHERE tape_id = ?').run(id); this.db.prepare('DELETE FROM rec_tapes WHERE id = ?').run(id); });
     return refs;

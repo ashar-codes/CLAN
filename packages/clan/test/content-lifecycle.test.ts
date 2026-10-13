@@ -5,9 +5,9 @@ it('course archive/restore/delete keeps independent notes, tasks, files and CLAN
  const course=app.courses.create(me,{name:'Disposable course'}),topic=app.courses.addTopic(me,course.id,'Topic');
  const note=app.notes.create(me,{title:'Independent note',body:'Keep'}),f=await app.files.add(me,file(storageDir,'keep.txt','keep'),'keep.txt',{kind:'personal',ownerId:app.me});
  app.courses.link(me,course.id,{module:'notes',entityId:note.id,topicId:topic.id});app.courses.link(me,course.id,{module:'files',entityId:f.refId});
- const task=app.tasks.create(me,{title:'Independent task',courseId:course.id});
+ const task=app.tasks.create(me,{title:'Independent task',courseId:course.id}),exam=app.exams.create(me,{courseId:course.id,name:'Retained exam',at:Date.now()+60000});
  expect(()=>app.courses.remove(other,course.id)).toThrow();app.courses.archive(me,course.id);expect(app.courses.list(me)).toHaveLength(0);expect(app.courses.list(me,true)).toHaveLength(1);app.courses.restore(me,course.id);expect(app.courses.mine(me,course.id).name).toBe('Disposable course');
- app.courses.remove(me,course.id);expect(()=>app.courses.mine(me,course.id)).toThrow();expect(()=>app.courses.restore(me,course.id)).toThrow();expect(app.notes.get(me,note.id)).not.toBeNull();expect(app.files.get(me,f.refId)).not.toBeNull();expect(app.tasks.get(me,task.id)).not.toBeNull();expect(app.courses.syncProviders()[0]!.one(app.me,course.id)).toBeNull();expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+ app.courses.remove(me,course.id);expect(()=>app.courses.mine(me,course.id)).toThrow();expect(()=>app.courses.restore(me,course.id)).toThrow();expect(app.notes.get(me,note.id)).not.toBeNull();expect(app.files.get(me,f.refId)).not.toBeNull();expect(app.tasks.get(me,task.id)).not.toBeNull();expect(app.exams.prep(me,exam.id).exam.name).toBe('Retained exam');expect(app.courses.context(other,course.id)).toBeNull();expect(app.courses.syncProviders()[0]!.one(app.me,course.id)).toBeNull();expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
  }finally{db.close();}
 });
 it('destructive Study APIs require the owner, deny reader agents, and remove only owned children',()=>{
@@ -36,5 +36,16 @@ it('referenced files cannot be removed locally or by sync, and agents/revoked me
  expect(()=>app.files.remove({kind:'agent',agentId:'reader',onBehalfOf:app.me,scopes:['files:read']},f.refId)).toThrow();
  app.files.remove(me,f.refId);expect(app.files.get(me,f.refId)).toBeNull();
  const r=app.reminders.create(me,{text:'Original',dueAt:Date.now()+60000});expect(()=>app.reminders.remove({kind:'agent',agentId:'reader',onBehalfOf:app.me,scopes:['reminders:read']},r.id)).toThrow();app.reminders.update(me,r.id,{text:'Edited'});expect(app.reminders.get(me,r.id)?.text).toBe('Edited');
+ }finally{db.close();}
+});
+
+it('lecture removal retains course references; board archive/restore/delete preserve independent Notes',()=>{
+ const {app,db}=setup(),me=user(app.me);try{const c=app.courses.create(me,{name:'Course'}),t=app.courses.addTopic(me,c.id,'Topic'),l=app.courses.addLecture(me,c.id,{title:'Lecture',topicIds:[t.id]}),n=app.notes.create(me,{title:'Keep',body:'Original'});app.courses.link(me,c.id,{module:'notes',entityId:n.id,lectureId:l.id});expect(()=>app.courses.removeLecture(user('other'),l.id)).toThrow();app.courses.removeLecture(me,l.id);expect(app.courses.links(me,c.id)[0]?.lectureId).toBeNull();expect(app.courses.topics(me,c.id)).toHaveLength(1);
+ const b=app.whiteboard.create(me,{kind:'personal',id:app.me},'Board');app.whiteboard.remove(me,b.id);expect(app.whiteboard.list(me,{kind:'personal',id:app.me},true)).toHaveLength(1);app.whiteboard.restore(me,b.id);expect(()=>app.whiteboard.discard(user('other'),b.id)).toThrow();app.whiteboard.discard(me,b.id);expect(app.whiteboard.get(me,b.id)).toBeNull();expect(app.whiteboard.syncProviders()[0]!.one(app.me,b.id)).toBeNull();expect(app.notes.get(me,n.id)?.body).toBe('Original');expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);}finally{db.close();}
+});
+
+it('recording references protect library files; active tapes/read agents cannot delete and foreign attachments are refused',async()=>{
+ const {app,db,storageDir}=setup(),me=user(app.me),agent={kind:'agent' as const,agentId:'reader',onBehalfOf:app.me,scopes:['recordings:read']};try{const f=await app.files.add(me,file(storageDir,'frame.png','fixture'),'frame.png',{kind:'personal',ownerId:app.me},'image/png'),t=app.recordings.start(me,{title:'Fixture',source:'screen',partPath:storageDir+'/disposable.part'}),event=app.recordings.mark(me,t.id,{kind:'screenshot',atMs:0,refId:f.refId});expect(()=>app.files.remove(me,f.refId)).toThrow(/still used/);expect(()=>app.recordings.remove(agent,t.id)).toThrow();expect(()=>app.recordings.removeEvent(agent,event.id)).toThrow();expect(()=>app.recordings.remove(me,t.id)).toThrow(/Stop/);app.recordings.fail(me,t.id,'Disposable fixture');app.recordings.remove(me,t.id);app.files.remove(me,f.refId);
+ const task=app.tasks.create(me,{title:'Task'}),foreign=app.notes.create(user('other'),{title:'Private',body:'Keep'});expect(()=>app.tasks.attach(me,task.id,'notes',foreign.id)).toThrow(/not allowed/);
  }finally{db.close();}
 });
