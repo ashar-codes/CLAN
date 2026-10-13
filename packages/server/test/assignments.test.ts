@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { initUpload, uploadStatus } from '@classroom/client';
@@ -55,7 +55,7 @@ describe('assignments', () => {
     expect(receipt.payload).toMatchObject({ assignmentId: A.id, sessionId: s.classroom.id, memberId: a!.memberId, fileName: 'Lab04.zip', size: f.size, sha256: f.sha256, status: 'accepted', late: false, version: 1, fullName: 'Student 0', rollNo: 'FA23-CS-100' });
     expect(receipt.payload.submittedAt).toBeGreaterThanOrEqual(before);
     const stored = s.assignments.submissionPath(receipt.payload.submissionId);
-    expect(stored.startsWith(resolve(s.storage.root, 'submissions') + '/')).toBe(true);
+    expect(stored.startsWith(resolve(s.storage.root, 'submissions') + sep)).toBe(true);
     expect(await hashFile(stored)).toBe(f.sha256);
     expect(readdirSync(join(s.storage.root, 'tmp'))).toEqual([]);
     const t = s.assignments.listForTeacher()[0]!;
@@ -194,7 +194,7 @@ describe('assignments', () => {
     for (const fileName of ['../../../../evil.sh', '/etc/cron.d/x', '..\\..\\boot.ini', 'CON', 'a\u0000.txt', '‮gnp.exe']) {
       const r = await uploadSubmission({ transport: trFor(s.url), url: s.url, token: a!.token, assignmentId: A.id, path: f.path, fileName, idempotencyKey: randomUUID() });
       const p = s.assignments.submissionPath(r.payload.submissionId);
-      expect(p.startsWith(resolve(s.storage.root, 'submissions', s.classroom.id) + '/')).toBe(true);
+      expect(p.startsWith(resolve(s.storage.root, 'submissions', s.classroom.id) + sep)).toBe(true);
       expect(r.payload.fileName).not.toMatch(/[/\\\u0000‮]/);
     }
     expect(existsSync(resolve(s.storage.root, '..', 'evil.sh'))).toBe(false);

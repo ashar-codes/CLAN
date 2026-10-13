@@ -2,8 +2,9 @@
 // module touches only its own tables (plus documented, read-only classroom readers); UI packages never import the backend.
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative as nativeRelative } from 'node:path';
 
+const relative = (from: string, to: string) => nativeRelative(from, to).replaceAll('\\', '/');
 const root = join(import.meta.dirname, '../../..');
 const src = join(import.meta.dirname, '../src');
 const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));

@@ -12,10 +12,12 @@ import { fetchLinkMeta, openClan, parseIntake } from '../src/index.ts';
 import { file, setup, user } from './helpers.ts';
 
 const servers: RunningServer[] = [];
-afterEach(async () => { await Promise.all(servers.splice(0).map((s) => s.close())); });
+const hostDbs: ReturnType<typeof openDb>[] = [];
+afterEach(async () => { await Promise.all(servers.splice(0).map((s) => s.close())); for (const db of hostDbs.splice(0)) { try { db.close(); } catch {} } });
 
 /** A host device: one database holding classroom tables + CLAN modules (as on the desktop), hosting `clanId`. */
 async function hostOn(db: ReturnType<typeof openDb>, clanId: string, type: ClanType = 'STUDY_GROUP', storageDir = tmp('chat-host-')) {
+  hostDbs.push(db);
   const app = openClan(db, { storageDir });
   if (!app.clans.get(clanId)) app.clans.create({ id: clanId, type, name: `${type} chat`, createdBy: app.me, expiresAt: type === 'TEMPORARY' ? Date.now() + 3600_000 : undefined });
   const s = await startClassroomServer({ title: `${type} chat`, host: '127.0.0.1', db, storageDir, chat: app.chat, hostName: 'Hana', clan: { type, id: clanId } });

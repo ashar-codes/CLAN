@@ -10,7 +10,7 @@ const lan=candidateInterfaces().find(i=>i.private)?.address;
 const binary=join(import.meta.dirname,'../../../native/livekit/bin',`${process.platform}-${process.arch}`,process.platform==='win32'?'livekit-server.exe':'livekit-server');
 const servers:RunningServer[]=[],rooms:Room[]=[],stops:(()=>void)[]=[],producers:Promise<unknown>[]=[],receivers:Promise<unknown>[]=[],cancelReaders:(()=>Promise<unknown>)[]=[],closeSources:(()=>Promise<unknown>)[]=[];
 afterEach(async()=>{vi.useRealTimers();stops.splice(0).forEach(f=>f());await Promise.all(producers.splice(0));await Promise.all(cancelReaders.splice(0).map(f=>f().catch(()=>{})));await Promise.all(receivers.splice(0));await Promise.all(rooms.splice(0).map(r=>r.disconnect().catch(()=>{})));await Promise.all(closeSources.splice(0).map(f=>f()));await Promise.all(servers.splice(0).map(s=>s.close()));});afterAll(()=>dispose());
-const until=async(f:()=>boolean|Promise<boolean>,ms=12000)=>{const end=Date.now()+ms;while(!await f()){if(Date.now()>end)throw Error('timeout');await new Promise(r=>setTimeout(r,50));}};
+const until=async(f:()=>boolean|Promise<boolean>,ms=12000)=>{const end=Date.now()+ms;while(!await f()){if(Date.now()>end)throw Error('timeout: '+f.toString());await new Promise(r=>setTimeout(r,50));}};
 async function fixture(n=3,extra:Partial<ServerOptions>={}){const s=await startClassroomServer({title:'Meeting QA',host:lan!,storageDir:tmp('meeting-'),hostName:'Host',clan:{type:'FRIENDS',id:randomUUID()},media:{binary,workDir:tmp('meeting-lk-')},...extra});servers.push(s);trustServer(s);s.classroom.setPolicy('open');const members=[];for(let i=0;i<n;i++)members.push(await secureJoin(s,i+1,device()));return {s,members};}
 async function request(s:RunningServer,token:string,body?:unknown,id?:string){const r=await trFor(s.url).fetch(s.url+`/api/meetings${id?'/'+id:''}`,{method:body?'POST':'GET',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json() as any};}
 async function token(s:RunningServer,t:string,id:string){return (await request(s,t,{action:'join'},id)).body as {token:string;lease:string};}
@@ -72,7 +72,7 @@ describe.skipIf(!lan || !existsSync(binary))('authorized local meetings with rea
   expect((await request(s,members[2]!.token,{action:'join'},m.id)).status).toBe(403);
   await request(s,h,{action:'invite',identity:members[2]!.memberId},m.id);const renewed=await token(s,members[2]!.token,m.id);expect(renewed.lease).not.toBe(removed.lease);
   peers[3]=await connect(s,renewed.token);await until(()=>peers[3]!.remoteParticipants.size===3);
-  expect((await request(s,h,{action:'end'},m.id)).status).toBe(200);await until(()=>peers.every(p=>p.connectionState===0));
+  expect((await request(s,h,{action:'end'},m.id)).status).toBe(200);await until(()=>peers.every(p=>p.connectionState===0)).catch(e=>{throw new Error(String(e)+' states='+peers.map(p=>p.connectionState).join(','));});
  },60000);
  it('group audio has three simultaneous decoded non-silent sources and late-join delivery',async()=>{
    const {s,members}=await fixture(2),h=s.classroom.teacherToken,m=(await request(s,h,{action:'create',mode:'audio',title:'Three voices'})).body as MeetingView;

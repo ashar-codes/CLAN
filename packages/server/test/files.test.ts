@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { downloadResource, partPaths } from '@classroom/client/node';
 import type { ResourceView, TeacherResourceView } from '@classroom/protocol';
@@ -165,7 +165,7 @@ describe('classroom files', () => {
     const dest = tmp();
     for (const name of ['../../escape.txt', '/etc/passwd', 'C:\\Windows\\x.dll', '..', 'CON', 'a\u0000b']) {
       const out = await downloadResource({ transport: trFor(s.url), url: s.url, token: a!.token, resource: { ...view(r), name }, destDir: dest });
-      expect(out.path.startsWith(dest + '/')).toBe(true);
+      expect(out.path.startsWith(dest + sep)).toBe(true);
       expect(out.path.slice(dest.length + 1)).not.toMatch(/[/\\\u0000]/);
     }
     expect(existsSync(join(dest, '..', 'escape.txt'))).toBe(false);

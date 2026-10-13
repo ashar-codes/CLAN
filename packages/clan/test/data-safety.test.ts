@@ -1,13 +1,17 @@
 // Data safety on disposable device databases: automatic backups, recovery from a damaged file, update (migrations on an
 // older database) and personal export → import into a fresh device.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, openSync, readdirSync, writeSync, closeSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { backupDb, migrate, MIGRATIONS, openDb, openDbSafely } from '../../server/src/db.ts';
+import { backupDb, migrate, MIGRATIONS, openDb as nativeOpenDb, openDbSafely as nativeOpenDbSafely } from '../../server/src/db.ts';
 import { openClan } from '../src/index.ts';
 import { tmp, user } from './helpers.ts';
 
+const dbs: DatabaseSync[] = [];
+const openDb = (...args: Parameters<typeof nativeOpenDb>) => { const db = nativeOpenDb(...args); dbs.push(db); return db; };
+const openDbSafely = (...args: Parameters<typeof nativeOpenDbSafely>) => { const result = nativeOpenDbSafely(...args); dbs.push(result.db); return result; };
+afterEach(() => { for (const db of dbs.splice(0)) { try { db.close(); } catch {} } });
 const notesOf = (path: string) => { const d = new DatabaseSync(path, { readOnly: true }); try { return (d.prepare('SELECT title FROM notes_notes ORDER BY title').all() as { title: string }[]).map((r) => r.title); } finally { d.close(); } };
 
 describe('device database safety', () => {

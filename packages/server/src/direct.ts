@@ -4,7 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer, connect, type Server, type Socket } from 'node:net';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { BleReassembler, bleFrames, newDirectCredentials, type BleResponse } from '@classroom/protocol';
 import { vpnInterfaces } from './netinfo.ts';
@@ -178,24 +178,29 @@ const frameIn = (s: Socket, cb: (f: Uint8Array) => void) => {
   s.on('data', (d) => { buf = Buffer.concat([buf, d]); while (buf.length >= 2 && buf.length >= 2 + buf.readUInt16BE(0)) { const n = buf.readUInt16BE(0); cb(new Uint8Array(buf.subarray(2, 2 + n))); buf = buf.subarray(2 + n); } });
 };
 
-/** Mock "radio": each advertised tag is a Unix socket; each accepted socket is one BLE connection. */
+/** Mock radio uses Unix sockets or Windows named pipes; files advertise only disposable tags. */
+const mockRadioPath = (dir: string, tag: string) => process.platform === 'win32'
+  ? '\\\\?\\pipe\\clan-qa-' + createHash('sha256').update(join(dir, tag)).digest('hex')
+  : join(dir, `${tag}.sock`);
 export class MockBleHost implements BleHostRadio {
-  private srv: Server | null = null; private socks = new Map<string, Socket>(); private dir: string; private path = '';
+  private srv: Server | null = null; private socks = new Map<string, Socket>(); private dir: string; private path = ''; private marker = '';
   constructor(dir: string) { this.dir = dir; }
   async advertise(tag: string, onFrame: (conn: string, frame: Uint8Array) => void) {
     mkdirSync(this.dir, { recursive: true });
-    this.path = join(this.dir, `${tag}.sock`);
-    rmSync(this.path, { force: true });
+    this.path = mockRadioPath(this.dir, tag);
+    this.marker = join(this.dir, `${tag}.sock`);
+    if (process.platform !== 'win32') rmSync(this.path, { force: true });
     this.srv = createServer((s) => { const conn = randomUUID(); this.socks.set(conn, s); frameIn(s, (f) => onFrame(conn, f)); s.on('close', () => this.socks.delete(conn)).on('error', () => {}); });
-    await new Promise<void>((r) => this.srv!.listen(this.path, r));
+    await new Promise<void>((r, reject) => { this.srv!.once('error', reject); this.srv!.listen(this.path, r); });
+    if (process.platform === 'win32') writeFileSync(this.marker, '');
   }
   async notify(conn: string, frame: Uint8Array) { const s = this.socks.get(conn); if (s) frameOut(s, frame); }
-  async stop() { for (const s of this.socks.values()) s.destroy(); await new Promise<void>((r) => (this.srv ? this.srv.close(() => r()) : r())); rmSync(this.path, { force: true }); }
+  async stop() { for (const s of this.socks.values()) s.destroy(); await new Promise<void>((r) => (this.srv ? this.srv.close(() => r()) : r())); if (this.marker) rmSync(this.marker, { force: true }); }
 }
 /** Member side of the mock radio (same shapes as a real BLE central). */
 export const mockBleScan = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter((f) => /^[0-9a-f]{8}\.sock$/.test(f)).map((f) => f.slice(0, 8)) : []);
 export function mockBleConnect(dir: string, tag: string) {
-  const s = connect(join(dir, `${tag}.sock`));
+  const s = connect(mockRadioPath(dir, tag));
   const subs = new Set<(f: Uint8Array) => void>();
   frameIn(s, (f) => subs.forEach((cb) => cb(f)));
   s.on('error', () => {});

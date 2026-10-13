@@ -27,8 +27,8 @@ jobs:
         run: sh native/livekit/fetch.sh
       - run: pnpm typecheck
       - run: pnpm build:desktop
-      - run: pnpm exec vitest run --maxWorkers=2
+      - run: pnpm exec vitest run --maxWorkers=1
       - name: Windows Electron media and People regressions
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         working-directory: apps/desktop
         run: pnpm exec vitest run -c vitest.e2e.config.ts e2e/people.test.ts e2e/meeting.test.ts e2e/screen.test.ts e2e/lan-directory.test.ts

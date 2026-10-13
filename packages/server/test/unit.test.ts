@@ -1,3 +1,4 @@
+import { resolve, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { Classroom, JoinError, newJoinCode, TOKEN_IDLE_MS } from '../src/classroom.ts';
@@ -250,13 +251,13 @@ describe('file primitives', () => {
 
   it('Storage refuses ids and names that would leave the root', () => {
     const st = new Storage('/srv/storage');
-    expect(st.resource('0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a')).toBe('/srv/storage/resources/0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a');
+    expect(st.resource('0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a')).toBe(join(resolve('/srv/storage'), 'resources', '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a'));
     for (const bad of ['../x', '..', '/etc/passwd', 'a/b', '0B6F1C8E-5B1A-4C55-9A8B-0F0E1D2C3B4A ']) expect(() => st.resource(bad)).toThrow();
     const sid = '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a';
     expect(() => st.submissionFile(sid, sid, '../x')).toThrow();
     expect(() => st.submissionFile(sid, sid, '..')).toThrow();
     expect(() => st.abs('../../etc/passwd')).toThrow();
-    expect(st.abs('submissions/x/y')).toBe('/srv/storage/submissions/x/y');
+    expect(st.abs('submissions/x/y')).toBe(join(resolve('/srv/storage'), 'submissions', 'x', 'y'));
   });
 });
 
