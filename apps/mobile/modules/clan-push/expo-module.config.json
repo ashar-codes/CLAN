@@ -1,0 +1,1 @@
+{"platforms":["apple","android"],"apple":{"modules":["ClanPushModule"]},"android":{"modules":["expo.modules.clanpush.ClanPushModule"]}}

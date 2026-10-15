@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+  <application>
+    <!-- Ahead of expo-notifications' service (priority -1): CLAN wake-ups are verified and shown natively, even when the app process was not running. -->
+    <service android:name="expo.modules.clanpush.ClanMessagingService" android:exported="false">
+      <intent-filter android:priority="1"><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
+    </service>
+    <receiver android:name="expo.modules.clanpush.CallActionReceiver" android:exported="false" />
+  </application>
+</manifest>

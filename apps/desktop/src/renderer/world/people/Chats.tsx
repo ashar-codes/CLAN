@@ -61,6 +61,9 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
   const [text, setText] = useState(''), [err, setErr] = useState(''), [confirm, setConfirm] = useState<'clear' | 'remove' | 'end' | null>(null);
   const [menu,setMenu]=useState(false),[search,setSearch]=useState<string|null>(null),[filesOnly,setFilesOnly]=useState(false),[details,setDetails]=useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  const [reply, setReply] = useState<PeopleMessage | null>(null), [editing, setEditing] = useState<PeopleMessage | null>(null), [forward, setForward] = useState<PeopleMessage | null>(null);
+  const [contact] = usePeople(() => api.people.contact(c.peerKey), [c.peerKey]);
+  const [me] = usePeople(() => api.people.me());
   const box = useRef<HTMLDivElement>(null);
   const { call, active } = useCall();
   const msgs = [...older.filter((o) => !recent?.some((r) => r.id === o.id)), ...(recent ?? [])];
@@ -77,15 +80,25 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
     const b = box.current, h = b?.scrollHeight ?? 0;
     void api.people.page(c.id, first.seq, PAGE).then((m) => { setOlder((o) => [...m, ...o]); if (m.length < PAGE) setNoMore(true); requestAnimationFrame(() => { if (b) b.scrollTop = b.scrollHeight - h; }); }, (e) => setErr(errText(e)));
   };
-  const send = () => { const t = text.trim(); if (!t) return; setText(''); setAtBottom(true); run(() => api.people.send(c.id, t)); };
+  const send = () => {
+    const t = text.trim(); if (!t) return; setText(''); setAtBottom(true);
+    if (editing) { const m = editing; setEditing(null); run(() => api.people.message('edit', m.id, t)); return; }
+    const r = reply?.id; setReply(null); run(() => api.people.send(c.id, t, r));
+  };
+  const actions = (m: PeopleMessage) => ({
+    reply: () => { setReply(m); setEditing(null); },
+    edit: () => { setEditing(m); setReply(null); setText(m.text ?? ''); },
+    forward: () => setForward(m),
+    run,
+  });
   const canSend = c.state === 'active';
 
   return (
     <section className="card chat-view stack" aria-label={`Chat with ${c.peerName}`}>
       <header className="row between chat-fixed-header">
-        <div className="row"><button aria-label="Back to conversations" onClick={onRemoved}>←</button><Avatar k={c.peerKey} name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
+        <div className="row"><button aria-label="Back to conversations" onClick={onRemoved}>←</button><Avatar k={c.peerKey} name={c.peerName} /><div><b>{c.peerName}</b><br /><small className="muted">{contact?.deviceName ? `${contact.deviceName} · ` : ''}{c.mode === 'temporary' ? ttlLabel(c.ttlMs) : 'Saved chat'}{STATE[c.state] ? ` · ${STATE[c.state]}` : ''}</small></div></div>
         <div className="row">
-          {(c.friend || c.state === 'active') && <><button disabled={active} onClick={() => call(c.peerKey, c.peerName)}>Call</button><button disabled={active} onClick={() => call(c.peerKey,c.peerName,true)}>Video call</button></>}
+          {(c.friend || c.state === 'active') && <><button aria-label={`Voice call ${c.peerName}`} title="Voice call" disabled={active} onClick={() => call(c.peerKey, c.peerName)}>📞</button><button aria-label={`Video call ${c.peerName}`} title="Video call" disabled={active} onClick={() => call(c.peerKey,c.peerName,true)}>🎥</button></>}
           <button aria-label="Chat options" aria-expanded={menu} onClick={()=>setMenu(!menu)}>⋯</button>
         </div>
       </header>
@@ -110,32 +123,71 @@ function ChatView({ c, onRemoved }: { c: PeopleConversation; onRemoved(): void }
       {c.state === 'invited_out' && <p className="muted" role="status">Waiting for {c.peerName} to accept. They will get the invitation as soon as their device is reachable.</p>}
       <div className="messages" ref={box} onScroll={onScroll} role="log" aria-label="Messages" aria-live="polite">
         {msgs.length >= PAGE && !noMore && <button className="link load-earlier" onClick={loadEarlier}>Load earlier messages</button>}
-        {msgs.filter(m=>(!filesOnly || !!m.transfer) && (!search || m.text?.toLowerCase().includes(search.toLowerCase()) || m.transfer?.name.toLowerCase().includes(search.toLowerCase()))).map((m) => <Bubble key={m.id} m={m} onError={setErr} />)}
+        {msgs.filter(m=>(!filesOnly || !!m.transfer) && (!search || m.text?.toLowerCase().includes(search.toLowerCase()) || m.transfer?.name.toLowerCase().includes(search.toLowerCase()))).map((m, i, all) => <div key={m.id}>
+          {(i === 0 || new Date(all[i - 1]!.createdAt).toDateString() !== new Date(m.createdAt).toDateString()) && <p className="day-sep" role="separator"><span>{dayLabel(m.createdAt)}</span></p>}
+          <Bubble m={m} myKey={me?.key ?? ''} peerName={c.peerName} active={c.state === 'active'} onError={setErr} act={actions(m)} /></div>)}
       </div>
       {!atBottom && <button className="small jump" onClick={() => { const b = box.current; if (b) b.scrollTop = b.scrollHeight; setAtBottom(true); }}>Jump to latest</button>}
       {err && <p role="alert" className="error">{err}</p>}
+      {(reply || editing) && <div className="reply-banner row between" role="status"><span><b>{editing ? 'Editing message' : `Replying to ${reply!.mine ? 'yourself' : c.peerName}`}</b><br /><small className="muted">{(editing ?? reply)!.text ?? reply?.transfer?.name ?? 'Attachment'}</small></span>
+        <button aria-label="Cancel" onClick={() => { setReply(null); if (editing) { setEditing(null); setText(''); } }}>✕</button></div>}
+      {forward && <Forward m={forward} from={c.id} onClose={() => setForward(null)} onError={setErr} />}
       {canSend ? <div className="composer row">
         <button aria-label="Send a file" title="Send a file" onClick={() => run(() => api.people.sendFile(c.id))}>📎</button>
         <VoiceRecorder convId={c.id} onError={setErr} />
         <textarea className="grow" rows={1} aria-label="Message" placeholder="Message" value={text} maxLength={8000} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           onDrop={(e) => { const f = [...e.dataTransfer.files]; if (f.length) { e.preventDefault(); run(() => api.people.sendFile(c.id, f)); } }} />
-        <button className="primary" disabled={!text.trim()} onClick={send}>Send</button>
+        <button className="primary" disabled={!text.trim()} onClick={send}>{editing ? 'Save' : 'Send'}</button>
       </div> : c.state === 'ended' || c.state === 'declined' ? <p className="muted">This chat is closed. Use “Invite again…” to talk.</p> : null}
     </section>
   );
 }
 
-function Bubble({ m, onError }: { m: PeopleMessage; onError(e: string): void }) {
+const dayLabel = (t: number) => { const d = new Date(t), n = new Date(), y = new Date(); y.setDate(n.getDate() - 1); return d.toDateString() === n.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }); };
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+type Acts = { reply(): void; edit(): void; forward(): void; run(f: () => Promise<unknown>): void };
+
+function Bubble({ m, myKey, peerName, active, onError, act }: { m: PeopleMessage; myKey: string; peerName: string; active: boolean; onError(e: string): void; act: Acts }) {
+  const [menu, setMenu] = useState(false);
   if (m.kind === 'event' || m.kind === 'call') return <p className="msg-event muted small-text" role="note">{m.text} · {clock(m.createdAt)}</p>;
-  const st = m.mine ? ({ queued: 'Pending', sending: 'Sending…', delivered: 'Delivered', read: 'Read', failed: 'Failed', received: '' } as const)[m.state] : '';
+  const st = m.mine ? ({ queued: '🕓 Pending', sending: '✓ Sending…', delivered: '✓✓ Delivered', read: '✓✓ Read', failed: '⚠ Failed', received: '' } as const)[m.state] : '';
+  const live = active && !m.deleted;
+  const pick = (f: () => void) => () => { setMenu(false); f(); };
+  const reactions = Object.values(m.reactions);
   return (
-    <div className={`msg ${m.mine ? 'mine' : 'theirs'}`} data-state={m.state}>
-      {m.transfer ? (m.kind === 'voice' ? <VoiceNote t={m.transfer} mine={m.mine} onError={onError} /> : <FileCard t={m.transfer} mine={m.mine} onError={onError} />) : <p className="msg-text">{m.text}</p>}
-      <small className="muted msg-meta">{clock(m.createdAt)}{st ? ` · ${st}` : ''}{m.expiresAt ? ` · disappears ${until(m.expiresAt)}` : ''}
+    <div className={`msg ${m.mine ? 'mine' : 'theirs'}`} data-state={m.state} onContextMenu={(e) => { e.preventDefault(); setMenu(true); }}>
+      <button className="msg-chevron link" aria-label="Message actions" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>⌄</button>
+      {m.replyTo && !m.deleted && <blockquote className="msg-reply"><b>{m.replyTo.author === myKey ? 'You' : peerName}</b><br />{m.replyTo.text ?? 'Message deleted'}</blockquote>}
+      {m.deleted ? <p className="msg-text muted"><i>⊘ {m.mine ? 'You deleted this message' : 'This message was deleted'}</i></p>
+        : m.transfer ? (m.kind === 'voice' ? <VoiceNote t={m.transfer} mine={m.mine} onError={onError} /> : <FileCard t={m.transfer} mine={m.mine} onError={onError} />) : <p className="msg-text">{m.text}</p>}
+      {!!reactions.length && <span className="msg-reactions" aria-label={`Reactions ${reactions.join(' ')}`}>{[...new Set(reactions)].join('')}{reactions.length > 1 ? ` ${reactions.length}` : ''}</span>}
+      <small className="muted msg-meta">{m.editedAt && !m.deleted ? 'Edited · ' : ''}{clock(m.createdAt)}{st ? ` · ${st}` : ''}{m.expiresAt ? ` · disappears ${until(m.expiresAt)}` : ''}
+        {m.op === 'edit_pending' && ' · edit not delivered yet'}{m.op === 'delete_pending' && ' · deletion not delivered yet'}{m.op === 'op_failed' && <span className="error"> · {peerName}'s CLAN could not apply this change</span>}
         {m.mine && m.state === 'failed' && <> · <button className="link" onClick={() => void api.people.retry(m.id).catch((e) => onError(errText(e)))}>Retry</button></>}</small>
+      {menu && <div className="msg-menu card" role="menu" onMouseLeave={() => setMenu(false)}>
+        {live && <div className="row" role="group" aria-label="React">{REACTIONS.map((e) => { const mine = m.reactions[myKey] === e; return <button key={e} role="menuitem" className="small" aria-label={`React ${e}`} onClick={pick(() => act.run(() => api.people.message('react', m.id, mine ? null : e)))}>{e}</button>; })}</div>}
+        {live && <button role="menuitem" onClick={pick(act.reply)}>↩ Reply</button>}
+        {m.text && !m.deleted && <button role="menuitem" onClick={pick(() => void navigator.clipboard.writeText(m.text!))}>⧉ Copy</button>}
+        {!m.deleted && (m.kind === 'text' || m.transfer?.state === 'complete' || m.mine && m.transfer) && <button role="menuitem" onClick={pick(act.forward)}>↪ Forward</button>}
+        {m.canEdit && <button role="menuitem" onClick={pick(act.edit)}>✎ Edit</button>}
+        <button role="menuitem" onClick={pick(() => window.alert(`Sent ${new Date(m.createdAt).toLocaleString()}\n${st || `From ${peerName}`}${m.editedAt ? `\nEdited ${new Date(m.editedAt).toLocaleString()}` : ''}`))}>ℹ Info</button>
+        <button role="menuitem" className="danger" onClick={pick(() => { if (window.confirm(`Delete for me? This removes it from this computer only.${m.mine ? ` ${peerName} keeps their copy.` : ''}`)) act.run(() => api.people.message('deleteForMe', m.id)); })}>🗑 Delete for me</button>
+        {m.canDeleteForEveryone && <button role="menuitem" className="danger" onClick={pick(() => { if (window.confirm(`Delete for everyone? CLAN removes it from ${peerName}'s CLAN when their device receives the deletion. It cannot remove screenshots or copies saved outside CLAN.`)) act.run(() => api.people.message('deleteForEveryone', m.id)); })}>⊘ Delete for everyone</button>}
+      </div>}
     </div>
   );
+}
+
+function Forward({ m, from, onClose, onError }: { m: PeopleMessage; from: string; onClose(): void; onError(e: string): void }) {
+  const [convs] = usePeople(() => api.people.conversations());
+  const to = (convs ?? []).filter((x) => x.state === 'active' && x.id !== from);
+  return <div className="card inset stack" role="dialog" aria-label="Forward to">
+    <b>Forward to</b>
+    {!to.length && <p className="muted">No other active chats.</p>}
+    <div className="row">{to.map((x) => <button key={x.id} onClick={() => { onClose(); void api.people.message('forward', m.id, x.id).catch((e) => onError(errText(e))); }}>{x.peerName}</button>)}</div>
+    <button onClick={onClose}>Cancel</button>
+  </div>;
 }
 
 const XFER: Record<PeopleTransfer['state'], string> = { offered: 'Waiting for consent', accepted: 'Starting…', transferring: 'Transferring', complete: 'Verified', declined: 'Declined', cancelled: 'Cancelled', failed: 'Failed', expired: 'Expired' };

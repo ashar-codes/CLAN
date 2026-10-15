@@ -46,13 +46,21 @@ export default function App() {
   useEffect(() => onPeopleNotification(() => { if (joined) setNotice(true); }), [joined]);
   const [share, clearShare] = useIncomingShare();
 
-  useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!StudentProfile.safeParse(p).success) setEditing(true); })
+  const onboarding = useRef<{ previous?: string; visibility?: 'everyone' | 'friends' | 'invisible'; photo?: { uri: string; mime: 'image/png' | 'image/jpeg' } } | null>(null);
+  useEffect(() => { loadProfile().then((p) => { setProfile(p); if (!p.fullName?.trim() || !p.deviceName?.trim()) setEditing(true); })
     .catch((e) => setReady(`CLAN could not open its secure identity: ${(e as Error).message}`)); }, []);
   // CLAN core (encrypted database) opens once the profile exists; then personal sync runs while the app is in front.
   useEffect(() => {
     if (!profile?.fullName || editing) return;
     let stop = () => {};
     openPhoneClan(profile.fullName).then(async (c) => {
+      // The onboarding identity is the People identity (a name chosen separately in People is kept).
+      const o = onboarding.current; onboarding.current = null;
+      try {
+        c.people.adoptIdentity(profile.fullName, profile.deviceName, o?.previous);
+        if (o?.visibility) c.people.setVisibility(o.visibility);
+        if (o?.photo) await c.people.setAvatar(o.photo.uri, o.photo.mime);
+      } catch { /* editable later in People › Profile */ }
       await setupPhoneSync(profile.deviceName ?? 'Phone');
       await migrateOldPhoneData().catch(() => {});
       c.sync.onApplied(() => bump());
@@ -69,11 +77,11 @@ export default function App() {
       <KeyboardAvoidingView style={s.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ThemeRoot><PhoneCallProvider>
         {editing ? (
-          <ProfileForm c={c} initial={profile} onSaved={(p) => { setProfile(p); setEditing(false); }} />
+          <ProfileForm c={c} initial={profile} first={!profile.fullName} onSaved={(p, extra) => { onboarding.current = { previous: profile.fullName, ...extra }; setProfile(p); setEditing(false); }} />
         ) : joined ? (
           <InClass c={c} joined={joined} onLeave={() => setJoined(null)} />
         ) : ready === 'ok' ? (
-          <Shell onEditProfile={() => setEditing(true)} intake={share ? <IntakeScreen share={share} onDone={clearShare} /> : undefined} join={<JoinScreen c={c} profile={profile as StudentProfile} onJoined={setJoined} onEdit={() => setEditing(true)} />} />
+          <Shell onEditProfile={() => setEditing(true)} intake={share ? <IntakeScreen share={share} onDone={clearShare} /> : undefined} join={<JoinScreen c={c} profile={profile} onJoined={setJoined} onEdit={() => setEditing(true)} onProfile={setProfile} />} />
         ) : ready ? <Text style={{ color: c.danger, padding: 20 }}>{ready}</Text> : <ActivityIndicator style={{ marginTop: 80 }} size="large" />}
         {notice && joined && ready === 'ok' && <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: c.bg }}><Pressable onPress={() => setNotice(false)} accessibilityRole="button"><Text style={{ color: c.text, padding: 16 }}>Return to CLAN</Text></Pressable><PeopleScreen onJoin={() => Alert.alert('Already in a CLAN', 'Return to your current CLAN and leave it before joining another.')} /></View>}
         </PhoneCallProvider></ThemeRoot>
@@ -84,31 +92,56 @@ export default function App() {
 
 type C = typeof lightColors;
 
-function ProfileForm({ c, initial, onSaved }: { c: C; initial: OwnProfile; onSaved(p: OwnProfile): void }) {
+type Vis = 'everyone' | 'friends' | 'invisible';
+function ProfileForm({ c, initial, first, onSaved }: { c: C; initial: OwnProfile; first: boolean; onSaved(p: OwnProfile, extra: { visibility?: Vis; photo?: { uri: string; mime: 'image/png' | 'image/jpeg' } }): void }) {
   const [p, setP] = useState({ fullName: initial.fullName ?? '', rollNo: initial.rollNo ?? '', deviceName: initial.deviceName ?? '' });
+  const [vis, setVis] = useState<Vis>('everyone'), [photo, setPhoto] = useState<{ uri: string; mime: 'image/png' | 'image/jpeg' } | null>(null);
   const [error, setError] = useState('');
   const save = async () => {
-    const parsed = StudentProfile.safeParse({ ...p, devicePublicKey: initial.devicePublicKey });
-    if (!parsed.success) return setError('Please fill in every field.');
-    await saveProfile(parsed.data);
-    onSaved({ ...initial, ...parsed.data });
+    const fullName = p.fullName.trim().replace(/\s+/g, ' '), deviceName = p.deviceName.trim(), rollNo = p.rollNo.trim();
+    if (!fullName || fullName.length > 80) return setError('Enter your full name (up to 80 characters).');
+    if (!deviceName || deviceName.length > 60) return setError('Name this device (up to 60 characters), e.g. “My phone”.');
+    if (rollNo.length > 40) return setError('The student / ID number can be up to 40 characters.');
+    await saveProfile({ fullName, rollNo, deviceName });
+    onSaved({ ...initial, fullName, rollNo, deviceName }, first ? { visibility: vis, ...(photo ? { photo } : {}) } : photo ? { photo } : {});
   };
+  const pick = async () => {
+    const ImagePicker = await import('expo-image-picker');
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+    const a = !r.canceled && r.assets[0]; if (a) setPhoto({ uri: a.uri, mime: a.mimeType === 'image/png' ? 'image/png' : 'image/jpeg' });
+  };
+  const VIS: [Vis, string, string][] = [['everyone', 'Everyone nearby', 'People on the same network can find you and send a friend or chat request. Recommended.'],
+    ['friends', 'Friends only', 'Only people you have added as friends can find you.'], ['invisible', 'Invisible', 'Nobody can find you; you can still scan codes.']];
   return (
     <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
-      <Text style={[s.h1, { color: c.text }]}>Your details</Text>
-      <Text style={{ color: c.muted }}>Shown to the CLAN host so they know who is joining. Saved on this phone only.</Text>
-      <Field c={c} label="Full name" value={p.fullName} placeholder="Ashar Khan" onChange={(v) => setP({ ...p, fullName: v })} />
-      <Field c={c} label="Student / roll number" value={p.rollNo} placeholder="FA23-CS-114" onChange={(v) => setP({ ...p, rollNo: v })} />
-      <Field c={c} label="Device name" value={p.deviceName} placeholder="Ashar-iPhone" onChange={(v) => setP({ ...p, deviceName: v })} />
-      {!!error && <Text style={{ color: c.danger }}>{error}</Text>}
+      <Text style={[s.h1, { color: c.text }]}>{first ? 'Create your profile' : 'Your profile'}</Text>
+      <Text style={{ color: c.muted }}>Your name is how friends and CLAN hosts see you. It stays on this phone and is shared only with people and CLANs you connect to.</Text>
+      <Field c={c} label="Full name" value={p.fullName} placeholder="Your full name" onChange={(v) => setP({ ...p, fullName: v })} />
+      <Field c={c} label="Device name" value={p.deviceName} placeholder={Platform.OS === 'ios' ? 'e.g. My iPhone' : 'e.g. My phone'} onChange={(v) => setP({ ...p, deviceName: v })} />
+      <Field c={c} label="Student / ID number (optional)" value={p.rollNo} placeholder="Only if your class asks for it" onChange={(v) => setP({ ...p, rollNo: v })} />
+      <Pressable accessibilityRole="button" onPress={() => void pick()} style={[s.pill, { borderColor: c.border, minHeight: 48 }]}>
+        <Text style={{ color: c.accent }}>{photo ? 'Profile picture chosen ✓ (change)' : 'Add your profile picture (optional)'}</Text>
+      </Pressable>
+      {first && <View accessibilityRole="radiogroup" accessibilityLabel="Who can find you" style={{ gap: 8 }}>
+        <Text style={{ color: c.text, fontWeight: '700', marginTop: 8 }}>Who can find you nearby?</Text>
+        {VIS.map(([v, label, help]) => (
+          <Pressable key={v} accessibilityRole="radio" accessibilityState={{ checked: vis === v }} onPress={() => setVis(v)} style={[s.pill, { borderColor: vis === v ? c.accent : c.border, flexDirection: 'column', alignItems: 'flex-start', minHeight: 48 }]}>
+            <Text style={{ color: c.text, fontWeight: vis === v ? '700' : '500' }}>{vis === v ? '● ' : '○ '}{label}</Text>
+            <Text style={{ color: c.muted, fontSize: 12 }}>{help}</Text>
+          </Pressable>
+        ))}
+        <Text style={{ color: c.muted, fontSize: 12 }}>Nearby people see your name and picture only. Change this any time in People. Anyone you block can never see you.</Text>
+      </View>}
+      {!!error && <Text style={{ color: c.danger }} accessibilityLiveRegion="polite">{error}</Text>}
       <Text style={{ color: c.muted, fontSize: 12 }}>Device key {shortFingerprint(initial.fingerprint)} — kept in this phone's secure storage.</Text>
-      <Button c={c} primary label="Save" onPress={save} />
+      <Button c={c} primary label={first ? 'Continue' : 'Save'} onPress={() => void save()} />
     </ScrollView>
   );
 }
 
-function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentProfile; onJoined(j: PairedJoin): void; onEdit(): void }) {
+function JoinScreen({ c, profile: own, onJoined, onEdit, onProfile }: { c: C; profile: OwnProfile; onJoined(j: PairedJoin): void; onEdit(): void; onProfile(p: OwnProfile): void }) {
   const [code, setCode] = useState('');
+  const [roll, setRoll] = useState(own.rollNo ?? '');
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -126,6 +159,11 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
   }, []);
 
   const join = async () => {
+    // CLAN hosts recognise members by name + student/ID number; asked here only if onboarding skipped it
+    const parsed = StudentProfile.safeParse({ fullName: own.fullName, rollNo: roll.trim(), deviceName: own.deviceName, devicePublicKey: own.devicePublicKey });
+    if (!parsed.success) { setError(roll.trim() ? 'Check your profile details.' : 'Enter your student or ID number to join.'); return; }
+    const profile = parsed.data;
+    if (roll.trim() !== (own.rollNo ?? '')) { await saveProfile({ fullName: profile.fullName, rollNo: profile.rollNo, deviceName: profile.deviceName }); onProfile({ ...own, rollNo: profile.rollNo }); }
     setBusy(true); setError(''); setManual(null);
     const discoveryStarted = performance.now();
     try {
@@ -152,7 +190,8 @@ function JoinScreen({ c, profile, onJoined, onEdit }: { c: C; profile: StudentPr
   return (
     <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
       <Text style={[s.h1, { color: c.text }]}>Join CLAN</Text>
-      <Pressable onPress={onEdit}><Text style={{ color: c.muted }}>Joining as <Text style={{ fontWeight: '600', color: c.text }}>{profile.fullName}</Text> · <Text style={{ color: c.accent }}>edit</Text></Text></Pressable>
+      <Pressable onPress={onEdit}><Text style={{ color: c.muted }}>Joining as <Text style={{ fontWeight: '600', color: c.text }}>{own.fullName}</Text> · <Text style={{ color: c.accent }}>edit</Text></Text></Pressable>
+      {!own.rollNo && <TextInput style={[s.input, { color: c.text, borderColor: c.border, backgroundColor: c.surface }]} value={roll} onChangeText={setRoll} maxLength={40} placeholder="Student / ID number (the host uses it to recognise you)" placeholderTextColor={c.muted} accessibilityLabel="Student or ID number" />}
       <TextInput
         style={[s.code, { color: c.text, borderColor: c.border, backgroundColor: c.surface }]}
         value={code} onChangeText={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))}

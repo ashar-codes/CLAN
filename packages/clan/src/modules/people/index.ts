@@ -86,6 +86,8 @@ export const schema: ModuleSchema = {
     -- Internet-assisted wake-ups: the relay we registered with, capabilities we gave friends, theirs for us, and
     -- wake-ups waiting to be sent while an envelope is still undelivered.
     ALTER TABLE people_profile ADD COLUMN push_relay TEXT;
+    -- Automatic download from friends: {on, maxBytes, kinds[]} (null = off; explicit consent for everything).
+    ALTER TABLE people_profile ADD COLUMN auto_download TEXT;
     ALTER TABLE people_contacts ADD COLUMN push TEXT;
     CREATE TABLE people_push_caps (peer_key TEXT PRIMARY KEY, cap_id TEXT NOT NULL UNIQUE, cap TEXT NOT NULL, mac TEXT NOT NULL, relay TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'new' CHECK (state IN ('new','granted','shared','revoke')), at INTEGER NOT NULL);
     CREATE TABLE people_push_out (id TEXT PRIMARY KEY, to_key TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL, outbox_id TEXT, due_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0);
@@ -95,7 +97,9 @@ export const schema: ModuleSchema = {
 export const PeopleChanged = defineEvent('PeopleChanged', 1, z.object({ what: z.enum(['profile', 'contacts', 'relations', 'conversations', 'messages', 'transfers', 'calls']), key: z.string().optional(), convId: z.string().optional() }));
 
 // Published only after authenticated, authorized, durable receipt; retries produce no second alert.
-export const PeopleAlert = defineEvent('PeopleAlert', 1, z.object({ id: z.uuid(), key: z.string(), kind: z.string(), convId: z.uuid().optional() }));
+export const PeopleAlert = defineEvent('PeopleAlert', 1, z.object({ id: z.uuid(), key: z.string(), kind: z.string(), convId: z.uuid().optional(),
+  /** Message or call id: the key phones use to show one notification whether it came by LAN or push wake-up. */
+  ref: z.string().optional() }));
 
 export class PeerError extends Error { readonly code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
 export type Relation = 'none' | 'outgoing' | 'incoming' | 'friend';
@@ -121,6 +125,16 @@ const DEFAULT_VIS: Record<ProfileField, 'everyone' | 'friends' | 'nobody'> = { u
 /** Unsolicited (non-friend) contact limits: per sender and overall, per hour. */
 const RATE = { perSender: 6, overall: 40, windowMs: 3_600_000 };
 const PENDING_REQUESTS_MAX = 50;
+const AutoDownload = z.object({ on: z.boolean(), maxBytes: z.number().int().min(1024 * 1024).max(512 * 1024 * 1024), kinds: z.array(z.enum(['image', 'video', 'audio', 'document'])).max(4) }).strict();
+/** Media/document class by extension AND type; anything that could run code (apk, exe, scripts, html…) is null: always asks. */
+export function fileKind(name: string, mime: string): 'image' | 'video' | 'audio' | 'document' | null {
+  const ext = name.toLowerCase().split('.').pop() ?? '';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'].includes(ext) && mime.startsWith('image/')) return 'image';
+  if (['mp4', 'mov', 'm4v', 'webm', '3gp'].includes(ext) && mime.startsWith('video/')) return 'video';
+  if (['mp3', 'm4a', 'aac', 'wav', 'ogg', 'opus'].includes(ext) && mime.startsWith('audio/')) return 'audio';
+  if (['pdf', 'txt', 'md', 'csv', 'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods'].includes(ext)) return 'document';
+  return null;
+}
 
 type RelRow = { key: string; state: Relation; blocked: number; note: string | null };
 type ConvRow = { id: string; peer_key: string; state: Conversation['state']; mode: 'permanent' | 'temporary'; ttl_ms: number | null; created_at: number; updated_at: number; read_seq: number; peer_read_at: number; next_seq: number };
@@ -759,6 +773,18 @@ export class People {
     if (notify && o.direction === 'in' && o.endedAt && !previous?.ended_at && !o.connectedAt && (o.outcome?.startsWith('missed') || o.outcome === 'attempt-later')) this.bus.publish(PeopleAlert, 'people', { id: randomUUID(), key: o.peerKey, kind: o.outcome === 'attempt-later' ? 'call.attempt' : 'call.missed', convId: this.convWith(o.peerKey)?.id });
   }
 
+  // ---------------- automatic download (friends only, bounded, never executable) ----------------
+  autoDownload(set?: { on: boolean; maxBytes: number; kinds: ('image' | 'video' | 'audio' | 'document')[] } | null) {
+    this.profileRow();
+    if (set !== undefined) this.db.prepare('UPDATE people_profile SET auto_download = ? WHERE one = 1').run(set === null ? null : JSON.stringify(AutoDownload.parse(set)));
+    const r = (this.db.prepare('SELECT auto_download a FROM people_profile').get() as { a: string | null }).a;
+    return r ? AutoDownload.parse(JSON.parse(r)) : { on: false, maxBytes: 25 * 1024 * 1024, kinds: ['image', 'audio', 'document'] as ('image' | 'video' | 'audio' | 'document')[] };
+  }
+  private autoAccepts(from: string, f: FileMeta) {
+    const a = this.autoDownload(), kind = fileKind(f.name, f.mime);
+    return a.on && this.isFriend(from) && f.size <= a.maxBytes && kind !== null && a.kinds.includes(kind);
+  }
+
   // ---------------- internet-assisted wake-ups (optional) ----------------
   /** The relay this device registers with (null = none: LAN only). Changing it re-grants every friend. */
   pushRelay(url?: string | null): string | null {
@@ -918,7 +944,7 @@ export class People {
       this.assertCallable(e.from);
       if (this.db.prepare('SELECT 1 FROM people_seen WHERE id = ?').get(e.id)) return { kind: e.body.kind };
       this.db.prepare('INSERT INTO people_seen (id, at) VALUES (?, ?)').run(e.id, at);
-      if (e.body.kind === 'call.invite') this.bus.publish(PeopleAlert, 'people', { id: e.id, key: e.from, kind: e.body.kind, convId: this.convWith(e.from)?.id });
+      if (e.body.kind === 'call.invite') this.bus.publish(PeopleAlert, 'people', { id: e.id, key: e.from, kind: e.body.kind, convId: this.convWith(e.from)?.id, ref: e.body.callId });
       return { kind: e.body.kind, live: e };
     }
     if (e.at < at - REPLAY_WINDOW_MS || e.at > at + REPLAY_WINDOW_MS) throw new PeerError('stale', 'Message too old.');
@@ -1025,11 +1051,11 @@ export class People {
           const f = body.file, voice = !!f.voice;
           if (voice && (f.size > VOICE_MAX || !(VOICE_MIME as readonly string[]).includes(f.mime))) throw new PeerError('refused', 'Unsupported voice message.');
           if (this.db.prepare('SELECT 1 FROM people_transfers WHERE id = ?').get(f.transferId)) break;
-          const retention = c.mode === 'temporary' ? 'temporary' : f.retention, expires = this.expiry(c, Math.min(e.at, at));
+          const retention = c.mode === 'temporary' ? 'temporary' : f.retention, expires = this.expiry(c, Math.min(e.at, at)), auto = voice || this.autoAccepts(e.from, f);
           this.db.prepare(`INSERT INTO people_transfers (id, conv_id, msg_id, direction, name, mime, size, sha256, retention, voice_ms, state, expires_at, created_at, updated_at)
-            VALUES (?, ?, ?, 'in', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.transferId, c.id, body.msgId, f.name, f.mime, f.size, f.sha256, retention, f.voice?.durationMs ?? null, voice ? 'accepted' : 'offered', expires, at, at);
+            VALUES (?, ?, ?, 'in', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.transferId, c.id, body.msgId, f.name, f.mime, f.size, f.sha256, retention, f.voice?.durationMs ?? null, auto ? 'accepted' : 'offered', expires, at, at);
           this.addMessage(c.id, { id: body.msgId, author: e.from, kind: voice ? 'voice' : 'file', transferId: f.transferId, createdAt: Math.min(e.at, at), state: 'received', expiresAt: expires });
-          if (voice) { this.queue(e.from, { kind: 'file.accept', transferId: f.transferId }); download = f.transferId; }
+          if (auto) { this.queue(e.from, { kind: 'file.accept', transferId: f.transferId }); download = f.transferId; }
           this.changed('transfers', { convId: c.id }); break;
         }
         case 'file.accept': {
@@ -1050,7 +1076,8 @@ export class People {
       }
     });
     if (dropBytes) void this.dropTransferBytes(dropBytes, 'cancelled').catch(() => { /* swept later */ });
-    if (alertAttempt || ['msg.text', 'file.offer', 'file.done', 'friend.request', 'chat.invite'].includes(e.body.kind)) this.bus.publish(PeopleAlert, 'people', { id: e.id, key: e.from, kind: e.body.kind, convId: this.convWith(e.from)?.id });
+    if (alertAttempt || ['msg.text', 'file.offer', 'file.done', 'friend.request', 'chat.invite'].includes(e.body.kind)) this.bus.publish(PeopleAlert, 'people', { id: e.id, key: e.from, kind: e.body.kind, convId: this.convWith(e.from)?.id,
+      ref: body.kind === 'msg.text' || body.kind === 'file.offer' ? body.msgId : body.kind === 'call.attempt' ? body.callId : undefined });
     if (e.body.kind.startsWith('friend.')) this.wake(e.from);
     return { kind: e.body.kind, download };
   }

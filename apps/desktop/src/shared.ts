@@ -348,6 +348,7 @@ export type PeopleApi = {
   chat(action: 'accept' | 'decline' | 'end', convId: string): Promise<void>;
   page(convId: string, before?: number | null, limit?: number): Promise<PeopleMessage[]>; send(convId: string, text: string, replyTo?: string): Promise<PeopleMessage>; retry(msgId: string): Promise<void>;
   message(action: 'edit' | 'deleteForEveryone' | 'deleteForMe' | 'react' | 'forward', msgId: string, arg?: string | null): Promise<void>;
+  autoDownload(set?: { on: boolean; maxBytes: number; kinds: ('image' | 'video' | 'audio' | 'document')[] } | null): Promise<{ on: boolean; maxBytes: number; kinds: ('image' | 'video' | 'audio' | 'document')[] }>;
   pushRelay(url?: string | null): Promise<{ relay: string | null; status: string }>; wakeCall(key: string, callId: string, kind: 'call' | 'call.cancel'): Promise<boolean>;
   read(convId: string): Promise<void>; clear(convId: string): Promise<void>; remove(convId: string): Promise<void>;
   sendFile(convId: string, files?: File[]): Promise<PeopleTransfer[]>; sendVoice(convId: string, bytes: Uint8Array, mime: string, durationMs: number): Promise<PeopleTransfer>;

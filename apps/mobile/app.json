@@ -26,7 +26,8 @@
         "NSBluetoothAlwaysUsageDescription": "CLAN uses Bluetooth to find a nearby CLAN host that runs its own network. Only pairing messages are exchanged.",
         "UIBackgroundModes": [
           "audio"
-        ]
+        ],
+        "NSPhotoLibraryAddUsageDescription": "CLAN saves a photo or video to your library only when you choose Save to Photos."
       },
       "entitlements": {
         "com.apple.developer.networking.HotspotConfiguration": true
@@ -92,7 +93,11 @@
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],
-      "allowBackup": false
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      }
     },
     "plugins": [
       [
@@ -133,6 +138,7 @@
       "./plugins/withReleaseSigning.js",
       "./plugins/withNoRemotePush.js"
     ],
-    "scheme": "clan"
+    "scheme": "clan",
+    "icon": "./assets/icon.png"
   }
 }

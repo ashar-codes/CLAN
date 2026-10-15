@@ -49,9 +49,9 @@ function ProfileForm({ initial, onSaved, onBack }: { initial: OwnProfile; onSave
       <button className="link back" onClick={onBack}>← Back</button>
       <h2>Your details</h2>
       <p className="muted">Shown to your teacher so they know who is joining. Saved on this device only.</p>
-      <label>Full name<input autoFocus value={p.fullName} maxLength={80} placeholder="Ashar Khan" onChange={(e) => setP({ ...p, fullName: e.target.value })} /></label>
+      <label>Full name<input autoFocus value={p.fullName} maxLength={80} placeholder="Your full name" onChange={(e) => setP({ ...p, fullName: e.target.value })} /></label>
       <label>Student / roll number<input value={p.rollNo} maxLength={40} placeholder="FA23-CS-114" onChange={(e) => setP({ ...p, rollNo: e.target.value })} /></label>
-      <label>Device name<input value={p.deviceName} maxLength={60} placeholder="Ashar-MacBook" onChange={(e) => setP({ ...p, deviceName: e.target.value })} /></label>
+      <label>Device name<input value={p.deviceName} maxLength={60} placeholder="e.g. My laptop" onChange={(e) => setP({ ...p, deviceName: e.target.value })} /></label>
       <p className="muted small-text">Device key {shortFingerprint(initial.fingerprint)} — created on this computer and protected by the system keychain. Your teacher recognises this device by it.</p>
       {error && <p className="error">{error}</p>}
       <button className="primary" disabled={!p.fullName.trim() || !p.rollNo.trim() || !p.deviceName.trim()} onClick={save}>Save</button>

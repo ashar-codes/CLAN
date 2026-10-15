@@ -3,33 +3,29 @@ import { saveDirectory, directoryStatus, directoryEnrollmentKey } from '../peopl
 // (Wi-Fi Direct, Wi-Fi Aware, Apple peer-to-peer, hotspots), friends and requests, personal chats with files and voice
 // notes, calls, and QR file transfer.
 import { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, ScrollView, Linking, Platform, Text, View } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
+import { Linking, Platform, Pressable, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as Sharing from 'expo-sharing';
-import { File, Paths } from 'expo-file-system';
 import { parseProfileQr, profileQr, safetyNumber, TEMP_TTLS } from '@classroom/protocol';
-import { browse } from '../discovery';
+import { browse, clanDiscoveryStatus } from '../discovery';
 import type { Candidate } from '@classroom/client';
 import { Radar } from '../ui/Radar';
-import type { Contact, PeopleMessage } from '@clan/core';
+import type { Contact } from '@clan/core';
 import { phoneClan, me } from '../core/clan';
-import { allowPeopleNotifications, takePeopleChat, onPeopleNotification, setPeopleViewing } from '../people/notifications';
+import { allowPeopleNotifications, takePeopleChat, onPeopleNotification } from '../people/notifications';
 import { phonePeople } from '../people/native';
-import { verify } from '../FileActions';
 import { PeerLink } from '../../modules/peer-link';
 import { nearby, parseWifiQr, wifiQr } from '../people/nearby';
 import { QrImage, QrScanner } from '../ui/qr';
 import { OpticalScreen } from './Optical';
 import { usePhoneCall } from '../people/Call';
-import { VoiceNotePlayer, VoiceRecorder } from '../people/Voice';
-import { act, bump, Btn, Card, Err, Field, H1, Muted, Mate, PersonPic, Row, Screen, useC, useData, when } from '../ui/kit';
+import { ChatView } from '../people/ChatView';
+import { pushStatus, pushTick, selfTestWake } from '../people/push';
+import { act, bump, Btn, Card, Err, Field, H1, Muted, PersonPic, Row, Screen, useC, useData } from '../ui/kit';
 
 type Seg = 'nearby' | 'chats' | 'friends';
 const people = () => phoneClan().people;
 const REL: Record<string, string> = { friend: 'Friend', incoming: 'Asked to be friends', outgoing: 'Request sent', none: '' };
 const ttlText = (ms: number | null) => !ms ? 'Saved chat' : ms <= 3_600_000 ? 'Disappears after 1 hour' : ms <= 86_400_000 ? 'Disappears after 24 hours' : 'Disappears after 7 days';
-const mb = (n: number) => n < 1e6 ? `${Math.max(1, Math.round(n / 1e3))} KB` : `${(n / 1e6).toFixed(1)} MB`;
 
 export function PeopleScreen({ onJoin }: { onJoin(): void }) {
   const [seg, setSeg] = useState<Seg>('chats'), [chat, setChat] = useState<string | null>(null), [err, setErr] = useState<string | null>(null);
@@ -113,14 +109,17 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
         </View>}
         {ok && <Text accessibilityLiveRegion="polite" style={{ color: c.text }}>{ok}</Text>}<Err msg={err} />
       </Card>
-      <Card title="Notifications"><Row>{(['direct', 'files', 'previews'] as const).map((key) => <Btn small key={key} label={`${key === 'direct' ? 'Messages & calls' : key === 'files' ? 'Files' : 'Notification previews'}: ${prefs?.[key] ? 'On' : 'Off'}`} on={!!prefs?.[key]} onPress={() => { phoneClan().notifications.setPrefs(me(), { [key]: !prefs?.[key] }); bump(); }} />)}</Row><Btn label={`Friend nearby alerts: ${people().nearbyAlerts() ? 'On' : 'Off'}`} on={people().nearbyAlerts()} onPress={() => void run(async () => { const on = !people().nearbyAlerts(); if (on && !await allowPeopleNotifications()) throw new Error('Allow notifications first.'); people().nearbyAlerts(on); })} /><Btn label="Enable message and call notifications" onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are denied. Allow them in system settings.'); phoneClan().notifications.setPrefs(me(), { direct: true }); }, 'Message and call notifications enabled.')} /><Muted small>Notification previews follow your privacy preferences. Files still require acceptance.</Muted></Card>
+      <Card title="Notifications"><Row>{(['direct', 'files', 'previews'] as const).map((key) => <Btn small key={key} label={`${key === 'direct' ? 'Messages & calls' : key === 'files' ? 'Files' : 'Notification previews'}: ${prefs?.[key] ? 'On' : 'Off'}`} on={!!prefs?.[key]} onPress={() => { phoneClan().notifications.setPrefs(me(), { [key]: !prefs?.[key] }); bump(); }} />)}</Row><Btn label={`Friend nearby alerts: ${people().nearbyAlerts() ? 'On' : 'Off'}`} on={people().nearbyAlerts()} onPress={() => void run(async () => { const on = !people().nearbyAlerts(); if (on && !await allowPeopleNotifications()) throw new Error('Allow notifications first.'); people().nearbyAlerts(on); })} /><Btn label="Enable message and call notifications" onPress={() => void run(async () => { if (!await allowPeopleNotifications()) throw new Error('Notifications are denied. Allow them in system settings.'); phoneClan().notifications.setPrefs(me(), { direct: true }); }, 'Message and call notifications enabled.')} /><Muted small>Notification previews follow your privacy preferences.</Muted></Card>
+      <AutoDownloadCard />
+      <PushCard />
       <Card title="Who can find you">
         <Row gap={6}>
-          <Btn small label="Everyone nearby (1 h)" on={vis === 'everyone'} onPress={() => setErr(act(() => people().setVisibility('everyone', 3_600_000)))} />
+          <Btn small label="Everyone nearby" on={vis === 'everyone'} onPress={() => setErr(act(() => people().setVisibility('everyone')))} />
           <Btn small label="Friends only" on={vis === 'friends'} onPress={() => setErr(act(() => people().setVisibility('friends')))} />
           <Btn small label="Invisible" on={vis === 'invisible'} onPress={() => setErr(act(() => people().setVisibility('invisible')))} />
         </Row>
-        <Muted small>Everyone Nearby shows only fields you mark for everyone and switches back by itself. Avoid it on public networks. Others only ever see a random id unless you let them in.</Muted>
+        <Muted small>{vis === 'everyone' ? 'People on this network see your name, picture and the fields you mark for everyone, and can send you a friend or chat request. It stays on until you change it.' : vis === 'friends' ? 'Only friends can find you. Others can still reach you through your code.' : 'Nobody can find you nearby. You can still scan codes.'} Blocked people never see you. Your network’s administrator may see that a CLAN device is present.</Muted>
+        {vis === 'everyone' && <Btn small label="Only for the next hour" onPress={() => setErr(act(() => people().setVisibility('everyone', 3_600_000)))} />}
         <Muted>Nearby on this phone</Muted>
         <Row gap={6}>
           <Btn small label="Off" on={nearby.mode === 'off'} onPress={() => nearby.setMode('off')} />
@@ -160,7 +159,7 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
       <Row><Btn label="People Radar" on={radarMode === 'people'} onPress={() => setRadarMode('people')} /><Btn label="CLAN Radar" on={radarMode === 'clans'} onPress={() => setRadarMode('clans')} /></Row>
       <Radar items={radarMode === 'people' ? entries.map((e) => ({ id: e.id, name: e.name, kind: 'Person', verified: e.friend && !!e.key && !!people().contact(e.key)?.verified })) : clans.map((x) => ({ id: x.sid ?? x.url, name: x.title ?? 'CLAN', kind: `CLAN · ${'discoverySource' in x && x.discoverySource === 'directory' ? 'Internal Network' : 'Nearby'} (not joined)` }))} onSelect={(id) => { if (radarMode === 'clans') onJoin(); else setOk(`Choose the Connect or Chat action for ${entries.find((x) => x.id === id)?.name ?? 'this person'} below.`); }} />
       <Muted small>Real discovery only. Positions do not indicate distance. CLAN discovery is an untrusted hint; joining requires the host's code.</Muted>
-      {radarMode === 'clans' && <><Btn primary label="Join or request access by code" onPress={onJoin} />{clans.map((x) => <Card key={x.sid ?? x.url} title={x.title ?? 'CLAN'}><Muted>{'discoverySource' in x && x.discoverySource === 'directory' ? 'Internal Network · Directory hint' : 'Nearby · Same LAN discovery'} · Not joined; host authentication is required.</Muted><Btn label={`Join ${x.title ?? 'CLAN'}`} onPress={onJoin} /></Card>)}{!clans.length && <Muted>No CLANs discovered. Use the host address or QR fallback in Join.</Muted>}</>}
+      {radarMode === 'clans' && <><Btn primary label="Join or request access by code" onPress={onJoin} />{clans.map((x) => <Card key={x.sid ?? x.url} title={x.title ?? 'CLAN'}><Muted>{'discoverySource' in x && x.discoverySource === 'directory' ? 'Internal Network · Directory hint' : 'Nearby · Same LAN discovery'} · Not joined; host authentication is required.</Muted><Btn label={`Join ${x.title ?? 'CLAN'}`} onPress={onJoin} /></Card>)}{!clans.length && <Muted>No live CLANs found on this network yet. A CLAN appears only while its host is running it. {clanDiscoveryStatus}. If the network blocks discovery, use the host address or QR in Join.</Muted>}</>}
       {radarMode === 'people' && entries.map((e) => (
         <Card key={e.id}>
           <Row><PersonPic pic={e.key ? people().avatarOf(e.key) : null} name={e.name} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700', color: c.text }}>{e.name}{e.friend ? ' · friend' : ''}</Text>
@@ -230,7 +229,7 @@ function Friends({ onChat }: { onChat(id: string): void }) {
   const me = useData(() => people().myProfile());
   const offers = useData(() => people().deviceOffers()) ?? [];
   const c = useC();
-  const [name, setName] = useState(me?.name ?? ''), [err, setErr] = useState<string | null>(null);
+  const [name, setName] = useState(me?.name ?? ''), [device, setDevice] = useState(me?.deviceName ?? ''), [err, setErr] = useState<string | null>(null);
   return (
     <>
       {offers.map((o) => (
@@ -242,10 +241,12 @@ function Friends({ onChat }: { onChat(id: string): void }) {
       ))}
       {!list.length && <Muted>No friends yet. Find people in Nearby or scan their code.</Muted>}
       {list.map((c) => <PersonCard key={c.key} c={c} onChat={onChat} />)}
-      <Card title="Your name for people">
-        <Field label="Name" value={name} onChange={setName} maxLength={80} />
-        <Btn small label="Save" disabled={!name.trim()} onPress={() => setErr(act(() => people().updateProfile({ name: name.trim() })))} />
-        <Btn small label="Change picture" onPress={() => void (async () => {
+      <Card title="Your profile">
+        <Row><PersonPic pic={me?.avatar ? undefined : null} name={me?.name || '?'} size={48} /><View style={{ flex: 1 }}><Text style={{ color: c.text, fontWeight: '700' }}>{me?.name || 'Name not set'}</Text><Muted small>{me?.deviceName ?? 'Device name not set'}</Muted></View></Row>
+        <Field label="Your full name" value={name} onChange={setName} maxLength={80} />
+        <Field label="Device name" value={device} onChange={setDevice} maxLength={60} />
+        <Btn small label="Save" disabled={!name.trim() || !device.trim()} onPress={() => setErr(act(() => people().updateProfile({ name: name.trim(), deviceName: device.trim() })))} />
+        <Btn small label={me?.avatar ? 'Change picture' : 'Add your profile picture'} onPress={() => void (async () => {
           const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
           const a = !r.canceled && r.assets[0]; if (!a) return;
           try { await people().setAvatar(a.uri, a.mimeType === 'image/png' ? 'image/png' : 'image/jpeg'); bump(); } catch (e) { setErr((e as Error).message); }
@@ -258,104 +259,58 @@ function Friends({ onChat }: { onChat(id: string): void }) {
 }
 
 function ChatList({ onOpen }: { onOpen(id: string): void }) {
-  const convs = useData(() => people().conversations()) ?? [];
-  if (!convs.length) return <Muted>No chats yet. Start one from Friends or Nearby.</Muted>;
-  return <>{convs.map((c) => (
-    <Card key={c.id}>
-      <Row><PersonPic pic={people().avatarOf(c.peerKey)} name={c.peerName} size={36} /><View style={{ flex: 1 }}><Text style={{ fontWeight: '700' }}>{c.peerName}{c.unread ? ` · ${c.unread} new` : ''}</Text>
-        <Muted small>{c.state === 'invited_in' ? 'Invites you to chat' : c.state === 'invited_out' ? 'Invitation sent' : c.state === 'ended' ? 'Ended' : c.state === 'declined' ? 'Declined' : (c.lastText ?? ttlText(c.ttlMs))}</Muted></View>
-        <Btn small label="Open" a11y={`Open chat with ${c.peerName}`} onPress={() => onOpen(c.id)} /></Row>
-    </Card>
-  ))}</>;
-}
-
-/** Refuse up front when the phone cannot hold the file (plus a margin) instead of failing half-way. */
-function roomFor(bytes: number) {
-  const free = Paths.availableDiskSpace, need = bytes + 64 * 1024 * 1024;
-  if (free < need) throw new Error(`Not enough free space on this phone (needs ${Math.ceil(need / 1e6)} MB, ${Math.floor(free / 1e6)} MB free).`);
-}
-
-const PAGE = 40;
-function ChatView({ id, onBack }: { id: string; onBack(): void }) {
-  useEffect(() => { setPeopleViewing(id); return () => setPeopleViewing(null); }, [id]);
   const c = useC();
-  const calls = usePhoneCall();
-  const [limit, setLimit] = useState(PAGE), [text, setText] = useState(''), [err, setErr] = useState<string | null>(null);
-  const [menu,setMenu]=useState(false),[query,setQuery]=useState<string|null>(null),[filesOnly,setFilesOnly]=useState(false);
-  const conv = useData(() => people().conversation(id));
-  const msgs = useData(() => people().page(id, { limit })) ?? [];
-  const tick = () => void phonePeople().then((r) => r.tick());
-  useEffect(() => { if (conv?.unread) { act(() => people().markRead(id)); tick(); } }, [conv?.unread, id]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!conv) return <Screen><Btn label="← Back" onPress={onBack} /><Muted>This conversation was removed.</Muted></Screen>;
-  const run = (f: () => unknown) => { setErr(act(f)); tick(); };
-  const send = () => { const t = text.trim(); if (!t) return; run(() => people().sendText(id, t)); setText(''); };
-  const sendFile = async () => {
-    const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }); const a = !r.canceled && r.assets[0];
-    if (!a) return;
-    try { await people().offerFile(id, a.uri, { name: a.name, mime: a.mimeType ?? 'application/octet-stream' }); tick(); } catch (e) { setErr((e as Error).message); }
-  };
-  const confirm = (what: 'clear' | 'remove' | 'end') => Alert.alert(what === 'end' ? 'End this chat?' : what === 'clear' ? 'Clear history on this phone?' : 'Remove this conversation from this phone?',
-    what === 'end' ? 'Neither of you can send more until a new invitation is accepted.' : `${conv.peerName} keeps their own copy — CLAN cannot delete what is already on their device.`,
-    [{ text: 'Cancel', style: 'cancel' }, { text: what === 'end' ? 'End chat' : what === 'clear' ? 'Clear' : 'Remove', style: 'destructive', onPress: () => {
-      if (what === 'end') run(() => people().endChat(id));
-      else void (what === 'clear' ? people().clearHistory(id) : people().removeConversation(id).then(onBack)).catch((e) => setErr((e as Error).message));
-    } }]);
-  return (
-    <KeyboardAvoidingView style={{flex:1,padding:12,gap:8}} behavior={Platform.OS==='ios'?'padding':undefined}>
-      <Row><Btn small label="← Chats" onPress={onBack} /><Mate name={conv.peerName}/><View style={{ flex: 1 }}><Text style={{ fontWeight: '800', fontSize: 18, color: c.text }}>{conv.peerName}</Text><Muted small>{ttlText(conv.ttlMs)}</Muted></View></Row>
-      <Row gap={6}>
-        {(conv.friend || conv.state === 'active') && <><Btn small label="Call" disabled={calls.active} onPress={() => calls.call(conv.peerKey, conv.peerName)} /><Btn small label="Video call" disabled={calls.active} onPress={()=>calls.call(conv.peerKey,conv.peerName,true)} /></>}
-        <Btn small label="⋯" a11y="Chat options" onPress={()=>setMenu(!menu)}/>
-      </Row>
-      {menu && <Row gap={6}><Btn small label="View contact details" onPress={()=>Alert.alert(conv.peerName,`${conv.friend?'Friend':'Chat contact'}\n${conv.peerKey}`)}/><Btn small label="Search chat" onPress={()=>setQuery(query===null?'':null)}/><Btn small label={filesOnly?'All messages':'Shared media/files'} onPress={()=>setFilesOnly(!filesOnly)}/><Btn small label="Notification settings" onPress={()=>Alert.alert('Notifications','Toggle messages and calls on this device?', [{text:'Cancel'},{text:'Toggle',onPress:()=>{const n=phoneClan().notifications;n.setPrefs(me(),{direct:!n.prefs(me()).direct});bump();}}])}/>
-        {conv.state === 'active' && <Btn small label="End chat" onPress={() => confirm('end')} />}
-        <Btn small label="Clear history" onPress={() => confirm('clear')} />
-        <Btn small danger label="Remove" onPress={() => confirm('remove')} />
-      </Row>}
-      {query!==null && <Field label="Search loaded messages" value={query} onChange={setQuery}/>}
-      <ScrollView style={{flex:1}} contentContainerStyle={{gap:8}} keyboardShouldPersistTaps="handled">
-      {conv.state === 'invited_in' && <Card tone="ok"><Text style={{ color: c.text }}>{conv.peerName} invites you to {conv.mode === 'temporary' ? `a temporary chat (${ttlText(conv.ttlMs).toLowerCase()} on both devices)` : 'a saved chat'}.</Text>
-        <Row><Btn small primary label="Accept" onPress={() => run(() => people().acceptChat(id))} /><Btn small label="Decline" onPress={() => run(() => people().declineChat(id))} /></Row></Card>}
-      {conv.state === 'invited_out' && <Muted>Waiting for {conv.peerName} to accept.</Muted>}
-      {msgs.length >= limit && <Btn small label="Load earlier messages" onPress={() => setLimit(limit + PAGE)} />}
-      {msgs.filter(m=>(!filesOnly || !!m.transfer) && (!query || m.text?.toLowerCase().includes(query.toLowerCase()) || m.transfer?.name.toLowerCase().includes(query.toLowerCase()))).map((m) => <Bubble key={m.id} m={m} onError={setErr} onAct={run} />)}
-      </ScrollView>
-      <Err msg={err} />
-      {conv.state === 'active' ? <>
-        <Field label="Message" value={text} onChange={setText} multiline maxLength={8000} />
-        <Row><Btn primary label="Send" disabled={!text.trim()} onPress={send} /><Btn label="📎 File" a11y="Send a file" onPress={() => void sendFile()} /><VoiceRecorder convId={id} onError={setErr} onSent={tick} /></Row>
-      </> : conv.state !== 'invited_in' && conv.state !== 'invited_out' ? <Muted>This chat is closed.</Muted> : null}
-    </KeyboardAvoidingView>
-  );
+  const [q, setQ] = useState('');
+  const all = useData(() => people().conversations()) ?? [];
+  const convs = q.trim() ? all.filter((x) => x.peerName.toLowerCase().includes(q.trim().toLowerCase()) || x.lastText?.toLowerCase().includes(q.trim().toLowerCase())) : all;
+  if (!all.length) return <Card><Muted>No conversations yet. Find people in Nearby, or add a friend with their code.</Muted></Card>;
+  return <>
+    <Field label="Search chats" value={q} onChange={setQ} placeholder="Name or message" />
+    {convs.map((x) => (
+      <Pressable key={x.id} accessibilityRole="button" accessibilityLabel={`Chat with ${x.peerName}${x.unread ? `, ${x.unread} unread` : ''}`} onPress={() => onOpen(x.id)}
+        style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 1, borderColor: c.border, opacity: pressed ? 0.7 : 1 })}>
+        <PersonPic pic={people().avatarOf(x.peerKey)} name={x.peerName} size={48} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+            <Text numberOfLines={1} style={{ flex: 1, fontWeight: '700', fontSize: 16, color: c.text }}>{x.peerName}</Text>
+            {x.lastAt && <Text style={{ color: x.unread ? c.ok : c.muted, fontSize: 12 }}>{new Date(x.lastAt).toDateString() === new Date().toDateString() ? new Date(x.lastAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date(x.lastAt).toLocaleDateString()}</Text>}
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text numberOfLines={1} style={{ flex: 1, color: c.muted }}>{x.state === 'invited_in' ? 'Invites you to chat' : x.state === 'invited_out' ? 'Invitation sent' : x.state === 'ended' ? 'Chat ended' : x.state === 'declined' ? 'Declined' : (x.lastText ?? ttlText(x.ttlMs))}</Text>
+            {!!x.unread && <View style={{ minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: c.ok, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{x.unread}</Text></View>}
+          </View>
+        </View>
+      </Pressable>
+    ))}
+  </>;
 }
 
-function Bubble({ m, onError, onAct }: { m: PeopleMessage; onError(e: string): void; onAct(f: () => unknown): void }) {
-  const c = useC(), t = m.transfer;
-  const st = m.mine ? ({ queued: 'Pending', sending: 'Sending…', delivered: 'Delivered', read: 'Read', failed: 'Failed', received: '' } as const)[m.state] : '';
-  if (m.kind === 'event' || m.kind === 'call') return <Muted small>{m.text} · {when(m.createdAt)}</Muted>;
-  const share = async () => {
-    try {
-      const path = m.mine ? people().outgoingBytesLocal(t!.id) : people().filePath(t!.id);
-      if (!path) throw new Error('This file is not on this phone.');
-      await verify(new File(path), t!.sha256);
-      await Sharing.shareAsync(path, { mimeType: t!.mime, dialogTitle: t!.name });
-    } catch (e) { onError((e as Error).message); }
-  };
-  return (
-    <View style={{ alignSelf: m.mine ? 'flex-end' : 'flex-start', maxWidth: '86%', backgroundColor: m.mine ? c.accent + '22' : c.surface, borderRadius: 14, padding: 10, gap: 4, borderWidth: 1, borderColor: m.state === 'failed' ? c.danger : c.border }}>
-      {t ? <>
-        <Text style={{ fontWeight: '700', color: c.text }}>{m.kind === 'voice' ? `Voice message · ${Math.round((t.voiceMs ?? 0) / 1000)} s` : t.name}</Text>
-        <Muted small>{mb(t.size)} · {t.retention} · {t.state === 'complete' ? 'Verified' : t.state === 'transferring' ? `${Math.round((t.received / Math.max(1, t.size)) * 100)}%` : t.state}{t.error ? ` — ${t.error}` : ''}</Muted>
-        {m.kind === 'voice' && <VoiceNotePlayer t={t} mine={m.mine} onError={onError} />}
-        <Row gap={6}>
-          {!m.mine && t.state === 'offered' && <><Btn small primary label={`Accept ${mb(t.size)}`} onPress={() => onAct(() => { roomFor(t.size - t.received); people().acceptFile(t.id); })} /><Btn small label="Decline" onPress={() => onAct(() => people().declineFile(t.id))} /></>}
-          {['offered', 'accepted', 'transferring'].includes(t.state) && (m.mine || t.state !== 'offered') && <Btn small label="Cancel" onPress={() => void people().cancelFile(t.id).catch((e) => onError((e as Error).message))} />}
-          {!m.mine && t.state === 'failed' && <Btn small label="Retry" onPress={() => onAct(() => { roomFor(t.size - t.received); people().retryDownload(t.id); })} />}
-          {(t.state === 'complete' || (m.mine && !['cancelled', 'expired'].includes(t.state))) && <Btn small label="Share / Open" onPress={() => void share()} />}
-        </Row>
-      </> : <Text style={{ color: c.text, fontSize: 16 }}>{m.text}</Text>}
-      <Muted small>{when(m.createdAt)}{st ? ` · ${st}` : ''}{m.expiresAt ? ` · disappears ${when(m.expiresAt)}` : ''}</Muted>
-      {m.mine && m.state === 'failed' && <Btn small label="Retry" onPress={() => onAct(() => people().retryMessage(m.id))} />}
-    </View>
-  );
+function AutoDownloadCard() {
+  const a = useData(() => people().autoDownload());
+  const [err, setErr] = useState<string | null>(null);
+  if (!a) return null;
+  const set = (x: Partial<typeof a>) => setErr(act(() => people().autoDownload({ ...a, ...x })));
+  const toggle = (k: (typeof a.kinds)[number]) => set({ kinds: a.kinds.includes(k) ? a.kinds.filter((x) => x !== k) : [...a.kinds, k] });
+  return <Card title="Automatic downloads">
+    <Btn small label={`From friends: ${a.on ? 'On' : 'Off'}`} on={a.on} onPress={() => set({ on: !a.on })} />
+    {a.on && <>
+      <Row gap={6}>{(['image', 'video', 'audio', 'document'] as const).map((k) => <Btn key={k} small label={k === 'image' ? 'Photos' : k === 'video' ? 'Videos' : k === 'audio' ? 'Audio' : 'Documents'} on={a.kinds.includes(k)} onPress={() => toggle(k)} />)}</Row>
+      <Row gap={6}>{[10, 25, 100].map((n) => <Btn key={n} small label={`Up to ${n} MB`} on={a.maxBytes === n * 1024 * 1024} onPress={() => set({ maxBytes: n * 1024 * 1024 })} />)}</Row>
+    </>}
+    <Muted small>Downloads into CLAN on this phone only (verified by SHA-256); use Save to Gallery/Photos or Save to Files to export. Files from people who are not your friends, larger files, and anything that could run code (apps, scripts, web pages) always ask first. Nothing is opened automatically.</Muted>
+    <Err msg={err} />
+  </Card>;
+}
+
+function PushCard() {
+  const relay = useData(() => people().pushRelay());
+  const [url, setUrl] = useState(relay ?? ''), [err, setErr] = useState<string | null>(null);
+  return <Card title="Internet-assisted notifications (optional)">
+    <Muted small>Local messages and calls never need the internet. When CLAN is closed or the phone is asleep, the operating system can stop local listening. A notification relay (FCM on Android, Apple Push on iPhone) lets friends wake this phone — it carries no message text, names or files; the message itself still arrives over the local network when CLAN opens. Requires internet on both sides and a relay your school or you operate.</Muted>
+    <Field label="Relay address (https://…)" value={url} onChange={setUrl} autoCapitalize="none" autoCorrect={false} placeholder="https://relay.example.edu" />
+    <Row><Btn small label="Save relay" onPress={() => { setErr(act(() => people().pushRelay(url.trim() || null))); pushTick(); }} /><Btn small label="Turn off" onPress={() => { setUrl(''); setErr(act(() => people().pushRelay(null))); pushTick(); }} /></Row>
+    <Muted small>{pushStatus()}</Muted>
+    {Platform.OS === 'android' && <Btn small label="Test a wake-up notification on this phone" onPress={() => void selfTestWake().then((r) => setErr(`Self-test: genuine ${r.genuine}, forged ${r.forged}, repeated ${r.replay}`), (e) => setErr((e as Error).message))} />}
+    <Err msg={err} />
+  </Card>;
 }

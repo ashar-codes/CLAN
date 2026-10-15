@@ -80,7 +80,35 @@ it('permanent chat: delivery, read receipts, file with consent and verification,
   await A.page.getByRole('navigation', { name: 'Conversations' }).getByRole('button', { name: /Bilal Ahmed/ }).click({ timeout: 20_000 });
   const chatA = A.page.getByRole('region', { name: 'Chat with Bilal Ahmed' });
   await chatA.getByText('Hello Aisha').waitFor({ timeout: 20_000 });
-  await chatB.getByText(/· Read/).waitFor({ timeout: 20_000 });
+  await chatB.getByText(/✓✓ Read/).waitFor({ timeout: 20_000 });
+
+  // reply, react, edit and delete for everyone: author-only, signed, applied on the other device
+  const text = (chat: typeof chatA, t: string) => chat.locator('.msg-text', { hasText: new RegExp(`^${t}$`) });
+  const bubble = (chat: typeof chatA, t: string) => chat.locator('.msg', { has: chat.page().locator('.msg-text', { hasText: new RegExp(`^${t}$`) }) });
+  await chatB.getByLabel('Message', { exact: true }).fill('Edit me please');
+  await chatB.getByLabel('Message', { exact: true }).press('Enter');
+  await text(chatA, 'Edit me please').click({ button: 'right', timeout: 20_000 });
+  await chatA.getByRole('menuitem', { name: 'React 👍' }).click();
+  await bubble(chatB, 'Edit me please').locator('.msg-reactions', { hasText: '👍' }).waitFor({ timeout: 20_000 });
+  await text(chatA, 'Edit me please').click({ button: 'right' });
+  expect(await chatA.getByRole('menuitem', { name: '✎ Edit' }).count()).toBe(0); // not A's message
+  expect(await chatA.getByRole('menuitem', { name: '⊘ Delete for everyone' }).count()).toBe(0);
+  await chatA.getByRole('menuitem', { name: '↩ Reply' }).click();
+  await chatA.getByLabel('Message', { exact: true }).fill('Reply from Aisha');
+  await chatA.getByLabel('Message', { exact: true }).press('Enter');
+  await bubble(chatB, 'Reply from Aisha').locator('.msg-reply', { hasText: 'Edit me please' }).waitFor({ timeout: 20_000 });
+  await text(chatB, 'Edit me please').click({ button: 'right' });
+  await chatB.getByRole('menuitem', { name: '✎ Edit' }).click();
+  await chatB.getByLabel('Message', { exact: true }).fill('Edited by Bilal');
+  await chatB.getByRole('button', { name: 'Save' }).click();
+  await bubble(chatA, 'Edited by Bilal').getByText(/Edited ·/).waitFor({ timeout: 20_000 });
+  B.page.once('dialog', (d) => void d.accept());
+  await text(chatB, 'Edited by Bilal').click({ button: 'right' });
+  await chatB.getByRole('menuitem', { name: '⊘ Delete for everyone' }).click();
+  await chatA.getByText('This message was deleted').waitFor({ timeout: 20_000 });
+  await chatB.getByText('You deleted this message').waitFor();
+  await bubble(chatA, 'Reply from Aisha').locator('.msg-reply', { hasText: 'Message deleted' }).waitFor();
+  expect(await text(chatA, 'Edited by Bilal').count()).toBe(0);
 
   // B sends a file; nothing moves until A accepts; A previews and saves a verified copy
   const src = join(work, 'notes.txt'), saved = join(work, 'saved-notes.txt');
@@ -115,7 +143,7 @@ it('permanent chat: delivery, read receipts, file with consent and verification,
 
 it('audio call: ringing, answer, encrypted audio flows both ways, hang up is logged', async () => {
   const chatA = A.page.getByRole('region', { name: 'Chat with Bilal Ahmed' });
-  await chatA.getByRole('button', { name: 'Call', exact: true }).click();
+  await chatA.getByRole('button', { name: 'Voice call Bilal Ahmed' }).click();
   const ring = B.page.getByRole('alertdialog', { name: /Incoming call: Aisha Khan/ });
   await ring.getByRole('button', { name: 'Answer' }).click({ timeout: 20_000 });
   const panelA = A.page.locator('.call-panel'), panelB = B.page.locator('.call-panel');
@@ -131,7 +159,7 @@ it('audio call: ringing, answer, encrypted audio flows both ways, hang up is log
 
 it('video call: real decoded frames and audio, camera toggles, upgrade, hangup releases tracks',async()=>{
   const chat=A.page.getByRole('region',{name:'Chat with Bilal Ahmed'});
-  await chat.getByRole('button',{name:'Video call',exact:true}).click();
+  await chat.getByRole('button',{name:'Video call Bilal Ahmed'}).click();
   await B.page.getByRole('alertdialog',{name:/Incoming call:/}).getByRole('button',{name:'Answer'}).click();
   const pa=A.page.locator('.call-panel'),pb=B.page.locator('.call-panel');
   await expect.poll(async()=>Number(await pa.getAttribute('data-video-rx')),{timeout:20000}).toBeGreaterThan(1000);
@@ -148,7 +176,7 @@ it('video call: real decoded frames and audio, camera toggles, upgrade, hangup r
 },90000);
 
 it('audio-only calls upgrade to video with explicit camera consent and keep the original call',async()=>{
-  await A.page.getByRole('region',{name:'Chat with Bilal Ahmed'}).getByRole('button',{name:'Call',exact:true}).click();
+  await A.page.getByRole('region',{name:'Chat with Bilal Ahmed'}).getByRole('button',{name:'Voice call Bilal Ahmed'}).click();
   await B.page.getByRole('alertdialog',{name:/Incoming call:/}).getByRole('button',{name:'Answer'}).click();
   const a=A.page.locator('.call-panel'),b=B.page.locator('.call-panel');await a.getByRole('button',{name:'Camera on',exact:true}).waitFor();
   await a.getByRole('button',{name:'Camera on',exact:true}).click();await expect.poll(async()=>Number(await b.getAttribute('data-video-rx')),{timeout:15000}).toBeGreaterThan(1000);
@@ -199,7 +227,7 @@ it('temporary chat terms need acceptance; queued messages reach a restarted app;
 
 it('visibility: Everyone Nearby is discovered automatically; Invisible disappears; blocking stops contact', async () => {
   await tab(A.page, 'Nearby');
-  await A.page.getByRole('button', { name: 'Everyone nearby (1 h)' }).click();
+  await A.page.getByRole('button', { name: 'Everyone nearby', exact: true }).click();
   await A.page.getByText(/You are visible to everyone nearby/).waitFor();
   await tab(B.page, 'Nearby');
   // automatic discovery over mDNS (needs multicast on this network); friends are also found in Friends Only
@@ -220,6 +248,6 @@ it('visibility: Everyone Nearby is discovered automatically; Invisible disappear
   await chatA.getByLabel('Message', { exact: true }).fill('Can you see this?');
   await chatA.getByLabel('Message', { exact: true }).press('Enter');
   const refused = chatA.locator('.msg', { hasText: 'Can you see this?' });
-  await refused.locator('.msg-meta').filter({ hasText: /· Failed/ }).waitFor({ timeout: 30_000 });
+  await refused.locator('.msg-meta').filter({ hasText: /⚠ Failed/ }).waitFor({ timeout: 30_000 });
   expect(await refused.getAttribute('data-state')).toBe('failed');
 }, 180_000);

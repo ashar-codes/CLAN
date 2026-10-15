@@ -16,6 +16,8 @@ import { startPhonePeople, type PhoneEnv, type PhonePeople } from './runtime';
 import { PeerLink } from '../../modules/peer-link';
 import { initializePeopleNotifications } from './notifications';
 import { nearby } from './nearby';
+import { pushTick, startPush, syncWakeKeys, takeWakeEvents } from './push';
+import { openPeopleChat } from './notifications';
 import type { PeerEnvelope } from '@classroom/protocol';
 
 /** Live call signals from any path go to the call screen (set by it). */
@@ -63,7 +65,7 @@ let rt: PhonePeople | null = null, starting: Promise<PhonePeople> | null = null,
 PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser && AppState.currentState !== 'active') { rt?.stop(); rt = null; if (devicesTimer) clearInterval(devicesTimer); devicesTimer = null; } });
 AppState.addEventListener('change', (st) => {
   if (st !== 'active' && !nearby.keepInBackground()) { rt?.stop(); rt = null; if (devicesTimer) clearInterval(devicesTimer); devicesTimer = null; } // the computer path; direct links follow the Nearby setting (nearby.ts)
-  else if (wanted) { nearby.networkChanged(); rt?.reconnect(); void phonePeople().catch(() => {}); }
+  else if (wanted) { nearby.networkChanged(); rt?.reconnect(); void phonePeople().then(() => { for (const e of takeWakeEvents()) openPeopleChat(e.convId); void nearby.cm?.tick(); pushTick(); }).catch(() => {}); }
 });
 /** Starts people networking for this app session (idempotent). */
 export function phonePeople(): Promise<PhonePeople> {
@@ -74,15 +76,16 @@ export function phonePeople(): Promise<PhonePeople> {
     await nearby.ensureNotificationConsent();
     const s = await deviceSigner();
     const signer = { publicKey: s.publicKey, sign: (b: Uint8Array) => s.sign(b) as string };
-    if (!subscribed) { subscribed = true; phoneClan().bus.subscribe('mobile.people', PeopleChanged, (e) => { bump(); if (e.payload.what === 'profile' || e.payload.what === 'relations') { nearby.advertise(true); void refreshDirectory(true); void nearby.cm?.tick(); } }); }
+    if (!subscribed) { subscribed = true; phoneClan().bus.subscribe('mobile.people', PeopleChanged, (e) => { bump(); if (e.payload.what === 'profile' || e.payload.what === 'relations' || e.payload.what === 'contacts') { syncWakeKeys(); pushTick(); } if (e.payload.what === 'profile' || e.payload.what === 'relations') { nearby.advertise(true); void refreshDirectory(true); void nearby.cm?.tick(); } if (e.payload.what === 'messages') pushTick(); }); }
     const links = nearby.manager(signer);
     nearby.onLive(live);
-    const devices = () => { try { const acc = phoneClan().sync.account(); if (!acc) return; const p = phoneClan().people; p.announceDevice(acc.accountId, `${p.myProfile().name}’s phone`); if (p.shareDeviceLinks()) void rt?.tick(); } catch { /* not linked yet */ } };
+    const devices = () => { try { const acc = phoneClan().sync.account(); if (!acc) return; const p = phoneClan().people; p.announceDevice(acc.accountId, p.myProfile().deviceName ?? `${p.myProfile().name}’s phone`); if (p.shareDeviceLinks()) void rt?.tick(); } catch { /* not linked yet */ } };
     if (devicesTimer) clearInterval(devicesTimer); devicesTimer = setInterval(devices, 60_000);
     rt = startPhonePeople({ people: phoneClan().people, signer, env, links, onLive: live, onChange: () => bump() });
     if (AppState.currentState !== 'active' && !nearby.keepInBackground()) { rt.stop(); rt = null; throw new Error('People networking resumes when CLAN is open.'); }
     void nearby.start();
     devices();
+    void startPush(signer).catch(() => { /* reported in pushStatus */ });
     return rt;
   })().finally(() => { starting = null; });
 }

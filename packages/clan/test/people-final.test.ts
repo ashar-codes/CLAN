@@ -149,6 +149,25 @@ describe('messages: replies, edit, delete, reactions', () => {
   });
 });
 
+describe('automatic downloads', () => {
+  it('accepts only friends’ bounded media/documents; executables and strangers always ask', async () => {
+    const clock = { t: 40_000_000 }, { a, b, conv } = friends(clock);
+    const { writeFileSync } = await import('node:fs'), { join } = await import('node:path');
+    const file = (n: string, size: number) => { const p = join(a.storageDir, n); writeFileSync(p, Buffer.alloc(size, 1)); return p; };
+    b.p.autoDownload({ on: true, maxBytes: 2 * 1024 * 1024, kinds: ['image', 'document'] });
+    const photo = await a.p.offerFile(conv, file('p.jpg', 1000), { name: 'p.jpg', mime: 'image/jpeg' });
+    const big = await a.p.offerFile(conv, file('big.pdf', 3 * 1024 * 1024), { name: 'big.pdf', mime: 'application/pdf' });
+    const apk = await a.p.offerFile(conv, file('game.apk', 1000), { name: 'game.apk', mime: 'image/jpeg' }); // lying mime
+    const vid = await a.p.offerFile(conv, file('v.mp4', 1000), { name: 'v.mp4', mime: 'video/mp4' }); // kind not chosen
+    flush(a, b);
+    expect(b.p.transfer(photo.id)!.state).toBe('accepted');
+    for (const t of [big, apk, vid]) expect(b.p.transfer(t.id)!.state).toBe('offered');
+    b.p.autoDownload({ on: false, maxBytes: 2 * 1024 * 1024, kinds: ['image'] });
+    const later = await a.p.offerFile(conv, file('q.png', 1000), { name: 'q.png', mime: 'image/png' }); flush(a, b);
+    expect(b.p.transfer(later.id)!.state).toBe('offered');
+  });
+});
+
 describe('internet-assisted wake-ups', () => {
   it('registers, grants per friend, wakes only while undelivered, verifies MAC, rate-limits and revokes on block', async () => {
     const clock = { t: Date.now() }, { a, b, conv } = friends(clock);

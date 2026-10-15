@@ -1,0 +1,18 @@
+// Final TEST package: its own application id (installs beside existing CLAN apps, never replaces their data),
+// release-mode JS bundle, disposable debug signing — never the protected beta upload identity.
+gradle.beforeProject { project ->
+  project.plugins.withId('com.android.application') {
+    project.androidComponents.finalizeDsl { android ->
+      def sha = System.getenv('CLAN_SOURCE_SHA')
+      if (sha == null || !(sha ==~ /[0-9a-f]{40}/)) throw new GradleException('Set the frozen CLAN_SOURCE_SHA')
+      android.buildTypes.getByName('qa').applicationIdSuffix = '.finalqa'
+      android.buildTypes.getByName('qa').resValue 'string', 'app_name', 'CLAN QA'
+      android.defaultConfig.versionName = '0.2.0-final-test'
+      android.defaultConfig.versionCode = 4
+      def assets = new File(project.buildDir, 'generated/final-qa-assets')
+      assets.mkdirs()
+      new File(assets, 'clan-build.json').text = groovy.json.JsonOutput.toJson([sourceCommit:sha, status:'TEST', applicationId:'app.classroomlan.student.finalqa'])
+      android.sourceSets.main.assets.srcDir assets
+    }
+  }
+}

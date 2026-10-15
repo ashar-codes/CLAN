@@ -52,4 +52,6 @@ const withGroup = (config) => withEntitlementsPlist(config, (c) => {
   return c;
 });
 
-module.exports = (config) => withGroup(withTarget(withFiles(config)));
+// An empty CLANShareGroup (a free/personal Apple team, which cannot use App Groups) builds without the extension;
+// sharing into CLAN then uses the in-app pickers.
+module.exports = (config) => config.ios?.infoPlist?.CLANShareGroup === '' ? config : withGroup(withTarget(withFiles(config)));

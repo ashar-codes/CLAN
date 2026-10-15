@@ -1,1 +1,1 @@
-{"platforms":["android"],"android":{"modules":["expo.modules.fileactions.FileActionsModule"]}}
+{"platforms":["apple","android"],"apple":{"modules":["FileActionsModule"]},"android":{"modules":["expo.modules.fileactions.FileActionsModule"]}}

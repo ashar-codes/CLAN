@@ -6,6 +6,7 @@ import { Chats } from './world/people/Chats.tsx';
 import { Friends } from './world/people/Friends.tsx';
 import { CallProvider } from './world/people/Call.tsx';
 import { Shell } from './Shell.tsx';
+import { Onboarding } from './Onboarding.tsx';
 import { AIHost } from './world/ai/ctx.tsx';
 import { RecorderHost } from './world/tape/recorder.tsx';
 import type { StartedClassroom } from '../shared.ts';
@@ -22,7 +23,10 @@ export function App() {
   useEffect(() => api.people.onOpen((id) => { if (screen.s !== 'home') setNotice({ id }); }), [screen.s]);
   const [caps, setCaps] = useState<Capabilities | null>(null);
   useEffect(() => { api.capabilities().then(setCaps); }, []);
-  if (!caps) return null;
+  const [named, setNamed] = useState<boolean | null>(null);
+  useEffect(() => { void api.getProfile().then((p) => setNamed(!!(p.fullName?.trim() && p.deviceName?.trim()))); }, []);
+  if (!caps || named === null) return null;
+  if (!named) return <Onboarding onDone={() => setNamed(true)} />;
 
   const ks = caps.keystore;
   const keyBanner = ks.insecureDev

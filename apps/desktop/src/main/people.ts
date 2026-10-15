@@ -59,7 +59,8 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   c.bus.subscribe('desktop.people.alert', PeopleAlert, (e) => {
     const x = e.payload, w = BrowserWindow.getAllWindows()[0], prefs = c.notifications.prefs({ kind: 'user', userId: c.me });
     if (!prefs.direct || x.kind.startsWith('file.') && !prefs.files || w?.isFocused() || !Notification.isSupported()) return;
-    const n = new Notification({ title: 'CLAN', body: x.kind === 'friend.nearby' ? 'A verified friend is reachable nearby.' : x.kind === 'call.attempt' ? 'Call attempt received after reconnecting (did not ring).' : x.kind === 'call.missed' ? 'Missed CLAN call.' : x.kind === 'call.invite' ? 'Incoming call. Open CLAN to answer.' : x.kind === 'friend.request' ? 'New friend request.' : x.kind === 'file.offer' ? 'New file or voice note offer.' : x.kind === 'file.done' ? 'Transfer complete.' : 'New message or chat invitation.' });
+    const who = prefs.previews ? p.contact(x.key)?.name : null;
+    const n = new Notification({ title: who ?? 'CLAN', body: x.kind === 'friend.nearby' ? 'A verified friend is reachable nearby.' : x.kind === 'call.attempt' ? 'Call attempt received after reconnecting (did not ring).' : x.kind === 'call.missed' ? 'Missed CLAN call.' : x.kind === 'call.invite' ? 'Incoming call. Open CLAN to answer.' : x.kind === 'friend.request' ? 'New friend request.' : x.kind === 'file.offer' ? 'New file or voice note offer.' : x.kind === 'file.done' ? 'Transfer complete.' : 'New message or chat invitation.' });
     n.on('click', () => { const win = BrowserWindow.getAllWindows()[0]; if (win) { win.show(); win.focus(); win.webContents.send('people:open', x.convId ?? null); } }); n.show();
   });
   // this computer is one of the account's devices (after Me › My Devices linking); friends hear about the others
@@ -131,6 +132,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     }
     void rt.tick();
   });
+  handle('people:autoDownload', (raw) => p.autoDownload(raw === undefined ? undefined : raw === null ? null : z.object({ on: z.boolean(), maxBytes: z.number().int(), kinds: z.array(z.enum(['image', 'video', 'audio', 'document'])) }).parse(raw)));
   handle('people:pushRelay', (url) => { const r = url === undefined ? p.pushRelay() : p.pushRelay(z.string().max(200).nullable().parse(url)); void push.tick(); return { relay: r, status: push.status }; });
   handle('people:wakeCall', (k, callId, kind) => { const ok = p.wakeForCall(Key.parse(k), Id.parse(callId), z.enum(['call', 'call.cancel']).parse(kind ?? 'call')); if (ok) void push.tick(); return ok; });
   handle('people:retry', (msgId) => { p.retryMessage(Id.parse(msgId)); void rt.tick(); });

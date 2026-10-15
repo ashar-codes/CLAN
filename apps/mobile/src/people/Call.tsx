@@ -12,6 +12,7 @@ import { getRandomBytes } from 'expo-crypto';
 import { phoneClan } from '../core/clan';
 import { Btn, Mate, Muted, Row, useC } from '../ui/kit';
 import { onPeopleLive, phonePeople } from './native';
+import { preAnswer, pushTick } from './push';
 
 type Ctx = { call(peerKey: string, peerName: string, video?: boolean): void; active: boolean };
 const CallCtx = createContext<Ctx>({ call: () => {}, active: false });
@@ -40,6 +41,7 @@ export function PhoneCallProvider({ children }: { children: ReactNode }) {
     camera: async () => { if(AppState.currentState!=='active')throw Error('Return to CLAN before enabling the camera.');if (Platform.OS === 'android' && await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA) !== 'granted') throw new Error('Camera permission denied.');if(AppState.currentState!=='active')throw Error('Return to CLAN before enabling the camera.');const stream = await mediaDevices.getUserMedia({audio:false,video:{facingMode:'user'}}); cameraTrack.current=stream.getVideoTracks()[0]; return stream as never; },
     onLocal: s => setLocal(s ? (s as unknown as {toURL():string}).toURL() : null),
     attempt: async (key, id) => { phoneClan().people.queueCallAttempt(key, id); void (await phonePeople()).tick(); },
+    wake: async (key, id, kind) => { const ok = phoneClan().people.wakeForCall(key, id, kind); if (ok) pushTick(); return ok; },
     signal: async (key, body) => { const p = phoneClan().people; return (await phonePeople()).sendLive(p.callSignal(key, body as never)); },
     log: (o) => { try { phoneClan().people.logCall(o); } catch { /* not fatal */ } },
     nameOf: async (k) => phoneClan().people.contact(k)?.name ?? null,
@@ -54,6 +56,8 @@ export function PhoneCallProvider({ children }: { children: ReactNode }) {
   useEffect(() => onPeopleLive((env) => {
     const b = env.body as unknown as Record<string, unknown> & { kind: string; callId: string };
     e.onSignal(env.from, b);
+    // answered/declined already on the system ringing screen (wake-up): the signed invite is the real call
+    if (b.kind === 'call.invite') { const pre = preAnswer(b.callId); if (pre === 'answer') void e.accept(); else if (pre === 'decline') e.hangup(); }
 
   }), [e]);
   const [, tick] = useState(0);

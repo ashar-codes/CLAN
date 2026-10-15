@@ -30,11 +30,13 @@ export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
         <div className="row between"><b>You are {vis === 'everyone' ? 'visible to everyone nearby' : vis === 'friends' ? 'visible to friends only' : 'invisible'}</b>
           {vis === 'everyone' && me?.profile.everyoneUntil && <span className="muted">until {new Date(me.profile.everyoneUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}</div>
         <div className="row" role="radiogroup" aria-label="Who can find you">
-          <button aria-pressed={vis === 'everyone'} onClick={() => act(() => api.people.visibility('everyone', 3_600_000).then(reloadMe), 'Visible to everyone on this network for 1 hour.')}>Everyone nearby (1 h)</button>
+          <button aria-pressed={vis === 'everyone'} onClick={() => act(() => api.people.visibility('everyone').then(reloadMe), 'Visible to everyone on this network until you change it.')}>Everyone nearby</button>
+          {vis === 'everyone' && !me?.profile.everyoneUntil && <button className="small" onClick={() => act(() => api.people.visibility('everyone', 3_600_000).then(reloadMe), 'Visible to everyone for the next hour, then Friends Only.')}>Only for 1 hour</button>}
           <button aria-pressed={vis === 'friends'} onClick={() => act(() => api.people.visibility('friends').then(reloadMe), 'Only friends can find you.')}>Friends only</button>
           <button aria-pressed={vis === 'invisible'} onClick={() => act(() => api.people.visibility('invisible').then(reloadMe), 'You are invisible. Discovery is off.')}>Invisible</button>
         </div>
-        <p className="muted small-text">Everyone Nearby shows only the fields you mark “everyone”, on the local network (and an explicitly configured internal directory), and switches back to Friends Only by itself. Avoid it on public or shared networks. Your location is never shown.</p>
+        <AutoDownload />
+        <p className="muted small-text">Everyone Nearby shows only the fields you mark “everyone”, on the local network (and an explicitly configured internal directory), until you change it (or for one hour if you choose that). Blocked people never see you. Your location is never shown.</p>
       </div>
       <button aria-pressed={alerts} onClick={() => void api.people.nearbyAlerts(!alerts).then(setAlerts)}>Friend nearby alerts: {alerts ? 'On' : 'Off'}</button>
       {msg && <p role="status">{msg}</p>}{err && <p role="alert" className="error">{err}</p>}
@@ -43,9 +45,9 @@ export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
       <p className="muted small-text">Positions are a visual layout, not physical distances. Select a person to view their verified profile and connection actions.</p>
       <div role="list" aria-label="People nearby" className="people-list">
         {!list?.length && <p className="muted" role="status">Nobody nearby is visible to you right now. People appear here only while they choose to be visible.</p>}
-        {list?.map((n) => <NearbyCard key={n.key} n={n} onChat={onChat} onError={setErr} />)}
+        {list?.filter((n) => n.key !== cc?.key).map((n) => <NearbyCard key={n.key} n={n} onChat={onChat} onError={setErr} />)}
       </div>
-      {cc && !list?.some((n) => n.key === cc.key) && <div role="list" aria-label="Connected by code" className="people-list">
+      {cc && <div role="list" aria-label="Connected by code" className="people-list">
         <NearbyCard n={{ key: cc.key, name: cc.name, profile: cc.profile ?? { key: cc.key, name: cc.name, avatar: null, updatedAt: 0 }, endpoint: '', relation: cc.relation, seenAt: cc.lastSeen, verified: cc.verified }} onChat={onChat} onError={setErr} /></div>}
       <QrCard onConnected={(c) => { setConnected(c.key); setMsg(`Connected to ${c.name}. Their identity matched the code.`); }} onError={setErr} onOptical={() => setOptical(true)} />
       {optical ? <OpticalTransfer onClose={() => setOptical(false)} /> : <button onClick={() => setOptical(true)}>QR file transfer (no network needed)…</button>}
@@ -59,7 +61,7 @@ function NearbyCard({ n, onChat, onError }: { n: NearbyPersonView; onChat(id: st
   return (
     <article id={`person-${n.key}`} role="listitem" className="card person" aria-label={n.name}>
       <div className="row"><Avatar k={n.key} name={n.name} /><div><b>{n.name}</b>{n.verified && <span className="chip" title="Identity checked by QR code"> ✓ verified</span>}
-        <br /><small className="muted">{[p.university, p.department, p.course].filter(Boolean).join(' · ') || 'CLAN user'}{REL[rel] ? ` · ${REL[rel]}` : ''}</small></div></div>
+        <br /><small className="muted">{[p.university, p.department, p.course].filter(Boolean).join(' · ') || 'On this network'}{REL[rel] ? ` · ${REL[rel]}` : ''}</small></div></div>
       <p className="muted small-text">{n.network ?? 'Nearby'} · {n.connection === 'connected' ? 'Connected (authenticated session)' : n.connection === 'reconnecting' ? 'Reconnecting' : n.connection === 'offline' || n.connection === 'failed' ? 'Offline — queued items remain pending' : 'Nearby — no persistent connection confirmed'}</p>
       {p.bio && <p className="small-text">{p.bio}</p>}
       {p.interests?.length ? <p className="muted small-text">Interests: {p.interests.join(', ')}</p> : null}
@@ -118,4 +120,16 @@ function QrCard({ onConnected, onError, onOptical }: { onConnected(c: PeopleCont
       <div className="row"><input aria-label="Paste a CLAN code" placeholder="clan://p/…" value={text} onChange={(e) => setText(e.target.value)} /><button disabled={!text.trim()} onClick={() => connect(text.trim())}>Connect</button></div>
     </div>
   );
+}
+
+function AutoDownload() {
+  const [a, reload] = usePeople(() => api.people.autoDownload());
+  if (!a) return null;
+  const set = (x: Partial<typeof a>) => void api.people.autoDownload({ ...a, ...x }).then(reload);
+  return <details><summary>Automatic downloads from friends: {a.on ? 'On' : 'Off'}</summary>
+    <label className="row"><input type="checkbox" checked={a.on} onChange={(e) => set({ on: e.target.checked })} /> Download files from friends automatically</label>
+    <div className="row">{(['image', 'video', 'audio', 'document'] as const).map((k) => <label key={k} className="row"><input type="checkbox" checked={a.kinds.includes(k)} disabled={!a.on} onChange={() => set({ kinds: a.kinds.includes(k) ? a.kinds.filter((x) => x !== k) : [...a.kinds, k] })} /> {k}s</label>)}</div>
+    <label>Largest file <select value={a.maxBytes} disabled={!a.on} onChange={(e) => set({ maxBytes: Number(e.target.value) })}>{[10, 25, 100].map((n) => <option key={n} value={n * 1024 * 1024}>{n} MB</option>)}</select></label>
+    <p className="muted small-text">Friends only, verified by SHA-256, never opened automatically. Larger files, other people's files and anything that could run code always ask first.</p>
+  </details>;
 }

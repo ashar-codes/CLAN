@@ -122,7 +122,8 @@ function registerIpc() {
   ipcMain.handle('profile:get', () => loadProfile());
   ipcMain.handle('profile:save', (_e, p: unknown) => {
     // The public key is owned by this process (from the keystore), never by the renderer.
-    const parsed = StudentProfile.parse({ ...(p as object), devicePublicKey: trust.device().publicKey });
+    // The student/ID number is optional until joining a CLAN asks for it.
+    const parsed = StudentProfile.extend({ rollNo: z.string().trim().max(40) }).parse({ ...(p as object), devicePublicKey: trust.device().publicKey });
     const previous = loadProfile();
     let legacy: unknown;
     try { legacy = JSON.parse(readFileSync(profilePath(), 'utf8')).deviceId ?? JSON.parse(readFileSync(profilePath(), 'utf8')).legacyDeviceId; } catch {}

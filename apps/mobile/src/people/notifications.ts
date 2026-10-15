@@ -2,6 +2,8 @@ import { Platform, AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { PeopleAlert } from '@clan/core';
 import { phoneClan, me } from '../core/clan';
+import { firstSighting } from './push';
+import { ClanPush } from '../../modules/clan-push';
 let initialized = false;
 let viewing: string | null = null;
 let pending: string | null = null;
@@ -9,6 +11,7 @@ export const takePeopleChat = () => { const id = pending; pending = null; return
 const opens = new Set<(id: string | null) => void>();
 export const onPeopleNotification = (cb: (id: string | null) => void) => { opens.add(cb); return () => { opens.delete(cb); }; };
 export const setPeopleViewing = (id: string | null) => { viewing = id; };
+export const openPeopleChat = (id: string | null) => { pending = id; for (const cb of opens) cb(id); };
 export async function allowPeopleNotifications() {
   if (Platform.OS === 'android') await Notifications.setNotificationChannelAsync('clan-people', { name: 'CLAN messages and calls', importance: Notifications.AndroidImportance.HIGH, sound: 'default', lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE });
   return (await Notifications.requestPermissionsAsync()).granted;
@@ -26,8 +29,11 @@ export function initializePeopleNotifications() {
   phoneClan().bus.subscribe('mobile.people.alert', PeopleAlert, (e) => {
     const x = e.payload; const prefs = phoneClan().notifications.prefs(me());
     if (x.kind.startsWith('file.') && !prefs.files) return;
+    if (x.kind === 'call.invite' && x.ref) ClanPush?.cancelCall(x.ref); // the in-app call screen takes over from the system ringer
+    if (!firstSighting(x.kind === 'msg.text' ? 'msg' : x.kind === 'file.offer' ? 'file' : x.kind === 'call.invite' ? 'call' : x.kind === 'call.attempt' ? 'missed' : x.kind, x.ref)) return; // already shown from a wake-up
     const title = x.kind === 'friend.nearby' ? 'Verified CLAN friend is reachable nearby' : x.kind === 'call.attempt' ? 'Call attempt received after reconnecting (did not ring)' : x.kind === 'call.missed' ? 'Missed CLAN call' : x.kind === 'call.invite' ? 'Incoming CLAN call' : x.kind === 'friend.request' ? 'CLAN friend request' : x.kind === 'file.offer' ? 'CLAN file or voice note' : x.kind === 'file.done' ? 'CLAN transfer complete' : x.kind === 'chat.invite' ? 'CLAN chat invitation' : 'New CLAN message';
-    void peopleNotice(x.id, title, x.convId).catch(() => {});
+    const who = (() => { try { return phoneClan().people.contact(x.key)?.name; } catch { return undefined; } })();
+    void peopleNotice(x.id, who ? `${who} · ${title.replace(/^New CLAN message$/, 'New message')}` : title, x.convId).catch(() => {});
   });
   const opened = (r: Notifications.NotificationResponse | null) => { const data = r?.notification.request.content.data; if (!data?.people) return; const id = data.convId; pending = typeof id === 'string' ? id : null; for (const cb of opens) cb(pending); };
   Notifications.addNotificationResponseReceivedListener(opened);

@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'expo.modules.clanpush'
+version = '0.1.0'
+android {
+  defaultConfig { versionCode 1; versionName '0.1.0' }
+  namespace 'expo.modules.clanpush'
+}
+dependencies {
+  // Same artifact and version expo-notifications already ships; inert unless the build has a Firebase configuration.
+  implementation 'com.google.firebase:firebase-messaging:25.0.1'
+  implementation 'androidx.core:core:1.13.1'
+}
