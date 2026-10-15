@@ -10,6 +10,8 @@ export type DiscoveryState = {
   clanBrowsing: boolean; servicesFound: number; servicesResolved: number; probesOk: number; probesFailed: number;
   clansFound: number; lastPeerAt: number | null; lastFailure: DiscoveryFailure | null; lastFailureAt: number | null;
   permissions: string[]; restarts: number; lastRestartAt: number | null;
+  /** Android Keep CLAN Available: service running and the last pulse the app actually processed (not just a notification). */
+  backgroundService: boolean; lastPulseAt: number | null;
 };
 
 const HINT: Record<DiscoveryFailure, string> = {
@@ -27,7 +29,7 @@ const HINT: Record<DiscoveryFailure, string> = {
 
 export class DiscoveryDiagnostics {
   state: DiscoveryState = { network: false, addresses: [], listener: null, advertising: false, browsing: false, clanBrowsing: false, servicesFound: 0, servicesResolved: 0,
-    probesOk: 0, probesFailed: 0, clansFound: 0, lastPeerAt: null, lastFailure: null, lastFailureAt: null, permissions: [], restarts: 0, lastRestartAt: null };
+    probesOk: 0, probesFailed: 0, clansFound: 0, lastPeerAt: null, lastFailure: null, lastFailureAt: null, permissions: [], restarts: 0, lastRestartAt: null, backgroundService: false, lastPulseAt: null };
   private events: { at: number; what: string }[] = [];
   private subs = new Set<() => void>();
   private readonly now: () => number;
@@ -44,6 +46,8 @@ export class DiscoveryDiagnostics {
   }
   count(k: 'servicesFound' | 'servicesResolved' | 'probesOk' | 'probesFailed' | 'clansFound', by = 1) { this.state[k] += by; if (k === 'probesOk') this.state.lastPeerAt = this.now(); this.changed(); }
   fail(f: DiscoveryFailure, detail = '') { this.state.lastFailure = f; this.state.lastFailureAt = this.now(); this.event(`failure ${f}${detail ? `: ${clean(detail)}` : ''}`); this.changed(); }
+  /** A background pulse was processed (no event logged: pulses are frequent). */
+  pulse(running: boolean) { this.state.backgroundService = running; this.state.lastPulseAt = this.now(); }
   restarted(reason: string) { this.state.restarts++; this.state.lastRestartAt = this.now(); this.event(`restart (${clean(reason)})`); this.changed(); }
   event(what: string) { this.events.push({ at: this.now(), what: clean(what) }); if (this.events.length > 200) this.events.splice(0, this.events.length - 200); }
   hint() { return this.state.lastFailure ? HINT[this.state.lastFailure] : null; }
@@ -57,7 +61,7 @@ export class DiscoveryDiagnostics {
       `listener: ${s.listener ? `ready on port ${s.listener}` : 'not ready'}`, `advertising: ${s.advertising}`, `people discovery: ${s.browsing}`, `CLAN discovery: ${s.clanBrowsing}`,
       `services found/resolved: ${s.servicesFound}/${s.servicesResolved}`, `probes ok/failed: ${s.probesOk}/${s.probesFailed}`, `CLANs found: ${s.clansFound}`,
       `last authenticated peer: ${t(s.lastPeerAt)}`, `last failure: ${s.lastFailure ?? 'none'} at ${t(s.lastFailureAt)}`, `missing permissions: ${s.permissions.join(', ') || 'none'}`,
-      `restarts: ${s.restarts} (last ${t(s.lastRestartAt)})`, `hint: ${this.hint() ?? '—'}`, '', 'recent events:',
+      `restarts: ${s.restarts} (last ${t(s.lastRestartAt)})`, `background service: ${s.backgroundService ? 'running' : 'off'} (last processed pulse ${t(s.lastPulseAt)})`, `hint: ${this.hint() ?? '—'}`, '', 'recent events:',
       ...this.events.map((e) => `${new Date(e.at).toISOString()}  ${e.what}`),
     ].join('\n');
   }

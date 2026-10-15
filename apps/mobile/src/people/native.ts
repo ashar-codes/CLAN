@@ -15,7 +15,7 @@ import { bump } from '../ui/kit';
 import { startPhonePeople, type PhoneEnv, type PhonePeople } from './runtime';
 import { PeerLink } from '../../modules/peer-link';
 import { initializePeopleNotifications } from './notifications';
-import { nearby } from './nearby';
+import { discoveryDiagnostics, nearby } from './nearby';
 import { pushTick, startPush, syncWakeKeys, takeWakeEvents } from './push';
 import { openPeopleChat } from './notifications';
 import type { PeerEnvelope } from '@classroom/protocol';
@@ -57,6 +57,7 @@ const env: PhoneEnv = {
 let devicesTimer: ReturnType<typeof setInterval> | null = null;
 if (Platform.OS === 'android') PeerLink?.addListener('availabilityTick', (e) => {
   if (!nearby.keepInBackground()) return;
+  discoveryDiagnostics.pulse(true);
   if (e.networkChanged) { rt?.reconnect(); nearby.networkChanged(true); }
   void refreshDirectory(); void rt?.tick(); void nearby.cm?.tick(); nearby.advertise();
 });

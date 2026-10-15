@@ -168,7 +168,14 @@ class Nearby {
     this.networkChanged();
   }
   /** Native network changes invalidate DNS-SD hints, not authenticated identities or durable queues. */
+  private netTimer: ReturnType<typeof setTimeout> | null = null; private netInvalidate = false;
+  /** Several sources report one handover (service pulse, network callback, foreground): one restart per burst. */
   networkChanged(invalidateSessions = false) {
+    this.netInvalidate ||= invalidateSessions;
+    if (this.netTimer) return;
+    this.netTimer = setTimeout(() => { this.netTimer = null; const inv = this.netInvalidate; this.netInvalidate = false; this.networkChangedNow(inv); }, 1500);
+  }
+  private networkChangedNow(invalidateSessions: boolean) {
     this.noteNetwork();
     if (!PeerLink || !this.running) return;
     this.generation++; this.directoryGeneration++; this.probed.clear(); this.entries.clear();

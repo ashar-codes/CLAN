@@ -335,6 +335,7 @@ function DiagnosticsCard({ children }: { children: ReactNode }) {
     <Muted small>{yes(d.browsing)} Looking for people · heard {d.servicesFound} · resolved {d.servicesResolved} · reached {d.probesOk} · failed {d.probesFailed}</Muted>
     <Muted small>{yes(d.clanBrowsing)} Looking for CLANs · {d.clansFound} found</Muted>
     <Muted small>Last authenticated person: {d.lastPeerAt ? new Date(d.lastPeerAt).toLocaleTimeString() : '—'} · restarts {d.restarts}</Muted>
+    {Platform.OS === 'android' && <Muted small>{yes(d.backgroundService && !!d.lastPulseAt && Date.now() - d.lastPulseAt < 30_000)} Background availability {d.lastPulseAt ? `· last processed ${Math.round((Date.now() - d.lastPulseAt) / 1000)} s ago` : '· not running'}</Muted>}
     {discoveryDiagnostics.hint() && <Text accessibilityLiveRegion="polite" style={{ color: c.text }}>{d.lastFailure}: {discoveryDiagnostics.hint()}</Text>}
     {children}
     <Row><Btn small label="Refresh discovery" onPress={() => { nearby.restartDiscovery(); setMsg('Discovery restarted.'); bump(); }} /><Btn small label="Share diagnostics" onPress={() => void share().catch((e) => setMsg((e as Error).message))} /></Row>
