@@ -77,8 +77,21 @@ export const PeerBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('chat.accept'), mode: z.enum(CHAT_MODES), ttlMs: z.number().int().nullable() }).strict(),
   z.object({ kind: z.literal('chat.decline') }).strict(),
   z.object({ kind: z.literal('chat.end') }).strict(),
-  z.object({ kind: z.literal('msg.text'), msgId: Id, text: z.string().min(1).max(8000) }).strict(),
+  // `replyTo` needs a recipient on this release (older devices refuse it; the sender then shows Failed).
+  z.object({ kind: z.literal('msg.text'), msgId: Id, text: z.string().min(1).max(8000), replyTo: Id.optional() }).strict(),
   z.object({ kind: z.literal('msg.read'), upTo: z.number().int().nonnegative() }).strict(),
+  /** Author only, within PEOPLE_EDIT_WINDOW_MS of the original; the envelope time orders competing edits. */
+  z.object({ kind: z.literal('msg.edit'), msgId: Id, text: z.string().min(1).max(8000) }).strict(),
+  /** Author only, within PEOPLE_DELETE_WINDOW_MS: a durable tombstone on the recipient (never resurrected). */
+  z.object({ kind: z.literal('msg.delete'), msgId: Id }).strict(),
+  /** Either participant; null removes their reaction. */
+  z.object({ kind: z.literal('msg.react'), msgId: Id, emoji: z.string().min(1).max(16).nullable() }).strict(),
+  /**
+   * Friend → friend: how to wake this person's phone through an internet push relay (or null to stop). `cap`
+   * authorises the relay call (the relay keeps only its hash); `mac` keys each wake-up so neither the relay nor the
+   * push provider can forge one. Neither contains message content.
+   */
+  z.object({ kind: z.literal('push.cap'), grant: z.object({ relay: z.string().url().max(200), capId: z.string().regex(/^[A-Za-z0-9_-]{22}$/), cap: Key, mac: Key }).strict().nullable() }).strict(),
   z.object({ kind: z.literal('file.offer'), msgId: Id, file: FileMeta }).strict(),
   z.object({ kind: z.literal('file.accept'), transferId: Id }).strict(),
   z.object({ kind: z.literal('file.decline'), transferId: Id }).strict(),
@@ -98,6 +111,8 @@ export type PeerKind = PeerBody['kind'];
 /** Signaling for calls is live-only: never queued, refused when stale. */
 export const LIVE_KINDS: ReadonlySet<PeerKind> = new Set(['call.invite', 'call.answer', 'call.ice', 'call.reject', 'call.end']);
 export const LIVE_MAX_AGE_MS = 60_000;
+/** Product windows (docs/FINAL_CHAT_FILE_SHARING.md); the recipient enforces them too. */
+export const PEOPLE_EDIT_WINDOW_MS = 60 * 60_000, PEOPLE_DELETE_WINDOW_MS = 48 * 3_600_000;
 
 export const PeerEnvelopeBody = z.object({ type: z.literal('clan-peer-msg'), v: z.literal(1), id: Id, from: Key, to: Key, at: z.number().int().nonnegative(), body: PeerBody }).strict();
 export const PeerEnvelope = PeerEnvelopeBody.extend({ sig: Sig }).strict();

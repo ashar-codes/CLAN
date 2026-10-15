@@ -32,6 +32,8 @@ export type CallDeps = {
   onLocal?(stream: Stream | null): void;
   signal(peerKey: string, body: Record<string, unknown>): Promise<boolean>;
   attempt?(peerKey: string, callId: string): Promise<void>;
+  /** Internet-assisted wake-up of their phone (true when they gave us a capability); 'call.cancel' stops its ringing. */
+  wake?(peerKey: string, callId: string, kind: 'call' | 'call.cancel'): Promise<boolean>;
   log(o: { id: string; peerKey: string; direction: 'in' | 'out'; connectedAt?: number | null; endedAt?: number | null; outcome?: string }): void;
   nameOf(key: string): Promise<string | null>;
   onRemote?(stream: Stream | null): void;
@@ -49,6 +51,7 @@ export class CallEngine {
   private videoSender: { replaceTrack(track: Track | null): Promise<void> } | null = null;
   private cameraBusy: string | null = null; private cameraEpoch = 0;
   private offer: string | null = null;
+  private woken: string | null = null; // call id whose callee's phone we rang through the relay
   private timers: ReturnType<typeof setTimeout>[] = [];
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private subs = new Set<(c: CallView | null) => void>();
@@ -76,6 +79,10 @@ export class CallEngine {
   /** End locally, tell the other side when asked, record it. */
   private finish(note: string, outcome: string, tell?: 'call.end' | 'call.reject', reason?: string) {
     const c = this.cur; if (!c || c.phase === 'ended') return;
+    if (this.woken === c.id) {
+      this.woken = null;
+      if (!c.connectedAt) { void this.d.wake?.(c.peerKey, c.id, 'call.cancel').catch(() => false); if (outcome === 'no answer') void this.d.attempt?.(c.peerKey, c.id).catch(() => {}); }
+    }
     if (tell) void this.d.signal(c.peerKey, tell === 'call.end' ? { kind: 'call.end', callId: c.id, reason: reason ?? 'hangup' } : { kind: 'call.reject', callId: c.id, reason: reason ?? 'declined' }).catch(() => {});
     this.d.log({ id: c.id, peerKey: c.peerKey, direction: c.dir, connectedAt: c.connectedAt, endedAt: Date.now(), outcome });
     this.cleanup();
@@ -148,7 +155,24 @@ export class CallEngine {
       if (this.now()?.id !== id || !this.active) return;
       this.d.log({ id, peerKey, direction: 'out' });
       const sent=await this.d.signal(peerKey, { kind: 'call.invite', callId: id, sdp: pc.localDescription!.sdp, ...(video ? {video:true} : {}) });if(this.now()?.id!==id || !this.active)return;
-      if(!sent){await this.d.attempt?.(peerKey,id);if(this.now()?.id===id && this.active)this.finish(`${peerName} is not reachable. A call attempt will arrive when they reconnect.`, 'unreachable');return;}
+      if(!sent){
+        // Not reachable directly. With a wake-up capability their phone rings now and we keep inviting until they
+        // connect or the ring window ends; otherwise only a missed-call record is delivered later.
+        if(await this.d.wake?.(peerKey,id,'call').catch(()=>false)){
+          this.woken=id; this.set({ note: 'Ringing their phone…' });
+          const until=Date.now()+RING_MS, invite={ kind: 'call.invite', callId: id, sdp: pc.localDescription!.sdp, ...(video ? {video:true} : {}) };
+          const retry=async():Promise<void>=>{
+            if(this.cur?.id!==id || this.cur.phase!=='calling')return;
+            if(Date.now()>=until)return this.finish('No answer.', 'no answer');
+            if(await this.d.signal(peerKey,invite).catch(()=>false)){ if(this.cur?.id===id){ this.set({ note: 'Ringing…' }); this.after(Math.max(1000,until-Date.now()),()=>{ if (this.cur?.id === id && this.cur.phase === 'calling') this.finish('No answer.', 'no answer', 'call.end', 'timeout'); }); } return; }
+            this.after(3000,()=>void retry());
+          };
+          this.after(3000,()=>void retry());
+          return;
+        }
+        await this.d.attempt?.(peerKey,id);
+        if(this.now()?.id===id && this.active)this.finish(`${peerName} is not reachable. A call attempt will arrive when they reconnect.`, 'unreachable');return;
+      }
       if(this.now()?.id!==id || !this.active)return;
       invited = true;
       this.set({ note: 'Ringing…' });

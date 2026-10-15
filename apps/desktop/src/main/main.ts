@@ -123,11 +123,12 @@ function registerIpc() {
   ipcMain.handle('profile:save', (_e, p: unknown) => {
     // The public key is owned by this process (from the keystore), never by the renderer.
     const parsed = StudentProfile.parse({ ...(p as object), devicePublicKey: trust.device().publicKey });
+    const previous = loadProfile();
     let legacy: unknown;
     try { legacy = JSON.parse(readFileSync(profilePath(), 'utf8')).deviceId ?? JSON.parse(readFileSync(profilePath(), 'utf8')).legacyDeviceId; } catch {}
     writeFileSync(profilePath(), JSON.stringify({ fullName: parsed.fullName, rollNo: parsed.rollNo, deviceName: parsed.deviceName, ...(legacy ? { legacyDeviceId: legacy } : {}) }));
     // the people profile starts from the student's name until they choose a different one there
-    try { if (clan.people.myProfile().name === 'CLAN user' && parsed.fullName.trim()) clan.people.updateProfile({ name: parsed.fullName.trim().slice(0, 80) }); } catch (e) { logError('people', e); }
+    try { clan.people.adoptIdentity(parsed.fullName, parsed.deviceName, previous.fullName); } catch (e) { logError('people', e); }
     return loadProfile();
   });
 
@@ -493,7 +494,7 @@ app.whenReady().then(async () => {
   const syncReady = registerSync(clan, keystore, () => loadProfile().deviceName);
   syncReady.then((sync) => app.on('will-quit', () => void sync.close()), (e) => logError('sync', e));
   // Nearby People, friends, private chats, direct files/voice notes and call signaling (Phase 14.3 A+B).
-  await registerPeople(clan, { keystore, trust, dataDir: app.getPath('userData'), displayName: () => loadProfile().fullName })
+  await registerPeople(clan, { keystore, trust, dataDir: app.getPath('userData'), displayName: () => loadProfile().fullName, deviceName: () => loadProfile().deviceName })
     .then((pp) => app.on('will-quit', () => void pp.close()), (e) => logError('people', e));
   registerHosting(clan, { sync: syncReady, liveClanId: () => (server && !server.classroom.info().ended ? server.classroom.clan.id ?? null : null) });
   // Automatic backups: a consistent snapshot shortly after start and daily, newest three kept (userData/backups).

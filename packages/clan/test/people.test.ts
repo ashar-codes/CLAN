@@ -14,7 +14,7 @@ function person(name: string, clock: { t: number }) {
   const d = setup({ now: () => clock.t });
   const signer = nodeSigner(newEd25519().privatePkcs8);
   d.app.people.setSigner(signer);
-  d.app.people.updateProfile({ name });
+  d.app.people.updateProfile({ name }); d.app.people.setVisibility('friends'); // these tests exercise Friends Only (new people default to Everyone: people-final.test.ts)
   return { ...d, p: d.app.people, signer, key: signer.publicKey };
 }
 type P = ReturnType<typeof person>;
@@ -34,7 +34,7 @@ describe('people: profiles, visibility and friends', () => {
   it('releases profiles per visibility and field settings; persists across restart', () => {
     const clock = { t: 1_000_000 }, a = person('Aisha', clock), b = person('Bilal', clock);
     a.p.updateProfile({ university: 'NUST', bio: 'Physics', fieldVisibility: { university: 'everyone', bio: 'friends' } });
-    expect(a.p.profileFor(b.key).profile).toBeNull(); // Friends Only by default: strangers see nothing
+    expect(a.p.profileFor(b.key).profile).toBeNull(); // Friends Only: strangers see nothing
     a.p.setVisibility('everyone', 60_000);
     const seen = a.p.profileFor(b.key).profile!.profile;
     expect(seen).toMatchObject({ name: 'Aisha', university: 'NUST' });

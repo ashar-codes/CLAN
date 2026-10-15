@@ -69,7 +69,7 @@ const api: DesktopApi = {
     attempt: inv('people:attempt'),
     me: inv('people:me'), qrImage: inv('people:qrImage'), resetQr: inv('people:resetQr'), update: inv('people:update'), pickAvatar: inv('people:pickAvatar'), avatar: inv('people:avatar'),
     visibility: inv('people:visibility'), nearby: inv('people:nearby'), contacts: inv('people:contacts'), contact: inv('people:contact'), connectQr: inv('people:connectQr'), friend: inv('people:friend'),
-    conversations: inv('people:conversations'), invite: inv('people:invite'), chat: inv('people:chat'), page: inv('people:page'), send: inv('people:send'), retry: inv('people:retry'),
+    conversations: inv('people:conversations'), invite: inv('people:invite'), chat: inv('people:chat'), page: inv('people:page'), send: inv('people:send'), retry: inv('people:retry'), message: inv('people:message'), pushRelay: inv('people:pushRelay'), wakeCall: inv('people:wakeCall'),
     read: inv('people:read'), clear: inv('people:clear'), remove: inv('people:remove'),
     sendFile: (c, files) => ipcRenderer.invoke('people:sendFile', c, files ? files.slice(0, 10).map((f) => webUtils.getPathForFile(f)).filter(Boolean) : undefined),
     sendVoice: inv('people:sendVoice'), file: inv('people:file'), voiceBytes: inv('people:voiceBytes'), preview: inv('people:preview'), save: inv('people:save'), openWith: inv('people:openWith'),

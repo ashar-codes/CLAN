@@ -332,7 +332,7 @@ export type PeopleConversation = import('@clan/core').Conversation;
 export type PeopleMessage = import('@clan/core').PeopleMessage;
 export type PeopleTransfer = import('@clan/core').PeopleTransfer;
 export type NearbyPersonView = { key: string; name: string; profile: import('@classroom/protocol').ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean; network?: string; connection?: string };
-export type MyPeopleProfile = { key: string; fingerprint: string; qr: string; port: number; profile: { name: string; fields: Record<string, unknown>; fieldVisibility: Record<string, 'everyone' | 'friends' | 'nobody'>;
+export type MyPeopleProfile = { key: string; fingerprint: string; qr: string; port: number; profile: { name: string; deviceName: string | null; ready: boolean; visibilityChoice: 'everyone' | 'friends' | 'invisible'; fields: Record<string, unknown>; fieldVisibility: Record<string, 'everyone' | 'friends' | 'nobody'>;
   visibility: 'everyone' | 'friends' | 'invisible'; everyoneUntil: number | null; avatar: { sha256: string; size: number; mime: string; objectId: string } | null; updatedAt: number } };
 export type PeopleApi = {
   directory(config?: import('@classroom/protocol').DirectoryConfig | null): Promise<{ config: import('@classroom/protocol').DirectoryConfig | null; status: string }>;
@@ -346,7 +346,9 @@ export type PeopleApi = {
   friend(action: 'request' | 'accept' | 'reject' | 'cancel' | 'remove' | 'block' | 'unblock' | 'verify', key: string, note?: string): Promise<void>;
   conversations(): Promise<PeopleConversation[]>; invite(key: string, mode?: 'permanent' | 'temporary', ttlMs?: number | null): Promise<string>;
   chat(action: 'accept' | 'decline' | 'end', convId: string): Promise<void>;
-  page(convId: string, before?: number | null, limit?: number): Promise<PeopleMessage[]>; send(convId: string, text: string): Promise<PeopleMessage>; retry(msgId: string): Promise<void>;
+  page(convId: string, before?: number | null, limit?: number): Promise<PeopleMessage[]>; send(convId: string, text: string, replyTo?: string): Promise<PeopleMessage>; retry(msgId: string): Promise<void>;
+  message(action: 'edit' | 'deleteForEveryone' | 'deleteForMe' | 'react' | 'forward', msgId: string, arg?: string | null): Promise<void>;
+  pushRelay(url?: string | null): Promise<{ relay: string | null; status: string }>; wakeCall(key: string, callId: string, kind: 'call' | 'call.cancel'): Promise<boolean>;
   read(convId: string): Promise<void>; clear(convId: string): Promise<void>; remove(convId: string): Promise<void>;
   sendFile(convId: string, files?: File[]): Promise<PeopleTransfer[]>; sendVoice(convId: string, bytes: Uint8Array, mime: string, durationMs: number): Promise<PeopleTransfer>;
   file(action: 'accept' | 'decline' | 'cancel' | 'retry', transferId: string): Promise<void>; voiceBytes(transferId: string): Promise<Uint8Array>;

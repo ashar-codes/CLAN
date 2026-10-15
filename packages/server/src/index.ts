@@ -21,3 +21,4 @@ export { serverCheckpointSection, SERVER_TABLES } from './hosting-sections.ts';
 export { startPeopleServer, advertisePeople, browsePeople, type PeopleHost } from './people-server.ts';
 export { listenLinks, tcpTransport, socketLink, advertiseLinks, browseLinks, LINK_SERVICE } from './link-tcp.ts';
 export { startLanDirectory } from './lan-directory.ts';
+export { pushRelay, fcmSender, apnsSender, type PushSender, type PushTarget } from './push-relay.ts';

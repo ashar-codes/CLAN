@@ -24,7 +24,7 @@ async function computer(name: string, base?: ReturnType<typeof setup>, keys?: { 
   const tls = keys?.tls ?? await createClassroomTls(`people-${name}`, Date.now(), 365 * 86_400_000);
   const live: PeerEnvelope[] = [];
   const rt = await startPeopleRuntime({ people: d.app.people, signer, tls, dir: join(d.storageDir, 'people'), bind: '127.0.0.1', discover: false, allowLoopback: true, endpoints: (port) => [`127.0.0.1:${port}`], onLive: (e) => live.push(e), tickMs: 200 });
-  d.app.people.updateProfile({ name });
+  d.app.people.updateProfile({ name }); d.app.people.setVisibility('friends');
   stops.push(() => rt.stop());
   return { ...d, p: d.app.people, rt, signer, tls, key: signer.publicKey, live };
 }
@@ -111,7 +111,7 @@ describe('people over the network', () => {
   it('a phone (no server) authenticates on its socket, receives its queue, acknowledges, and sends through the computer', async () => {
     const pc = await computer('Desk');
     const phoneDb = setup(), phone = phoneDb.app.people, ps = nodeSigner(newEd25519().privatePkcs8);
-    phone.setSigner(ps); phone.updateProfile({ name: 'Phone person' });
+    phone.setSigner(ps); phone.updateProfile({ name: 'Phone person' }); phone.setVisibility('friends');
     const b = await hello(`127.0.0.1:${pc.rt.port}`, ps, { invite: pc.p.inviteToken() });
     const client = peerClient({ endpoint: `127.0.0.1:${pc.rt.port}`, tls: b, peerKey: b.key, signer: ps, invite: pc.p.inviteToken() });
     phone.meet({ profile: await client.profile(), endpoints: [`127.0.0.1:${pc.rt.port}`], tls: { certificate: b.certificate, spkiSha256: b.spkiSha256 } });
@@ -143,7 +143,7 @@ describe('people over the network', () => {
   it.skipIf(!lan)('automatic discovery: Everyone Nearby appears with its public profile; Friends Only hides strangers; Invisible disappears', async () => {
     const mk = async (name: string) => {
       const d = setup(), signer = nodeSigner(newEd25519().privatePkcs8), tls = await createClassroomTls(`d-${name}`, Date.now(), 1e10);
-      d.app.people.setSigner(signer); d.app.people.updateProfile({ name });
+      d.app.people.setSigner(signer); d.app.people.updateProfile({ name }); d.app.people.setVisibility('friends');
       const rt = await startPeopleRuntime({ people: d.app.people, signer, tls, dir: join(d.storageDir, 'people'), discover: true, endpoints: (port) => [`${lan}:${port}`], tickMs: 500 });
       stops.push(() => rt.stop());
       return { p: d.app.people, rt, key: signer.publicKey };
@@ -159,7 +159,7 @@ describe('people over the network', () => {
   it.skipIf(!lan)('presence: Friends Only friends find each other automatically; an advertiser never learns who looked', async () => {
     const mk = async (name: string) => {
       const d = setup(), signer = nodeSigner(newEd25519().privatePkcs8), tls = await createClassroomTls(`p-${name}`, Date.now(), 1e10);
-      d.app.people.setSigner(signer); d.app.people.updateProfile({ name });
+      d.app.people.setSigner(signer); d.app.people.updateProfile({ name }); d.app.people.setVisibility('friends');
       const rt = await startPeopleRuntime({ people: d.app.people, signer, tls, dir: join(d.storageDir, 'people'), discover: true, endpoints: (port) => [`${lan}:${port}`], tickMs: 300 });
       stops.push(() => rt.stop());
       return { p: d.app.people, rt, key: signer.publicKey };

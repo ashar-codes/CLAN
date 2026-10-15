@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { z } from 'zod';
 import {
-  b64u, personDeviceStatement, presenceTag, safetyNumber, verifyStatement, CHAT_MODES, conversationId, envelopeValid, FILE_MAX, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
+  b64u, personDeviceStatement, presenceTag, safetyNumber, verifyStatement, CHAT_MODES, conversationId, envelopeValid, FILE_MAX, PEOPLE_EDIT_WINDOW_MS as EDIT_WINDOW_MS, PEOPLE_DELETE_WINDOW_MS as DELETE_WINDOW_MS, PUSH_CALL_TTL_MS, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
   TEMP_TTLS, Visibility, VOICE_MAX, VOICE_MIME, type FileMeta, type PeerBody, type PeerSigner, type ProfileField,
 } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
@@ -68,6 +68,27 @@ export const schema: ModuleSchema = {
   `, `
     ALTER TABLE people_profile ADD COLUMN nearby_alerts INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE people_nearby_alerts (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+  `, `
+    -- Device names (display only; identity stays the key). Ours from onboarding, theirs from an authenticated session.
+    ALTER TABLE people_profile ADD COLUMN device_name TEXT;
+    ALTER TABLE people_contacts ADD COLUMN device_name TEXT;
+    -- Replies, edits, deletion tombstones, local hiding (Delete for me) and reactions.
+    ALTER TABLE people_messages ADD COLUMN reply_to TEXT;
+    ALTER TABLE people_messages ADD COLUMN edited_at INTEGER;
+    ALTER TABLE people_messages ADD COLUMN deleted_at INTEGER;
+    ALTER TABLE people_messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE people_messages ADD COLUMN reactions TEXT NOT NULL DEFAULT '{}';
+    -- Our pending edit/deletion of our own message: edit_pending | delete_pending | op_failed.
+    ALTER TABLE people_messages ADD COLUMN op_state TEXT;
+    ALTER TABLE people_outbox ADD COLUMN op_msg TEXT;
+    -- An edit or deletion that arrived before its message: applied on arrival, so a deleted message never appears.
+    CREATE TABLE people_msg_ops (msg_id TEXT PRIMARY KEY, author TEXT NOT NULL, text TEXT, edited_at INTEGER, deleted_at INTEGER, at INTEGER NOT NULL);
+    -- Internet-assisted wake-ups: the relay we registered with, capabilities we gave friends, theirs for us, and
+    -- wake-ups waiting to be sent while an envelope is still undelivered.
+    ALTER TABLE people_profile ADD COLUMN push_relay TEXT;
+    ALTER TABLE people_contacts ADD COLUMN push TEXT;
+    CREATE TABLE people_push_caps (peer_key TEXT PRIMARY KEY, cap_id TEXT NOT NULL UNIQUE, cap TEXT NOT NULL, mac TEXT NOT NULL, relay TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'new' CHECK (state IN ('new','granted','shared','revoke')), at INTEGER NOT NULL);
+    CREATE TABLE people_push_out (id TEXT PRIMARY KEY, to_key TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL, outbox_id TEXT, due_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0);
   `],
 };
 
@@ -78,17 +99,24 @@ export const PeopleAlert = defineEvent('PeopleAlert', 1, z.object({ id: z.uuid()
 
 export class PeerError extends Error { readonly code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
 export type Relation = 'none' | 'outgoing' | 'incoming' | 'friend';
-export type Contact = { key: string; name: string; profile: ProfileView | null; verified: boolean; endpoints: string[]; relation: Relation; blocked: boolean; note: string | null; lastSeen: number };
+export type Contact = { key: string; name: string; deviceName: string | null; profile: ProfileView | null; verified: boolean; endpoints: string[]; relation: Relation; blocked: boolean; note: string | null; lastSeen: number };
 export type Conversation = { id: string; peerKey: string; peerName: string; state: 'invited_out' | 'invited_in' | 'active' | 'declined' | 'ended'; mode: 'permanent' | 'temporary'; ttlMs: number | null;
   unread: number; lastAt: number | null; lastText: string | null; friend: boolean };
 export type Message = { id: string; convId: string; seq: number; author: string; mine: boolean; kind: 'text' | 'file' | 'voice' | 'call' | 'event'; text: string | null; createdAt: number;
-  state: 'queued' | 'sending' | 'delivered' | 'failed' | 'received' | 'read'; expiresAt: number | null; transfer: Transfer | null };
+  state: 'queued' | 'sending' | 'delivered' | 'failed' | 'received' | 'read'; expiresAt: number | null; transfer: Transfer | null;
+  /** Edited/deleted are the author's authenticated changes; `op` is our own change still travelling (or refused). */
+  editedAt: number | null; deleted: boolean; op: 'edit_pending' | 'delete_pending' | 'op_failed' | null;
+  replyTo: { id: string; author: string; text: string | null; kind: Message['kind'] } | null; reactions: Record<string, string>;
+  canEdit: boolean; canDeleteForEveryone: boolean };
 export type Transfer = { id: string; direction: 'in' | 'out'; name: string; mime: string; size: number; sha256: string; retention: 'temporary' | 'permanent'; voiceMs: number | null;
   state: 'offered' | 'accepted' | 'transferring' | 'complete' | 'declined' | 'cancelled' | 'failed' | 'expired'; received: number; objectId: string | null; error: string | null; expiresAt: number | null };
-export type ProfileInput = { name?: string; university?: string; department?: string; course?: string; interests?: string[]; bio?: string; fieldVisibility?: Partial<Record<ProfileField, 'everyone' | 'friends' | 'nobody'>> };
+export type ProfileInput = { name?: string; deviceName?: string; university?: string; department?: string; course?: string; interests?: string[]; bio?: string; fieldVisibility?: Partial<Record<ProfileField, 'everyone' | 'friends' | 'nobody'>> };
 
 const REPLAY_WINDOW_MS = 14 * 86_400_000;
 const NAME = z.string().trim().min(1).max(80);
+const DEVICE = z.string().trim().min(1).max(60);
+/** The name every database had before onboarding existed; never shown to others as a person. */
+const PLACEHOLDER = 'CLAN user';
 const DEFAULT_VIS: Record<ProfileField, 'everyone' | 'friends' | 'nobody'> = { university: 'friends', department: 'friends', course: 'friends', interests: 'friends', bio: 'friends' };
 /** Unsolicited (non-friend) contact limits: per sender and overall, per hour. */
 const RATE = { perSender: 6, overall: 40, windowMs: 3_600_000 };
@@ -96,7 +124,8 @@ const PENDING_REQUESTS_MAX = 50;
 
 type RelRow = { key: string; state: Relation; blocked: number; note: string | null };
 type ConvRow = { id: string; peer_key: string; state: Conversation['state']; mode: 'permanent' | 'temporary'; ttl_ms: number | null; created_at: number; updated_at: number; read_seq: number; peer_read_at: number; next_seq: number };
-type MsgRow = { id: string; conv_id: string; seq: number; author: string; kind: Message['kind']; text: string | null; transfer_id: string | null; created_at: number; received_at: number; state: 'queued' | 'delivered' | 'failed' | 'received'; expires_at: number | null };
+type MsgRow = { id: string; conv_id: string; seq: number; author: string; kind: Message['kind']; text: string | null; transfer_id: string | null; created_at: number; received_at: number; state: 'queued' | 'delivered' | 'failed' | 'received'; expires_at: number | null;
+  reply_to: string | null; edited_at: number | null; deleted_at: number | null; hidden: number; reactions: string; op_state: Message['op'] };
 type XferRow = { id: string; conv_id: string; msg_id: string; direction: 'in' | 'out'; name: string; mime: string; size: number; sha256: string; retention: 'temporary' | 'permanent'; voice_ms: number | null;
   state: Transfer['state']; received: number; object_id: string | null; ref_id: string | null; error: string | null; expires_at: number | null };
 
@@ -114,28 +143,43 @@ export class People {
   private changed(what: z.infer<typeof PeopleChanged.schema>['what'], extra: { key?: string; convId?: string } = {}) { this.bus.publish(PeopleChanged, 'people', { what, ...extra }); }
 
   // ---------------- profile & visibility ----------------
-  private profileRow(): { name: string; avatar_object: string | null; fields: string; field_visibility: string; visibility: Visibility; everyone_until: number | null; updated_at: number } {
+  private profileRow(): { name: string; device_name: string | null; avatar_object: string | null; fields: string; field_visibility: string; visibility: Visibility; everyone_until: number | null; updated_at: number } {
     type R = ReturnType<People['profileRow']>;
     const get = () => this.db.prepare('SELECT * FROM people_profile').get() as R | undefined;
     const r = get();
     if (r) return r;
-    this.db.prepare('INSERT INTO people_profile (one, name, updated_at) VALUES (1, ?, ?)').run('CLAN user', this.now());
+    // A new person: no name until onboarding sets one (nothing is advertised before), then Everyone Nearby until
+    // they choose otherwise. Existing databases keep the visibility they saved.
+    this.db.prepare("INSERT INTO people_profile (one, name, visibility, updated_at) VALUES (1, '', 'everyone', ?)").run(this.now());
     return get()!;
   }
+  /** A real name exists (onboarding done): only then is this device advertised or shown to anyone. */
+  ready() { const n = this.profileRow().name.trim(); return !!n && n !== PLACEHOLDER; }
   myProfile() {
     const r = this.profileRow();
     const fields = JSON.parse(r.fields) as Partial<Record<ProfileField, unknown>>, vis = { ...DEFAULT_VIS, ...JSON.parse(r.field_visibility) } as Record<ProfileField, 'everyone' | 'friends' | 'nobody'>;
     const avatar = r.avatar_object ? this.store.object(r.avatar_object) : null;
-    return { name: r.name, fields, fieldVisibility: vis, visibility: this.visibility(), everyoneUntil: r.everyone_until, avatar: avatar ? { sha256: avatar.sha256, size: avatar.size, mime: avatar.mime as 'image/png' | 'image/jpeg', objectId: avatar.id } : null, updatedAt: r.updated_at };
+    return { name: this.ready() ? r.name : '', deviceName: r.device_name, ready: this.ready(), fields, fieldVisibility: vis, visibility: this.visibility(), visibilityChoice: r.visibility, everyoneUntil: r.everyone_until,
+      avatar: avatar ? { sha256: avatar.sha256, size: avatar.size, mime: avatar.mime as 'image/png' | 'image/jpeg', objectId: avatar.id } : null, updatedAt: r.updated_at };
+  }
+  /**
+   * Onboarding identity → People. The person's own name replaces only an unset/placeholder People name, or the one
+   * onboarding set before (`previous`); a name chosen separately in People is kept. The device name always follows.
+   */
+  adoptIdentity(name: string | undefined, deviceName: string | undefined, previous?: string) {
+    const n = name?.trim().slice(0, 80), d = deviceName?.trim().slice(0, 60), cur = this.profileRow();
+    const takeName = !!n && n !== cur.name && (!this.ready() || (!!previous && cur.name === previous.trim().slice(0, 80)));
+    if (!takeName && (!d || d === cur.device_name)) return;
+    this.updateProfile({ ...(takeName ? { name: n } : {}), ...(d && d !== cur.device_name ? { deviceName: d } : {}) });
   }
   updateProfile(input: ProfileInput) {
     const cur = this.myProfile();
     const f = { ...cur.fields } as Record<string, unknown>;
-    const P = z.object({ name: NAME.optional(), university: z.string().trim().max(120).optional(), department: z.string().trim().max(120).optional(), course: z.string().trim().max(120).optional(),
+    const P = z.object({ name: NAME.refine((v) => v !== PLACEHOLDER, 'Enter your name.').optional(), deviceName: DEVICE.optional(), university: z.string().trim().max(120).optional(), department: z.string().trim().max(120).optional(), course: z.string().trim().max(120).optional(),
       interests: z.array(z.string().trim().min(1).max(40)).max(12).optional(), bio: z.string().trim().max(500).optional(), fieldVisibility: z.partialRecord(z.enum(PROFILE_FIELDS), FieldVisibility).optional() }).strict().parse(input);
     for (const k of PROFILE_FIELDS) if (P[k] !== undefined) { if (P[k] === '' || (Array.isArray(P[k]) && !(P[k] as unknown[]).length)) delete f[k]; else f[k] = P[k]; }
-    this.db.prepare('UPDATE people_profile SET name = ?, fields = ?, field_visibility = ?, updated_at = ? WHERE one = 1')
-      .run(P.name ?? cur.name, JSON.stringify(f), JSON.stringify({ ...cur.fieldVisibility, ...(P.fieldVisibility ?? {}) }), this.now());
+    this.db.prepare('UPDATE people_profile SET name = ?, device_name = ?, fields = ?, field_visibility = ?, updated_at = ? WHERE one = 1')
+      .run(P.name ?? this.profileRow().name, P.deviceName ?? cur.deviceName, JSON.stringify(f), JSON.stringify({ ...cur.fieldVisibility, ...(P.fieldVisibility ?? {}) }), this.now());
     this.changed('profile');
     return this.myProfile();
   }
@@ -187,18 +231,19 @@ export class People {
     return r ? { mime: r.mime, data: new Uint8Array(r.data) } : null;
   }
   avatarPath(objectId: string) { const p = this.myProfile().avatar; return p && p.objectId === objectId ? this.store.object(objectId)?.location ?? null : null; }
-  /** Everyone Nearby is opt-in and temporary (default 1 h); it falls back to Friends Only when it expires. */
-  setVisibility(v: Visibility, everyoneMs = 3_600_000) {
+  /** Everyone Nearby lasts until changed; `everyoneMs` makes it temporary (then it falls back to Friends Only). */
+  setVisibility(v: Visibility, everyoneMs?: number) {
     const vis = Visibility.parse(v);
-    const until = vis === 'everyone' ? this.now() + z.number().int().min(60_000).max(8 * 3_600_000).parse(everyoneMs) : null;
+    this.profileRow();
+    const until = vis === 'everyone' && everyoneMs !== undefined ? this.now() + z.number().int().min(60_000).max(8 * 3_600_000).parse(everyoneMs) : null;
     this.db.prepare('UPDATE people_profile SET visibility = ?, everyone_until = ?, updated_at = ? WHERE one = 1').run(vis, until, this.now());
     this.changed('profile');
     return this.visibility();
   }
   visibility(at = this.now()): Visibility {
     const r = this.db.prepare('SELECT visibility, everyone_until FROM people_profile').get() as { visibility: Visibility; everyone_until: number | null } | undefined;
-    if (!r) return 'friends';
-    return r.visibility === 'everyone' && (r.everyone_until ?? 0) <= at ? 'friends' : r.visibility;
+    if (!r || !this.ready()) return 'invisible'; // nothing to show before onboarding
+    return r.visibility === 'everyone' && r.everyone_until !== null && r.everyone_until <= at ? 'friends' : r.visibility;
   }
   /** What `viewer` may see. Strangers see a profile only while this device is visible to Everyone Nearby. */
   profileFor(viewer: string | null, invite?: string | null): { profile: ReturnType<typeof signProfile> | null } {
@@ -208,6 +253,7 @@ export class People {
     const known = friend || (viewer ? this.hasConversation(viewer) || rel?.state === 'incoming' || rel?.state === 'outgoing' : false);
     const vis = this.visibility();
     if (!known && vis !== 'everyone' && !(invite && vis !== 'invisible' && invite === this.inviteToken())) return { profile: null };
+    if (!this.ready()) return { profile: null };
     const p = this.myProfile(), view: Record<string, unknown> = { key: this.myKey(), name: p.name, avatar: p.avatar ? { sha256: p.avatar.sha256, size: p.avatar.size, mime: p.avatar.mime } : null, updatedAt: p.updatedAt };
     for (const k of PROFILE_FIELDS) { const v = p.fields[k]; const fv = p.fieldVisibility[k]; if (v !== undefined && (fv === 'everyone' || (fv === 'friends' && friend))) view[k] = v; }
     return { profile: signProfile(this.sgn(), ProfileView.parse(view)) };
@@ -215,7 +261,7 @@ export class People {
   /** Whether `viewer` may open a connection to this device at all (discovery mode, relationship, or our QR secret). */
   reachableBy(viewer: string, invite?: string | null) {
     const rel = this.rel(viewer);
-    if (rel?.blocked) return false;
+    if (rel?.blocked || !this.ready()) return false;
     if (rel?.state && rel.state !== 'none') return true;
     if (this.hasConversation(viewer)) return true;
     if (invite && this.visibility() !== 'invisible' && invite === this.inviteToken()) return true;
@@ -317,12 +363,19 @@ export class People {
     this.touch(key);
     this.db.prepare('UPDATE people_contacts SET link_addrs = ? WHERE key = ?').run(JSON.stringify(ok), key);
   }
+  /** Their device name, as their authenticated session told us (display only). */
+  setPeerDevice(key: string, name: unknown) {
+    const d = DEVICE.safeParse(name);
+    if (!d.success) return;
+    const r = this.db.prepare('UPDATE people_contacts SET device_name = ? WHERE key = ? AND coalesce(device_name, \'\') <> ?').run(d.data, key, d.data) as { changes: number };
+    if (r.changes) this.changed('contacts', { key });
+  }
   markVerified(key: string) { this.db.prepare('UPDATE people_contacts SET verified = 1 WHERE key = ?').run(key); this.changed('contacts', { key }); }
   contact(key: string): Contact | null {
-    const c = this.db.prepare('SELECT * FROM people_contacts WHERE key = ?').get(key) as { key: string; profile: string | null; endpoints: string; tls: string | null; verified: number; last_seen: number } | undefined;
+    const c = this.db.prepare('SELECT * FROM people_contacts WHERE key = ?').get(key) as { key: string; profile: string | null; endpoints: string; tls: string | null; verified: number; last_seen: number; device_name: string | null } | undefined;
     if (!c) return null;
     const prof = c.profile ? (JSON.parse(c.profile) as { profile: ProfileView }).profile : null, rel = this.rel(key);
-    return { key, name: prof?.name ?? 'Unknown person', profile: prof, verified: !!c.verified, endpoints: JSON.parse(c.endpoints), relation: rel?.state ?? 'none', blocked: !!rel?.blocked, note: rel?.note ?? null, lastSeen: c.last_seen };
+    return { key, name: prof?.name ?? 'Unknown person', deviceName: c.device_name, profile: prof, verified: !!c.verified, endpoints: JSON.parse(c.endpoints), relation: rel?.state ?? 'none', blocked: !!rel?.blocked, note: rel?.note ?? null, lastSeen: c.last_seen };
   }
   route(key: string) {
     const c = this.db.prepare('SELECT endpoints, tls FROM people_contacts WHERE key = ?').get(key) as { endpoints: string; tls: string | null } | undefined;
@@ -363,7 +416,7 @@ export class People {
   }
   removeFriend(key: string) {
     if (this.rel(key)?.state !== 'friend') throw new PeerError('not_found', 'This person is not a friend.');
-    tx(this.db, () => { this.setRel(key, 'none'); this.queue(key, { kind: 'friend.remove' }); this.forgetPresence(key); });
+    tx(this.db, () => { this.setRel(key, 'none'); this.queue(key, { kind: 'friend.remove' }); this.forgetPresence(key); this.revokeWake(key); });
   }
   /** They are no longer a friend: stop recognising them and make our future adverts unrecognisable to them. */
   private forgetPresence(key: string) {
@@ -379,6 +432,7 @@ export class People {
       this.db.prepare(`INSERT INTO people_relations (key, state, blocked, updated_at) VALUES (?, 'none', 1, ?) ON CONFLICT (key) DO UPDATE SET state = 'none', blocked = 1, updated_at = excluded.updated_at`).run(key, this.now());
       this.db.prepare('DELETE FROM people_outbox WHERE to_key = ?').run(key);
       if (wasFriend) this.forgetPresence(key);
+      this.revokeWake(key);
       this.db.prepare("UPDATE people_conversations SET state = 'ended', updated_at = ? WHERE peer_key = ? AND state <> 'ended'").run(this.now(), key);
     });
     this.changed('relations', { key });
@@ -428,44 +482,115 @@ export class People {
   conversations(): Conversation[] {
     const rows = this.db.prepare('SELECT * FROM people_conversations ORDER BY updated_at DESC').all() as ConvRow[];
     return rows.filter((c) => !this.isBlocked(c.peer_key)).map((c) => {
-      const last = this.db.prepare('SELECT text, kind, created_at FROM people_messages WHERE conv_id = ? ORDER BY seq DESC LIMIT 1').get(c.id) as { text: string | null; kind: string; created_at: number } | undefined;
-      const unread = (this.db.prepare("SELECT count(*) n FROM people_messages WHERE conv_id = ? AND seq > ? AND author <> ? AND kind <> 'event'").get(c.id, c.read_seq, this.myKey()) as { n: number }).n;
+      const last = this.db.prepare('SELECT text, kind, created_at, deleted_at FROM people_messages WHERE conv_id = ? AND hidden = 0 ORDER BY seq DESC LIMIT 1').get(c.id) as { text: string | null; kind: string; created_at: number; deleted_at: number | null } | undefined;
+      const unread = (this.db.prepare("SELECT count(*) n FROM people_messages WHERE conv_id = ? AND seq > ? AND author <> ? AND kind <> 'event' AND hidden = 0 AND deleted_at IS NULL").get(c.id, c.read_seq, this.myKey()) as { n: number }).n;
       return { id: c.id, peerKey: c.peer_key, peerName: this.contact(c.peer_key)?.name ?? 'Unknown person', state: c.state, mode: c.mode, ttlMs: c.ttl_ms, unread, lastAt: last?.created_at ?? null,
-        lastText: last ? (last.kind === 'text' ? last.text : last.kind === 'voice' ? 'Voice message' : last.kind === 'file' ? 'File' : last.text) : null, friend: this.isFriend(c.peer_key) };
+        lastText: last ? (last.deleted_at ? 'Message deleted' : last.kind === 'text' ? last.text : last.kind === 'voice' ? 'Voice message' : last.kind === 'file' ? 'File' : last.text) : null, friend: this.isFriend(c.peer_key) };
     });
   }
   conversation(convId: string) { return this.conversations().find((c) => c.id === convId) ?? null; }
   canMessage(c: ConvRow) { return c.state === 'active' && !this.isBlocked(c.peer_key); }
 
   // ---------------- messages ----------------
-  private addMessage(convId: string, o: { id: string; author: string; kind: Message['kind']; text?: string | null; transferId?: string | null; createdAt: number; state: MsgRow['state']; expiresAt: number | null }) {
+  private addMessage(convId: string, o: { id: string; author: string; kind: Message['kind']; text?: string | null; transferId?: string | null; createdAt: number; state: MsgRow['state']; expiresAt: number | null; replyTo?: string | null }) {
     const c = this.must(convId);
     if (this.db.prepare('SELECT 1 FROM people_messages WHERE id = ?').get(o.id)) return false;
-    this.db.prepare('INSERT INTO people_messages (id, conv_id, seq, author, kind, text, transfer_id, created_at, received_at, state, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(o.id, convId, c.next_seq, o.author, o.kind, o.text ?? null, o.transferId ?? null, o.createdAt, this.now(), o.state, o.expiresAt);
+    const op = this.db.prepare('SELECT * FROM people_msg_ops WHERE msg_id = ? AND author = ?').get(o.id, o.author) as { text: string | null; edited_at: number | null; deleted_at: number | null } | undefined;
+    this.db.prepare('INSERT INTO people_messages (id, conv_id, seq, author, kind, text, transfer_id, created_at, received_at, state, expires_at, reply_to, edited_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(o.id, convId, c.next_seq, o.author, o.kind, op?.deleted_at ? null : op?.text ?? o.text ?? null, o.transferId ?? null, o.createdAt, this.now(), o.state, o.expiresAt, o.replyTo ?? null, op?.deleted_at ? null : op?.edited_at ?? null, op?.deleted_at ?? null);
+    if (op) this.db.prepare('DELETE FROM people_msg_ops WHERE msg_id = ?').run(o.id);
     this.db.prepare('UPDATE people_conversations SET next_seq = next_seq + 1, updated_at = ? WHERE id = ?').run(this.now(), convId);
     return true;
   }
   private expiry(c: ConvRow, at: number) { return c.mode === 'temporary' && c.ttl_ms ? at + c.ttl_ms : null; }
-  sendText(convId: string, text: string) {
+  sendText(convId: string, text: string, o: { replyTo?: string } = {}) {
     const c = this.must(convId);
     if (!this.canMessage(c)) throw new PeerError('not_allowed', c.state === 'invited_out' ? 'Waiting for them to accept the chat.' : 'This conversation is not active.');
     const t = z.string().trim().min(1).max(8000).parse(text), id = randomUUID(), at = this.now();
-    tx(this.db, () => { this.addMessage(convId, { id, author: this.myKey(), kind: 'text', text: t, createdAt: at, state: 'queued', expiresAt: this.expiry(c, at) }); this.queue(c.peer_key, { kind: 'msg.text', msgId: id, text: t }, id); });
+    const replyTo = o.replyTo ? this.visibleRow(o.replyTo, convId).id : undefined;
+    tx(this.db, () => { this.addMessage(convId, { id, author: this.myKey(), kind: 'text', text: t, createdAt: at, state: 'queued', expiresAt: this.expiry(c, at), replyTo }); this.queue(c.peer_key, { kind: 'msg.text', msgId: id, text: t, ...(replyTo ? { replyTo } : {}) }, id); });
     this.changed('messages', { convId });
     return this.message(id)!;
   }
   private toMessage(m: MsgRow, c: ConvRow): Message {
-    const mine = m.author === this.myKey();
-    return { id: m.id, convId: m.conv_id, seq: m.seq, author: m.author, mine, kind: m.kind, text: m.text, createdAt: m.created_at, expiresAt: m.expires_at,
-      state: mine && m.state === 'queued' && (this.activeSends.get(m.id) ?? 0) > this.now() ? 'sending' : mine && m.state === 'delivered' && c.peer_read_at >= m.created_at ? 'read' : m.state, transfer: m.transfer_id ? this.transfer(m.transfer_id) : null };
+    const mine = m.author === this.myKey(), at = this.now();
+    const r = m.reply_to ? this.db.prepare('SELECT id, author, kind, text, deleted_at, hidden FROM people_messages WHERE id = ? AND conv_id = ?').get(m.reply_to, m.conv_id) as { id: string; author: string; kind: Message['kind']; text: string | null; deleted_at: number | null; hidden: number } | undefined : undefined;
+    const live = !m.deleted_at && c.state === 'active' && !this.isBlocked(c.peer_key) && m.state !== 'failed';
+    return { id: m.id, convId: m.conv_id, seq: m.seq, author: m.author, mine, kind: m.kind, text: m.deleted_at ? null : m.text, createdAt: m.created_at, expiresAt: m.expires_at,
+      state: mine && m.state === 'queued' && (this.activeSends.get(m.id) ?? 0) > at ? 'sending' : mine && m.state === 'delivered' && c.peer_read_at >= m.created_at ? 'read' : m.state, transfer: m.transfer_id && !m.deleted_at ? this.transfer(m.transfer_id) : null,
+      editedAt: m.edited_at, deleted: !!m.deleted_at, op: m.op_state, reactions: JSON.parse(m.reactions) as Record<string, string>,
+      replyTo: m.reply_to ? { id: m.reply_to, author: r?.author ?? '', kind: r?.kind ?? 'text', text: !r || r.deleted_at || r.hidden ? null : r.kind === 'text' ? r.text : r.kind === 'voice' ? 'Voice message' : 'File' } : null,
+      canEdit: mine && live && m.kind === 'text' && at - m.created_at <= EDIT_WINDOW_MS,
+      canDeleteForEveryone: mine && !m.deleted_at && (m.kind === 'text' || m.kind === 'file' || m.kind === 'voice') && at - m.created_at <= DELETE_WINDOW_MS };
   }
-  message(id: string) { const m = this.db.prepare('SELECT * FROM people_messages WHERE id = ?').get(id) as MsgRow | undefined; return m ? this.toMessage(m, this.conv(m.conv_id)!) : null; }
+  message(id: string) { const m = this.db.prepare('SELECT * FROM people_messages WHERE id = ?').get(id) as MsgRow | undefined; return m && !m.hidden ? this.toMessage(m, this.conv(m.conv_id)!) : null; }
   /** Newest-last page; `before` = a seq to page backwards (reading position stays on the client). */
   page(convId: string, o: { before?: number; limit?: number } = {}): Message[] {
     const c = this.must(convId), lim = Math.min(Math.max(o.limit ?? 50, 1), 200);
-    const rows = this.db.prepare(`SELECT * FROM people_messages WHERE conv_id = ? ${o.before ? 'AND seq < ?' : ''} ORDER BY seq DESC LIMIT ?`).all(...[convId, ...(o.before ? [o.before] : []), lim]) as MsgRow[];
+    const rows = this.db.prepare(`SELECT * FROM people_messages WHERE conv_id = ? AND hidden = 0 ${o.before ? 'AND seq < ?' : ''} ORDER BY seq DESC LIMIT ?`).all(...[convId, ...(o.before ? [o.before] : []), lim]) as MsgRow[];
     return rows.reverse().map((m) => this.toMessage(m, c));
+  }
+  private visibleRow(msgId: string, convId?: string) {
+    const m = this.db.prepare('SELECT * FROM people_messages WHERE id = ? AND hidden = 0').get(z.uuid().parse(msgId)) as MsgRow | undefined;
+    if (!m || (convId && m.conv_id !== convId)) throw new PeerError('not_found', 'That message is no longer here.');
+    return m;
+  }
+  /** Changes our own text message for both of us (within the edit window). Queued like any message when offline. */
+  editMessage(msgId: string, text: string) {
+    const m = this.visibleRow(msgId), c = this.must(m.conv_id), t = z.string().trim().min(1).max(8000).parse(text);
+    if (!this.toMessage(m, c).canEdit) throw new PeerError('not_allowed', m.author !== this.myKey() ? 'You can only edit your own messages.' : 'This message can no longer be edited.');
+    if (t === m.text) return this.message(msgId)!;
+    tx(this.db, () => {
+      const pending = this.pendingOriginal(msgId, c.peer_key);
+      if (pending) { // never left this device: send the new text as the message itself
+        this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(pending);
+        this.queue(c.peer_key, { kind: 'msg.text', msgId, text: t, ...(m.reply_to ? { replyTo: m.reply_to } : {}) }, msgId);
+        this.db.prepare('UPDATE people_messages SET text = ?, edited_at = ? WHERE id = ?').run(t, this.now(), msgId);
+      } else {
+        this.db.prepare("UPDATE people_messages SET text = ?, edited_at = ?, op_state = 'edit_pending' WHERE id = ?").run(t, this.now(), msgId);
+        this.queue(c.peer_key, { kind: 'msg.edit', msgId, text: t }, null, msgId);
+      }
+    });
+    this.changed('messages', { convId: m.conv_id });
+    return this.message(msgId)!;
+  }
+  /** Removes our own message for both of us. Their copy is replaced by a "deleted" placeholder once delivered. */
+  async deleteForEveryone(msgId: string) {
+    const m = this.visibleRow(msgId), c = this.must(m.conv_id);
+    if (!this.toMessage(m, c).canDeleteForEveryone) throw new PeerError('not_allowed', m.author !== this.myKey() ? 'You can only delete your own messages for everyone.' : 'This message is too old to delete for everyone.');
+    if (m.transfer_id) { const t = this.xfer(m.transfer_id); if (!['complete', 'declined', 'cancelled', 'expired', 'failed'].includes(t.state)) this.queue(c.peer_key, { kind: 'file.cancel', transferId: t.id }); await this.dropTransferBytes(t.id, 'cancelled'); }
+    tx(this.db, () => {
+      const pending = this.pendingOriginal(msgId, c.peer_key);
+      if (pending) this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(pending); // they never received it
+      for (const r of this.db.prepare('SELECT id FROM people_outbox WHERE op_msg = ?').all(msgId) as { id: string }[]) this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(r.id); // superseded edits
+      this.db.prepare(`UPDATE people_messages SET text = NULL, deleted_at = ?, op_state = ? WHERE id = ?`).run(this.now(), pending ? null : 'delete_pending', msgId);
+      if (!pending) this.queue(c.peer_key, { kind: 'msg.delete', msgId }, null, msgId);
+    });
+    this.changed('messages', { convId: m.conv_id });
+  }
+  /** Removes the message from this device only (their copy is untouched); file bytes kept here are freed. */
+  async deleteForMe(msgId: string) {
+    const m = this.visibleRow(msgId);
+    if (m.transfer_id) { const t = this.xfer(m.transfer_id); if (t.direction === 'out' && ['offered', 'accepted', 'transferring'].includes(t.state)) this.queue(this.must(m.conv_id).peer_key, { kind: 'file.cancel', transferId: t.id }); await this.dropTransferBytes(t.id, t.state === 'complete' ? 'complete' : 'cancelled'); }
+    this.db.prepare('UPDATE people_messages SET hidden = 1, text = NULL WHERE id = ?').run(msgId);
+    this.changed('messages', { convId: m.conv_id });
+  }
+  react(msgId: string, emoji: string | null) {
+    const m = this.visibleRow(msgId), c = this.must(m.conv_id);
+    if (!this.canMessage(c) || m.deleted_at || m.kind === 'event' || m.kind === 'call') throw new PeerError('not_allowed', 'You cannot react to this message.');
+    const e = emoji === null ? null : z.string().trim().min(1).max(16).parse(emoji), r = JSON.parse(m.reactions) as Record<string, string>;
+    if (e) r[this.myKey()] = e; else delete r[this.myKey()];
+    tx(this.db, () => { this.db.prepare('UPDATE people_messages SET reactions = ? WHERE id = ?').run(JSON.stringify(r), msgId); this.queue(c.peer_key, { kind: 'msg.react', msgId, emoji: e }); });
+    this.changed('messages', { convId: m.conv_id });
+  }
+  /** The outbox row that would still deliver the original message itself (it has not left this device). */
+  private pendingOriginal(msgId: string, key: string) {
+    if ((this.activeSends.get(msgId) ?? 0) > this.now()) return null; // in flight: it may already be there
+    for (const r of this.db.prepare('SELECT id, envelope FROM people_outbox WHERE to_key = ? AND msg_id = ?').all(key, msgId) as { id: string; envelope: string }[]) {
+      const k = (JSON.parse(r.envelope) as PeerEnvelope).body.kind;
+      if (k === 'msg.text' || k === 'file.offer') return r.id;
+    }
+    return null;
   }
   markRead(convId: string) {
     const c = this.must(convId), top = (this.db.prepare('SELECT coalesce(max(seq), 0) s FROM people_messages WHERE conv_id = ?').get(convId) as { s: number }).s;
@@ -634,17 +759,88 @@ export class People {
     if (notify && o.direction === 'in' && o.endedAt && !previous?.ended_at && !o.connectedAt && (o.outcome?.startsWith('missed') || o.outcome === 'attempt-later')) this.bus.publish(PeopleAlert, 'people', { id: randomUUID(), key: o.peerKey, kind: o.outcome === 'attempt-later' ? 'call.attempt' : 'call.missed', convId: this.convWith(o.peerKey)?.id });
   }
 
+  // ---------------- internet-assisted wake-ups (optional) ----------------
+  /** The relay this device registers with (null = none: LAN only). Changing it re-grants every friend. */
+  pushRelay(url?: string | null): string | null {
+    this.profileRow();
+    if (url !== undefined) {
+      const u = url === null || url.trim() === '' ? null : z.string().url().max(200).refine((x) => x.startsWith('https://') || /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(x), 'Use an https:// relay address.').parse(url.trim());
+      this.db.prepare('UPDATE people_profile SET push_relay = ? WHERE one = 1').run(u);
+      this.db.prepare("UPDATE people_push_caps SET state = 'revoke'").run();
+    }
+    return (this.db.prepare('SELECT push_relay r FROM people_profile').get() as { r: string | null } | undefined)?.r ?? null;
+  }
+  /** Friends who should get a capability for our relay (new friends, or after the relay changed). */
+  wakeGrantsWanted(): string[] {
+    if (!this.pushRelay()) return [];
+    return this.contacts('friends').map((f) => f.key).filter((k) => !this.db.prepare("SELECT 1 FROM people_push_caps WHERE peer_key = ? AND state <> 'revoke'").get(k));
+  }
+  /** A fresh capability for one friend (state new → granted at the relay → shared with the friend). */
+  newWakeGrant(key: string) {
+    const relay = this.pushRelay(); if (!relay || !this.isFriend(key)) throw new PeerError('not_allowed', 'Wake-ups are for friends.');
+    const g = { capId: b64u.encode(randomBytes(16)), cap: b64u.encode(randomBytes(32)), mac: b64u.encode(randomBytes(32)) };
+    this.db.prepare("INSERT INTO people_push_caps (peer_key, cap_id, cap, mac, relay, state, at) VALUES (?, ?, ?, ?, ?, 'new', ?) ON CONFLICT (peer_key) DO UPDATE SET cap_id = excluded.cap_id, cap = excluded.cap, mac = excluded.mac, relay = excluded.relay, state = 'new', at = excluded.at")
+      .run(key, g.capId, g.cap, g.mac, relay, this.now());
+    return g;
+  }
+  wakeGrants(state?: 'new' | 'granted' | 'shared' | 'revoke') {
+    return (this.db.prepare(`SELECT peer_key peerKey, cap_id capId, cap, mac, relay, state FROM people_push_caps ${state ? 'WHERE state = ?' : ''}`).all(...(state ? [state] : [])) as { peerKey: string; capId: string; cap: string; mac: string; relay: string; state: string }[]);
+  }
+  /** Relay accepted the grant: tell the friend (an ordinary signed, queued envelope). */
+  wakeGranted(capId: string) {
+    const g = this.wakeGrants('new').find((x) => x.capId === capId); if (!g || !this.isFriend(g.peerKey)) return;
+    tx(this.db, () => { this.db.prepare("UPDATE people_push_caps SET state = 'shared' WHERE cap_id = ?").run(capId); this.queue(g.peerKey, { kind: 'push.cap', grant: { relay: g.relay, capId: g.capId, cap: g.cap, mac: g.mac } }); });
+  }
+  wakeRevoked(capId: string) { this.db.prepare("DELETE FROM people_push_caps WHERE cap_id = ? AND state = 'revoke'").run(capId); }
+  /** What the phone's native notification code needs to check and label wake-ups (never leaves this device). */
+  wakeKeys() { return this.wakeGrants().filter((g) => g.state !== 'revoke' && !this.isBlocked(g.peerKey)).map((g) => ({ capId: g.capId, mac: g.mac, name: this.contact(g.peerKey)?.name ?? 'A friend', convId: this.convWith(g.peerKey)?.id ?? null, peerKey: g.peerKey })); }
+  private revokeWake(key: string) {
+    if (!this.db.prepare('SELECT 1 FROM people_push_caps WHERE peer_key = ?').get(key)) return;
+    this.db.prepare("UPDATE people_push_caps SET state = 'revoke' WHERE peer_key = ?").run(key);
+    if (this.isFriend(key)) this.queue(key, { kind: 'push.cap', grant: null });
+  }
+  /** Envelopes a person would want to be told about, if they cannot be reached directly within a few seconds. */
+  private wantWake(key: string, body: PeerBody, outboxId: string) {
+    const kind = body.kind === 'msg.text' ? 'msg' : body.kind === 'file.offer' ? 'file' : body.kind === 'call.attempt' ? 'missed' : null;
+    if (!kind || !this.db.prepare('SELECT 1 FROM people_contacts WHERE key = ? AND push IS NOT NULL').get(key)) return;
+    const ref = body.kind === 'msg.text' || body.kind === 'file.offer' ? body.msgId : body.kind === 'call.attempt' ? body.callId : outboxId;
+    this.db.prepare('INSERT OR IGNORE INTO people_push_out (id, to_key, kind, ref, outbox_id, due_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(randomUUID(), key, kind, ref, outboxId, this.now() + 5_000, this.now() + 24 * 3_600_000);
+  }
+  /** A live call could not reach them: ring their phone through the relay now (true if they have a capability). */
+  wakeForCall(key: string, callId: string, kind: 'call' | 'call.cancel' = 'call') {
+    if (!this.db.prepare('SELECT 1 FROM people_contacts WHERE key = ? AND push IS NOT NULL').get(key) || this.isBlocked(key)) return false;
+    z.uuid().parse(callId);
+    this.db.prepare('INSERT INTO people_push_out (id, to_key, kind, ref, outbox_id, due_at, expires_at) VALUES (?, ?, ?, ?, NULL, ?, ?)').run(randomUUID(), key, kind, callId, this.now(), this.now() + PUSH_CALL_TTL_MS);
+    return true;
+  }
+  /** Wake-ups due now whose envelope is still undelivered, with the friend's capability. */
+  wakesDue(at = this.now()) {
+    const rows = this.db.prepare('SELECT w.*, c.push FROM people_push_out w JOIN people_contacts c ON c.key = w.to_key WHERE w.due_at <= ? AND w.expires_at > ? ORDER BY w.due_at LIMIT 50').all(at, at) as { id: string; to_key: string; kind: string; ref: string; outbox_id: string | null; expires_at: number; tries: number; push: string | null }[];
+    const out: { id: string; to: string; kind: string; ref: string; expiresAt: number; grant: { relay: string; capId: string; cap: string; mac: string } }[] = [];
+    for (const r of rows) {
+      if (!r.push || this.isBlocked(r.to_key) || (r.outbox_id && !this.db.prepare('SELECT 1 FROM people_outbox WHERE id = ?').get(r.outbox_id))) { this.db.prepare('DELETE FROM people_push_out WHERE id = ?').run(r.id); continue; }
+      out.push({ id: r.id, to: r.to_key, kind: r.kind, ref: r.ref, expiresAt: r.expires_at, grant: JSON.parse(r.push) });
+    }
+    return out;
+  }
+  wakeSent(id: string) { this.db.prepare('DELETE FROM people_push_out WHERE id = ?').run(id); }
+  wakeFailed(id: string, final: boolean) {
+    if (final) { this.db.prepare('DELETE FROM people_push_out WHERE id = ?').run(id); return; }
+    this.db.prepare('UPDATE people_push_out SET tries = tries + 1, due_at = ? + min(300000, 5000 * (1 << min(tries, 6))) WHERE id = ?').run(this.now(), id);
+  }
+
   // ---------------- outbox ----------------
   private assertPeer(key: string) {
     if (!/^[A-Za-z0-9_-]{43}$/.test(key) || key === this.myKey()) throw new PeerError('invalid', 'Unknown person.');
     if (!this.db.prepare('SELECT 1 FROM people_contacts WHERE key = ?').get(key)) throw new PeerError('not_found', 'Meet this person first (nearby or by QR).');
   }
-  private queue(key: string, body: PeerBody, msgId: string | null = null) {
+  private queue(key: string, body: PeerBody, msgId: string | null = null, opMsg: string | null = null) {
     if (this.isBlocked(key)) return;
     const count = this.db.prepare('SELECT count(*) n FROM people_outbox').get() as { n: number };
     if (count.n >= 2000) throw new PeerError('full', 'The pending delivery queue is full. Reconnect or cancel pending items first.');
     const env = signEnvelope(this.sgn(), { id: randomUUID(), to: key, at: this.now(), body });
-    this.db.prepare('INSERT INTO people_outbox (id, to_key, envelope, msg_id, created_at, next_at) VALUES (?, ?, ?, ?, ?, ?)').run(env.id, key, JSON.stringify(env), msgId, this.now(), this.now());
+    this.db.prepare('INSERT INTO people_outbox (id, to_key, envelope, msg_id, created_at, next_at, op_msg) VALUES (?, ?, ?, ?, ?, ?, ?)').run(env.id, key, JSON.stringify(env), msgId, this.now(), this.now(), opMsg);
+    this.wantWake(key, body, env.id);
   }
   private dropQueued(key: string, kind: string) {
     for (const r of this.db.prepare('SELECT id, envelope FROM people_outbox WHERE to_key = ?').all(key) as { id: string; envelope: string }[]) if ((JSON.parse(r.envelope) as PeerEnvelope).body.kind === kind) this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(r.id);
@@ -666,22 +862,32 @@ export class People {
     if (previous <= this.now()) this.changed('messages');
   }
   delivered(id: string, recipient?: string) {
-    const r = this.db.prepare('SELECT msg_id, to_key FROM people_outbox WHERE id = ?').get(id) as { msg_id: string | null; to_key: string } | undefined;
+    const r = this.db.prepare('SELECT msg_id, to_key, op_msg FROM people_outbox WHERE id = ?').get(id) as { msg_id: string | null; to_key: string; op_msg: string | null } | undefined;
     if (!r || recipient && r.to_key !== recipient) return;
     if (r.msg_id) this.activeSends.delete(r.msg_id);
     tx(this.db, () => {
       this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(id);
+      this.db.prepare('DELETE FROM people_push_out WHERE outbox_id = ?').run(id);
       if (r.msg_id) this.db.prepare("UPDATE people_messages SET state = 'delivered' WHERE id = ? AND state IN ('queued','failed')").run(r.msg_id);
+      if (r.op_msg && !this.db.prepare('SELECT 1 FROM people_outbox WHERE op_msg = ?').get(r.op_msg)) this.db.prepare('UPDATE people_messages SET op_state = NULL WHERE id = ?').run(r.op_msg);
     });
-    if (r.msg_id) this.changed('messages', { convId: (this.db.prepare('SELECT conv_id c FROM people_messages WHERE id = ?').get(r.msg_id) as { c: string } | undefined)?.c });
+    const m = r.msg_id ?? r.op_msg;
+    if (m) this.changed('messages', { convId: (this.db.prepare('SELECT conv_id c FROM people_messages WHERE id = ?').get(m) as { c: string } | undefined)?.c });
   }
   /** Not reachable now: retried with backoff (queued messages survive restarts). A refusal is final. */
   deliveryFailed(id: string, error: string, final = false) {
-    const r = this.db.prepare('SELECT tries, msg_id FROM people_outbox WHERE id = ?').get(id) as { tries: number; msg_id: string | null } | undefined;
+    const r = this.db.prepare('SELECT tries, msg_id, op_msg FROM people_outbox WHERE id = ?').get(id) as { tries: number; msg_id: string | null; op_msg: string | null } | undefined;
     if (!r) return;
     if (r.msg_id) this.activeSends.delete(r.msg_id);
     if (final) {
-      tx(this.db, () => { this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(id); if (r.msg_id) this.db.prepare("UPDATE people_messages SET state = 'failed' WHERE id = ?").run(r.msg_id); });
+      tx(this.db, () => {
+        this.db.prepare('DELETE FROM people_outbox WHERE id = ?').run(id);
+        this.db.prepare('DELETE FROM people_push_out WHERE outbox_id = ?').run(id);
+        if (r.msg_id) this.db.prepare("UPDATE people_messages SET state = 'failed' WHERE id = ?").run(r.msg_id);
+        // e.g. their CLAN is older than edits/deletion: say so instead of pretending it reached them
+        if (r.op_msg) this.db.prepare("UPDATE people_messages SET op_state = 'op_failed' WHERE id = ?").run(r.op_msg);
+      });
+      if (r.op_msg) this.changed('messages');
     } else this.db.prepare('UPDATE people_outbox SET tries = tries + 1, next_at = ?, last_error = ? WHERE id = ?').run(this.now() + Math.min(5 * 60_000, 2_000 * 2 ** Math.min(r.tries, 8)), error.slice(0, 200), id);
     if (r.msg_id) this.changed('messages');
   }
@@ -692,8 +898,8 @@ export class People {
     if (!m) throw new PeerError('bad_state', 'Only failed messages can be retried.');
     const c = this.must(m.conv_id);
     if (!this.canMessage(c)) throw new PeerError('not_allowed', 'This conversation is not active.');
-    if (m.kind !== 'text') throw new PeerError('bad_state', 'Send the file again.');
-    tx(this.db, () => { this.db.prepare("UPDATE people_messages SET state = 'queued' WHERE id = ?").run(msgId); this.queue(c.peer_key, { kind: 'msg.text', msgId, text: m.text! }, msgId); });
+    if (m.kind !== 'text' || m.deleted_at || m.hidden) throw new PeerError('bad_state', 'Send the file again.');
+    tx(this.db, () => { this.db.prepare("UPDATE people_messages SET state = 'queued' WHERE id = ?").run(msgId); this.queue(c.peer_key, { kind: 'msg.text', msgId, text: m.text!, ...(m.reply_to ? { replyTo: m.reply_to } : {}) }, msgId); });
   }
 
   // ---------------- incoming ----------------
@@ -720,7 +926,7 @@ export class People {
     const rel = this.rel(e.from), friend = rel?.state === 'friend', c = this.convWith(e.from), body = e.body;
     const unsolicited = body.kind === 'friend.request' || (body.kind === 'chat.invite' && !friend && c?.state !== 'active');
     if (unsolicited) this.limit(e.from);
-    let download: string | undefined, alertAttempt = false;
+    let download: string | undefined, alertAttempt = false, dropBytes: string | null = null;
     tx(this.db, () => {
       this.db.prepare('INSERT INTO people_seen (id, at) VALUES (?, ?)').run(e.id, at);
       this.touch(e.from);
@@ -759,7 +965,7 @@ export class People {
           break;
         case 'friend.reject': if (rel?.state === 'outgoing') this.setRel(e.from, 'none'); break;
         case 'friend.cancel': if (rel?.state === 'incoming') this.setRel(e.from, 'none'); break;
-        case 'friend.remove': if (rel?.state === 'friend') { this.setRel(e.from, 'none'); this.forgetPresence(e.from); } break;
+        case 'friend.remove': if (rel?.state === 'friend') { this.setRel(e.from, 'none'); this.forgetPresence(e.from); this.revokeWake(e.from); this.db.prepare('UPDATE people_contacts SET push = NULL WHERE key = ?').run(e.from); } break;
         case 'chat.invite': {
           const same = c?.state === 'active' && c.mode === body.mode && c.ttl_ms === body.ttlMs;
           if (same) { this.queue(e.from, { kind: 'chat.accept', mode: body.mode, ttlMs: body.ttlMs }); break; }
@@ -774,9 +980,45 @@ export class People {
         case 'chat.end': if (c && c.state !== 'ended') { this.db.prepare("UPDATE people_conversations SET state = 'ended', updated_at = ? WHERE id = ?").run(at, c.id); this.changed('conversations', { convId: c.id }); } break;
         case 'msg.text': {
           if (!c || !this.canMessage(c)) throw new PeerError('refused', 'No active conversation.');
-          if (this.addMessage(c.id, { id: body.msgId, author: e.from, kind: 'text', text: body.text, createdAt: Math.min(e.at, at), state: 'received', expiresAt: this.expiry(c, Math.min(e.at, at)) })) this.changed('messages', { convId: c.id });
+          if (this.addMessage(c.id, { id: body.msgId, author: e.from, kind: 'text', text: body.text, createdAt: Math.min(e.at, at), state: 'received', expiresAt: this.expiry(c, Math.min(e.at, at)), replyTo: body.replyTo ?? null })) this.changed('messages', { convId: c.id });
           break;
         }
+        case 'msg.edit': case 'msg.delete': {
+          if (!c) throw new PeerError('refused', 'No conversation.');
+          const m = this.db.prepare('SELECT * FROM people_messages WHERE id = ?').get(body.msgId) as MsgRow | undefined;
+          const editing = body.kind === 'msg.edit';
+          if (!m) { // arrived before its message (or the message expired): remember, so it can never appear unchanged
+            this.db.prepare(`INSERT INTO people_msg_ops (msg_id, author, text, edited_at, deleted_at, at) VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT (msg_id) DO UPDATE SET text = CASE WHEN excluded.edited_at > coalesce(edited_at, 0) THEN excluded.text ELSE text END, edited_at = max(coalesce(edited_at, 0), coalesce(excluded.edited_at, 0)), deleted_at = coalesce(deleted_at, excluded.deleted_at) WHERE author = excluded.author`)
+              .run(body.msgId, e.from, editing ? body.text : null, editing ? e.at : null, editing ? null : e.at, at);
+            break;
+          }
+          // only the author, only in this conversation, only what an author may change, only within the window
+          if (m.author !== e.from || m.conv_id !== c.id || (editing ? m.kind !== 'text' : !['text', 'file', 'voice'].includes(m.kind))) throw new PeerError('refused', 'You can only change your own messages.');
+          if (e.at - m.created_at > (editing ? EDIT_WINDOW_MS : DELETE_WINDOW_MS) + 120_000) throw new PeerError('refused', editing ? 'Too late to edit.' : 'Too late to delete for everyone.');
+          if (m.deleted_at) break; // deletion wins over everything after it
+          if (editing) { if (e.at > (m.edited_at ?? 0)) this.db.prepare('UPDATE people_messages SET text = ?, edited_at = ? WHERE id = ?').run(body.text, e.at, m.id); }
+          else {
+            this.db.prepare('UPDATE people_messages SET text = NULL, deleted_at = ? WHERE id = ?').run(e.at, m.id);
+            if (m.transfer_id) dropBytes = m.transfer_id;
+          }
+          this.changed('messages', { convId: c.id });
+          break;
+        }
+        case 'msg.react': {
+          const m = this.db.prepare('SELECT * FROM people_messages WHERE id = ?').get(body.msgId) as MsgRow | undefined;
+          if (!c || !m || m.conv_id !== c.id || m.deleted_at || m.kind === 'event' || m.kind === 'call') break; // nothing to react to (any more)
+          const r = JSON.parse(m.reactions) as Record<string, string>;
+          if (body.emoji) r[e.from] = body.emoji; else delete r[e.from];
+          this.db.prepare('UPDATE people_messages SET reactions = ? WHERE id = ?').run(JSON.stringify(r), m.id);
+          this.changed('messages', { convId: c.id });
+          break;
+        }
+        case 'push.cap':
+          if (!friend) throw new PeerError('refused', 'Only friends share wake-up capabilities.');
+          this.db.prepare('UPDATE people_contacts SET push = ? WHERE key = ?').run(body.grant ? JSON.stringify(body.grant) : null, e.from);
+          if (!body.grant) this.db.prepare('DELETE FROM people_push_out WHERE to_key = ?').run(e.from);
+          break;
         case 'msg.read': if (c) { this.db.prepare('UPDATE people_conversations SET peer_read_at = max(peer_read_at, ?) WHERE id = ?').run(Math.min(body.upTo, at), c.id); this.changed('messages', { convId: c.id }); } break;
         case 'file.offer': {
           if (!c || !this.canMessage(c)) throw new PeerError('refused', 'No active conversation.');
@@ -807,6 +1049,7 @@ export class People {
         }
       }
     });
+    if (dropBytes) void this.dropTransferBytes(dropBytes, 'cancelled').catch(() => { /* swept later */ });
     if (alertAttempt || ['msg.text', 'file.offer', 'file.done', 'friend.request', 'chat.invite'].includes(e.body.kind)) this.bus.publish(PeopleAlert, 'people', { id: e.id, key: e.from, kind: e.body.kind, convId: this.convWith(e.from)?.id });
     if (e.body.kind.startsWith('friend.')) this.wake(e.from);
     return { kind: e.body.kind, download };
@@ -828,6 +1071,8 @@ export class People {
       for (const m of expired) { this.db.prepare('DELETE FROM people_messages WHERE id = ?').run(m.id); if (m.transfer_id) this.db.prepare('DELETE FROM people_transfers WHERE id = ?').run(m.transfer_id); }
     });
     this.db.prepare('DELETE FROM people_seen WHERE at < ?').run(at - 2 * REPLAY_WINDOW_MS);
+    this.db.prepare('DELETE FROM people_msg_ops WHERE at < ?').run(at - 2 * REPLAY_WINDOW_MS);
+    this.db.prepare('DELETE FROM people_push_out WHERE expires_at <= ?').run(at);
     if (expired.length) this.changed('messages');
     return expired.length;
   }

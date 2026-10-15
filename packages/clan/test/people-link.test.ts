@@ -32,7 +32,7 @@ const memTransport = { name: 'mem', handles: (a: string) => a.startsWith('mem:')
 
 async function device(name: string, maintainFriends = () => false) {
   const d = setup(), signer = nodeSigner(newEd25519().privatePkcs8);
-  d.app.people.setSigner(signer); d.app.people.updateProfile({ name });
+  d.app.people.setSigner(signer); d.app.people.updateProfile({ name }); d.app.people.setVisibility('friends');
   const live: PeerEnvelope[] = [];
   let addr = '';
   const cm = new ConnectionManager({ people: d.app.people, signer, files: nodeFiles(d.storageDir), onLive: (e) => live.push(e), myAddrs: () => [addr], maintainFriends, tickMs: 150 }).use(tcpTransport()).use(memTransport);
@@ -228,7 +228,7 @@ describe('people over clan-link/1 (no TLS server, no router needed)', () => {
   it('a computer scans a phone-style code (link listeners only) and they talk over the link', async () => {
     const phone = await device('Phone'), d = setup(), signer = nodeSigner(newEd25519().privatePkcs8);
     const pc = await startPeopleRuntime({ people: d.app.people, signer, tls: await createClassroomTls('pc', Date.now(), 1e10), dir: join(d.storageDir, 'people'), bind: '127.0.0.1', discover: false, allowLoopback: true, endpoints: (port) => [`127.0.0.1:${port}`], tickMs: 150 });
-    d.app.people.updateProfile({ name: 'Desk' }); stops.push(() => pc.stop());
+    d.app.people.updateProfile({ name: 'Desk' }); d.app.people.setVisibility('friends'); stops.push(() => pc.stop());
     const code = profileQr({ key: phone.key, endpoints: [], links: [phone.addr()], name: 'Phone', invite: phone.p.inviteToken(), intent: 'friend' });
     const c = await pc.connectQr(code);
     expect(c).toMatchObject({ key: phone.key, name: 'Phone', verified: true });

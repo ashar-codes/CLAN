@@ -33,6 +33,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     camera: async () => { if(document.hidden)throw Error('Return to CLAN before enabling the camera.');await api.people.armMedia('camera');if(document.hidden)throw Error('Return to CLAN before enabling the camera.');return await navigator.mediaDevices.getUserMedia({audio:false,video:cameraChoice.current ? {deviceId:{exact:cameraChoice.current}} : true}) as never; },
     onLocal: s => { if (local.current) local.current.srcObject = s as MediaStream | null; },
     attempt: (key, id) => api.people.attempt(key, id),
+    wake: (key, id, kind) => api.people.wakeCall(key, id, kind),
     signal: (k, b) => api.people.signal(k, b),
     log: (o) => void api.people.logCall(o).catch(() => {}),
     nameOf: (k) => api.people.contact(k).then((c) => c?.name ?? null, () => null),

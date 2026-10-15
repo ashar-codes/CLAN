@@ -64,7 +64,8 @@ export class LinkSession {
   private lastHi = '';
   /** What this person may see of us (it changes when they become a requester or friend) and where we listen. */
   private introduce() {
-    const hi = { t: 'hi', profile: this.p.profileFor(this.peerKey, this.invite).profile, addrs: this.hooks.myAddrs() }, j = JSON.stringify(hi);
+    const profile = this.p.profileFor(this.peerKey, this.invite).profile, device = profile ? this.p.myProfile().deviceName : null;
+    const hi = { t: 'hi', profile, addrs: this.hooks.myAddrs(), ...(device ? { device } : {}) }, j = JSON.stringify(hi);
     if (j !== this.lastHi) { this.lastHi = j; this.post(hi); }
   }
   get open() { return !this.link.closed; }
@@ -159,7 +160,7 @@ export class LinkSession {
     if (m.t === 'pong') return;
     if (m.t === 'hi') {
       const prof = m.profile as { profile?: { key?: string } } | null;
-      try { if (prof?.profile?.key === this.peerKey) this.p.meet({ profile: prof }); } catch { /* invalid profile: ignored, envelopes still verify */ }
+      try { if (prof?.profile?.key === this.peerKey) { this.p.meet({ profile: prof }); this.p.setPeerDevice(this.peerKey, m.device); } } catch { /* invalid profile: ignored, envelopes still verify */ }
       if (Array.isArray(m.addrs)) { try { this.p.setLinkAddrs(this.peerKey, (m.addrs as unknown[]).filter((a): a is string => typeof a === 'string').slice(0, 6)); } catch { /* malformed: ignored */ } }
       this.hooks.onChange?.('contacts');
       void this.flush();

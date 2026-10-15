@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import type { ClanApp } from '@clan/core';
-import { PeopleChanged, PeopleAlert } from '@clan/core';
+import { PeopleChanged, PeopleAlert, PushAgent } from '@clan/core';
 import { candidateInterfaces, createClassroomTls, logError } from '@classroom/server';
 import { IMAGE_PREVIEW_BYTES, TEXT_PREVIEW_BYTES, previewImageMime, previewKind, type FilePreview } from '@classroom/client';
 import { newEd25519, nodeSigner, sha256File } from '@classroom/client/node';
@@ -28,12 +28,12 @@ import type { Trust } from './trust.ts';
 
 const Key = z.string().regex(/^[A-Za-z0-9_-]{43}$/), Id = z.uuid();
 
-export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust: Trust; dataDir: string; displayName(): string | undefined }) {
+export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust: Trust; dataDir: string; displayName(): string | undefined; deviceName?(): string | undefined }) {
   const p = c.people, signer = nodeSigner(o.keystore.get('device-ed25519', () => newEd25519().privatePkcs8)); // the same key as trust.device(), synchronous signer
   const fresh = await createClassroomTls('people', Date.now(), 5 * 365 * 86_400_000);
   const tls = JSON.parse(o.keystore.get('people-tls', () => JSON.stringify({ certPem: fresh.certPem, keyPem: fresh.keyPem, certificate: fresh.certificate, spkiSha256: fresh.spkiSha256 }))) as typeof fresh;
   p.setSigner(signer);
-  if (p.myProfile().name === 'CLAN user' && o.displayName()) p.updateProfile({ name: o.displayName()!.slice(0, 80) });
+  p.adoptIdentity(o.displayName(), o.deviceName?.());
   const send = (ch: string, v: unknown) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send(ch, v); };
   const loopback = process.env.CLAN_TEST_LOOPBACK === '1' && !(await import('electron')).app.isPackaged; // development/E2E only
   // The same port across restarts, so friends' saved routes keep working; a fresh one only if it is taken.
@@ -63,9 +63,12 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     n.on('click', () => { const win = BrowserWindow.getAllWindows()[0]; if (win) { win.show(); win.focus(); win.webContents.send('people:open', x.convId ?? null); } }); n.show();
   });
   // this computer is one of the account's devices (after Me › My Devices linking); friends hear about the others
-  const devices = () => { try { const acc = c.sync.account(); if (!acc) return; p.announceDevice(acc.accountId, `${p.myProfile().name}’s ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer'}`); if (p.shareDeviceLinks()) void rt.tick(); } catch (e) { logError('people', e); } };
+  const devices = () => { try { const acc = c.sync.account(); if (!acc) return; p.announceDevice(acc.accountId, p.myProfile().deviceName ?? `${p.myProfile().name}’s ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer'}`); if (p.shareDeviceLinks()) void rt.tick(); } catch (e) { logError('people', e); } };
   devices();
   setInterval(() => { void p.sweep().catch((e) => logError('people', e)); devices(); }, 60_000).unref();
+  // Optional internet-assisted wake-ups for friends' phones (sender side only: a computer has no push token).
+  const push = new PushAgent(p, { fetch: (u, i) => fetch(u, i), sign: (b) => signer.sign(b), devices: () => [], nonce: () => randomUUID().replaceAll('-', '') });
+  setInterval(() => void push.tick(), 5_000).unref();
   void p.sweep();
 
   const handle = (ch: string, f: (...a: unknown[]) => unknown) => ipcMain.handle(ch, (_e, ...a) => f(...a));
@@ -113,7 +116,23 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   handle('people:invite', (k, mode, ttl) => { const id = p.inviteChat(Key.parse(k), z.enum(['permanent', 'temporary']).parse(mode ?? 'permanent'), ttl === null || ttl === undefined ? null : z.number().int().refine((n) => (TEMP_TTLS as readonly number[]).includes(n)).parse(ttl)); void rt.tick(); return id; });
   handle('people:chat', (action, id) => { const conv = Id.parse(id), a = z.enum(['accept', 'decline', 'end']).parse(action); if (a === 'accept') p.acceptChat(conv); else if (a === 'decline') p.declineChat(conv); else p.endChat(conv); void rt.tick(); });
   handle('people:page', (id, before, limit) => p.page(Id.parse(id), { before: before === undefined || before === null ? undefined : z.number().int().parse(before), limit: limit === undefined ? undefined : z.number().int().parse(limit) }));
-  handle('people:send', (id, text) => { const m = p.sendText(Id.parse(id), z.string().parse(text)); void rt.tick(); return m; });
+  handle('people:send', (id, text, replyTo) => { const m = p.sendText(Id.parse(id), z.string().parse(text), { replyTo: replyTo ? Id.parse(replyTo) : undefined }); void rt.tick(); return m; });
+  handle('people:message', async (action, msgId, arg) => {
+    const id = Id.parse(msgId), a = z.enum(['edit', 'deleteForEveryone', 'deleteForMe', 'react', 'forward']).parse(action);
+    if (a === 'edit') p.editMessage(id, z.string().parse(arg));
+    else if (a === 'deleteForEveryone') await p.deleteForEveryone(id);
+    else if (a === 'deleteForMe') await p.deleteForMe(id);
+    else if (a === 'react') p.react(id, arg === null ? null : z.string().parse(arg));
+    else { // forward a copy into another active conversation (text, or the verified local file)
+      const m = p.message(id), to = Id.parse(arg);
+      if (!m || m.deleted) throw new Error('That message is no longer here.');
+      if (m.kind === 'text' && m.text) p.sendText(to, m.text);
+      else if (m.transfer) { const path = m.mine ? p.outgoingBytesLocal(m.transfer.id) : p.filePath(m.transfer.id); if (!path) throw new Error('This file is not on this computer.'); await offer(to, path, m.transfer.name, m.transfer.mime); }
+    }
+    void rt.tick();
+  });
+  handle('people:pushRelay', (url) => { const r = url === undefined ? p.pushRelay() : p.pushRelay(z.string().max(200).nullable().parse(url)); void push.tick(); return { relay: r, status: push.status }; });
+  handle('people:wakeCall', (k, callId, kind) => { const ok = p.wakeForCall(Key.parse(k), Id.parse(callId), z.enum(['call', 'call.cancel']).parse(kind ?? 'call')); if (ok) void push.tick(); return ok; });
   handle('people:retry', (msgId) => { p.retryMessage(Id.parse(msgId)); void rt.tick(); });
   handle('people:read', (id) => { p.markRead(Id.parse(id)); void rt.tick(); });
   handle('people:clear', (id) => p.clearHistory(Id.parse(id)));
