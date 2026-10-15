@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 release/
+release-final/
 .expo/
 apps/mobile/ios/
 apps/mobile/android/
