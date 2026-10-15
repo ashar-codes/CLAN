@@ -12,7 +12,12 @@ const page = await app.firstWindow();
 createServer((req, res) => {
   let body = ''; req.on('data', (c) => { body += c; });
   req.on('end', async () => {
-    try { const out = await page.evaluate(`(async () => { ${JSON.parse(body).code} })()`); res.end(JSON.stringify(out ?? null)); }
+    try {
+      const { code, main } = JSON.parse(body);
+      // main: answer native dialogs from the main process, as a person would (paths only)
+      if (main) { await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [f] })); }, main); }
+      const out = code ? await page.evaluate(`(async () => { ${code} })()`) : null; res.end(JSON.stringify(out ?? null));
+    }
     catch (e) { res.statusCode = 500; res.end(String(e)); }
   });
 }).listen(Number(process.env.PORT ?? 7788), '127.0.0.1', () => console.log('driver ready'));

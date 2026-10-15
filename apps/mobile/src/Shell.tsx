@@ -4,7 +4,7 @@ import { directorySettings } from './people/directory';
 import { useEffect, useState, type ReactNode } from 'react';
 import * as Notifications from 'expo-notifications';
 import {syncTimetableNotifications} from './timetable/notifications';
-import { AppState, Alert, Pressable, Text, View } from 'react-native';
+import { AppState, Alert, Keyboard, Pressable, Text, View } from 'react-native';
 import { dataNotice, phoneClan, me } from './core/clan';
 import { nearby } from './people/nearby';
 import { syncNow } from './sync/phone';
@@ -24,6 +24,9 @@ const TABS: [Tab, string, string][] = [['home', 'Home', '⌂'], ['study', 'Study
 
 export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEditProfile(): void; intake?: ReactNode }) {
   const c = useC();
+  // the tab bar steps aside while typing (keyboard up) so composers and fields keep their space
+  const [typing, setTyping] = useState(false);
+  useEffect(() => { const a = Keyboard.addListener('keyboardDidShow', () => setTyping(true)), b = Keyboard.addListener('keyboardDidHide', () => setTyping(false)); return () => { a.remove(); b.remove(); }; }, []);
   const [tab, setTab] = useState<Tab>('home'), [joining, setJoining] = useState(false), [devices, setDevices] = useState(false), [hosting, setHosting] = useState(false);
   useEffect(() => onPeopleNotification(() => { setTab('people'); setJoining(false); setDevices(false); setHosting(false); }), []);
   const [studyInitial, setStudyInitial] = useState<MobileStudyTab>('courses');
@@ -44,7 +47,7 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1 }}>{body}</View>
-      {!intake && (
+      {!intake && !typing && (
         <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface }}>
           {TABS.map(([t, l, ic]) => (
             <Pressable key={t} accessibilityRole="tab" accessibilityLabel={t === 'inbox' && inboxCount ? `${l}, ${inboxCount} items` : t === 'people' && peopleCount ? `${l}, ${peopleCount} new` : l} accessibilityState={{ selected: tab === t }}
