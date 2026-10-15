@@ -84,7 +84,8 @@ object ClanWake {
     if (!nm.areNotificationsEnabled()) return "notifications-off"
     val previews = prefs(ctx).getBoolean("previews", true)
     val who = if (previews) f.name else "A friend"
-    val small = ctx.applicationInfo.icon
+    // the monochrome status-bar icon generated from the CLAN logo (expo-notifications resource), else the app icon
+    val small = ctx.resources.getIdentifier("notification_icon", "drawable", ctx.packageName).takeIf { it != 0 } ?: ctx.applicationInfo.icon
     try {
       when (e.k) {
         "call" -> {

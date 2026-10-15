@@ -12,9 +12,13 @@ mkdir -p "$DST"
 rsync -a --delete --exclude .git --exclude node_modules --exclude apps/mobile/android --exclude apps/mobile/ios \
   --exclude '**/build' --exclude '**/.gradle' --exclude ios-derived --exclude apps/desktop/dist --exclude 'apps/desktop/release*' \
   --exclude 'Installable Files' --exclude '*.xcarchive' --exclude ipa "$SRC/" "$DST/"
-if [ ! -d "$DST/node_modules" ]; then cp -c -R "$SRC/node_modules" "$DST/node_modules"; fi
+# always the current dependencies (APFS clone: no extra space); the build dir is disposable
+rm -rf "$DST/node_modules"; cp -c -R "$SRC/node_modules" "$DST/node_modules"
 cd "$DST/apps/mobile"
 CLAN_FINAL_QA=1 CLAN_FREE_TEAM="${CLAN_FREE_TEAM:-1}" CI=1 npx expo prebuild -p ios --no-install --clean
+# Pin the published Hermes prebuilt (checked against Maven's SHA-1) so a slow network cannot silently fall back to a
+# from-source Hermes build. Set CLAN_HERMES_TARBALL to reuse a verified download.
+if [ -n "${CLAN_HERMES_TARBALL:-}" ]; then export HERMES_ENGINE_TARBALL_PATH="$CLAN_HERMES_TARBALL"; fi
 pod install --project-directory=ios
 xcodebuild -workspace ios/CLANQA.xcworkspace -scheme CLANQA -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$DST/CLAN-QA.xcarchive" -derivedDataPath "$DST/ios-derived" -allowProvisioningUpdates \

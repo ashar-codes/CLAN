@@ -54,7 +54,7 @@ async function joinClan(p: Page, name: string, code: string, host: Page, first =
 const say = async (p: Page, text: string) => { await p.getByTestId('chat-input').fill(text); await p.getByTestId('chat-input').press('Enter'); };
 const log = (p: Page) => p.locator('[role="log"]');
 const wheel = async (p: Page, who: string, action: 'Message' | 'Send') => {
-  await p.locator('.c-room-person', { hasText: who }).click();
+  await p.locator('.c-room-person', { hasText: who }).click({ timeout: 10_000 }).catch(async (e) => { throw new Error(`no ${who} among ${JSON.stringify(await p.locator('.c-room-person').allTextContents())}`, { cause: e }); });
   await p.locator('.wheel-pop').getByRole('button', { name: action, exact: true }).click();
 };
 
@@ -81,7 +81,7 @@ it('Study Group: group chat, reply, send to one member only, table share, direct
   await pickNext(a, secret.path);
   await wheel(a.page, 'Bea', 'Send');
   await a.page.getByText('to Bea only').waitFor({ timeout: 15_000 });
-  await b.page.getByTestId('thread-Host').click({ timeout: 15_000 });
+  await b.page.getByTestId('thread-E2E Tester').click({ timeout: 15_000 });
   const att = log(b.page).getByTestId('chat-file').filter({ hasText: 'only-bea.pdf' });
   await att.getByText('only the two of you').waitFor();
   await att.getByTestId('chat-download').click();
@@ -89,7 +89,7 @@ it('Study Group: group chat, reply, send to one member only, table share, direct
   const got = readdirSync(b.downloads, { recursive: true }).map(String).find((f) => f.endsWith('only-bea.pdf'))!;
   expect(createHash('sha256').update(readFileSync(join(b.downloads, got))).digest('hex')).toBe(secret.sha);
   // C: no conversation, no file — not on the table, not in C's files.
-  expect(await c.page.getByTestId('thread-Host').count()).toBe(0);
+  expect(await c.page.getByTestId('thread-E2E Tester').count()).toBe(0);
   expect(await c.page.getByText('only-bea.pdf').count()).toBe(0);
   expect(await a.page.getByTestId('room-table').getByTitle('only-bea.pdf').count()).toBe(0);
 
@@ -100,7 +100,7 @@ it('Study Group: group chat, reply, send to one member only, table share, direct
   for (const x of [b, c]) await x.page.getByText('for-everyone.pdf').first().waitFor({ timeout: 15_000 });
 
   // B → A directly; C never sees it.
-  await wheel(b.page, 'Host', 'Message');
+  await wheel(b.page, 'E2E · host', 'Message');
   await say(b.page, 'psst, a question for you');
   await a.page.getByTestId('thread-Bea').click({ timeout: 15_000 });
   await log(a.page).getByText('psst, a question for you').waitFor();

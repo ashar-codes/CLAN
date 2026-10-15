@@ -28,4 +28,8 @@ sizes.forEach((s, i) => { const e = 6 + 16 * i; head.writeUInt8(s === 256 ? 0 : 
 out('apps/desktop/build/icon.ico', Buffer.concat([head, ...imgs]));
 // tray/notification + renderer favicon
 out('apps/desktop/build/tray.png', rounded(64, 0.02));
+// Android status-bar/notification icon: white silhouette of the mark (non-white pixels), transparent elsewhere
+out('apps/mobile/assets/notification-icon.png', (() => { const c = createCanvas(96, 96), g = c.getContext('2d'); crop(g, -8, -8, 112); const d = g.getImageData(0, 0, 96, 96);
+  for (let i = 0; i < d.data.length; i += 4) { const lum = (d.data[i] + d.data[i + 1] + d.data[i + 2]) / 3; const a = lum < 200 ? 255 : 0; d.data[i] = d.data[i + 1] = d.data[i + 2] = 255; d.data[i + 3] = a; }
+  g.putImageData(d, 0, 0); return c.toBuffer('image/png'); })());
 console.log('icons written');

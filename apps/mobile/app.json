@@ -136,7 +136,14 @@
       "@config-plugins/react-native-webrtc",
       "./plugins/withShareExtension.js",
       "./plugins/withReleaseSigning.js",
-      "./plugins/withNoRemotePush.js"
+      "./plugins/withNoRemotePush.js",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#4F46E5"
+        }
+      ]
     ],
     "scheme": "clan",
     "icon": "./assets/icon.png"
