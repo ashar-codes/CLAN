@@ -205,17 +205,26 @@ export async function pairAndJoin(o: {
     const key = (c: Candidate) => JSON.stringify([c.sid ?? '', [...new Set([c.url, ...(c.alt ?? [])])].sort()]);
     const seen = new Set(o.candidates.slice(0, 32).map(key));
     const deadline = performance.now() + Math.min(10000, Math.max(0, o.discoveryWindowMs ?? 10000));
+    // Late adverts (a host announced or resolved after the person tapped Join) are still tried, but the wait ends as soon
+    // as the known candidates have all failed and nothing new appeared for QUIET_MS — not after a blind fixed delay.
+    const QUIET_MS = 2500;
+    let initialSettled = !carriers.length, lastFresh = performance.now();
+    void Promise.allSettled(attempts.slice()).then(() => { initialSettled = true; });
     attempts.push((async () => {
       while (searching && performance.now() < deadline && seen.size < 32) {
+        if (initialSettled && performance.now() - lastFresh > QUIET_MS && seen.size > 0) break;
         const fresh = o.candidatesNow!().filter(c => { const k = key(c); if (seen.has(k) || seen.size >= 32) return false; seen.add(k); return true; });
         if (fresh.length) {
+          lastFresh = performance.now();
           try { return await pairAndJoin({ ...o, candidates: fresh, carriers: [], candidatesNow: undefined }); }
           catch (e) { if (e instanceof TransferError) errors.push(e); }
         }
         await new Promise(r => setTimeout(r, 100));
       }
       const noHint=new TransferError('none_found', 'No additional reachable CLAN was discovered. Use the host address or QR fallback.');
-      if(!errors.length)errors.push(noHint);
+      // "nothing else appeared" is the answer only when there was nothing else to try; while a known candidate is
+      // still pairing, its own result (e.g. wrong code) is the truthful one (the old order depended on timing)
+      if(!errors.length && !carriers.length)errors.push(noHint);
       throw noHint;
     })());
   }

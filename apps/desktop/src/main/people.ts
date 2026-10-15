@@ -15,6 +15,7 @@ import { z } from 'zod';
 import QRCode from 'qrcode';
 import type { ClanApp } from '@clan/core';
 import { PeopleChanged, PeopleAlert, PushAgent } from '@clan/core';
+import { DiscoveryDiagnostics } from '@classroom/client';
 import { candidateInterfaces, createClassroomTls, logError } from '@classroom/server';
 import { IMAGE_PREVIEW_BYTES, TEXT_PREVIEW_BYTES, previewImageMime, previewKind, type FilePreview } from '@classroom/client';
 import { newEd25519, nodeSigner, sha256File } from '@classroom/client/node';
@@ -27,6 +28,9 @@ import type { Keystore } from './keystore.ts';
 import type { Trust } from './trust.ts';
 
 const Key = z.string().regex(/^[A-Za-z0-9_-]{43}$/), Id = z.uuid();
+
+/** One connectivity-diagnostics record for this computer (People and CLAN discovery). */
+export const desktopDiagnostics = new DiscoveryDiagnostics();
 
 export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust: Trust; dataDir: string; displayName(): string | undefined; deviceName?(): string | undefined }) {
   const p = c.people, signer = nodeSigner(o.keystore.get('device-ed25519', () => newEd25519().privatePkcs8)); // the same key as trust.device(), synchronous signer
@@ -49,7 +53,7 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
     directory: savedDirectory,
     ownClans: () => { const h = directoryHost(); if (!h) return []; const u = new URL(h.url); return [{ kind: 'clan', r: h.sid.replaceAll('-', ''), endpoints: [u.host], clan: { sid: h.sid, title: h.title.slice(0, 80), type: h.type } } satisfies DirectoryAdvert]; },
     onClans: (items, expires) => setDirectoryClassrooms(items.filter((x) => x.clan).map((x) => ({ ...x.clan!, url: `http://${x.endpoints[0]}`, alt: x.endpoints.slice(1).map((a) => `http://${a}`), discoverySource: 'directory' })), expires),
-    onLive: (e) => send('people:live', { from: e.from, body: e.body }),
+    onLive: (e) => send('people:live', { from: e.from, body: e.body }), diagnostics: desktopDiagnostics,
     onChange: (what) => send('people:changed', { what }),
   });
   const rt = await start(saved).catch((e: NodeJS.ErrnoException) => { if (saved && e.code === 'EADDRINUSE') return start(); throw e; });
@@ -98,6 +102,18 @@ export async function registerPeople(c: ClanApp, o: { keystore: Keystore; trust:
   });
   handle('people:visibility', async (v, ms) => { const r = p.setVisibility(z.enum(['everyone', 'friends', 'invisible']).parse(v), ms === undefined ? undefined : z.number().int().parse(ms)); await rt.refreshDiscovery(); return r; });
   handle('people:nearby', () => rt.nearby());
+  const diagView = () => ({ state: desktopDiagnostics.state, hint: desktopDiagnostics.hint(), recent: desktopDiagnostics.recent(25) });
+  handle('people:diagnostics', () => diagView());
+  handle('people:restartDiscovery', () => { rt.restartDiscovery(); return diagView(); });
+  handle('people:exportDiagnostics', async () => {
+    const { app } = await import('electron');
+    const text = desktopDiagnostics.export({ app: `${app.getName()} ${app.getVersion()}`, source: await readFile(join(app.getAppPath(), 'package.json'), 'utf8').then((t) => String((JSON.parse(t) as { clanSourceCommit?: string }).clanSourceCommit ?? 'development'), () => 'unknown'), platform: `${process.platform} ${process.arch}`, generated: new Date().toISOString() });
+    const win = BrowserWindow.getFocusedWindow(), opts = { defaultPath: `clan-diagnostics-${Date.now()}.txt`, filters: [{ name: 'Text', extensions: ['txt'] }] };
+    const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, text, 'utf8');
+    return { name: basename(r.filePath) };
+  });
   handle('people:directory', async (raw) => { if (raw !== undefined) { const config = raw === null ? null : directoryConfig(raw); const previous = rt.directory().config; rt.configureDirectory(config); try { await writeFile(directoryFile, JSON.stringify(config), { mode: 0o600 }); } catch (e) { rt.configureDirectory(previous); throw e; } } return rt.directory(); });
   let addresses = candidateInterfaces().map((i) => i.address).sort().join(',');
   powerMonitor.on('resume', () => rt.networkChanged());

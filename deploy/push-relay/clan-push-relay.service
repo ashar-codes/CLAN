@@ -1,0 +1,21 @@
+# systemd unit for the CLAN push relay. Install after reading ANDROID_PUSH_ACTIVATION.md.
+[Unit]
+Description=CLAN push relay (wake-ups only; no message content)
+After=network-online.target
+
+[Service]
+User=clanrelay
+Group=clanrelay
+EnvironmentFile=/etc/clan-relay/relay.env
+WorkingDirectory=/opt/clan
+ExecStart=/usr/bin/node packages/server/src/push-relay-cli.ts
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/clan-relay
+ReadOnlyPaths=/etc/clan-relay
+
+[Install]
+WantedBy=multi-user.target

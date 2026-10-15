@@ -334,6 +334,7 @@ export type PeopleTransfer = import('@clan/core').PeopleTransfer;
 export type NearbyPersonView = { key: string; name: string; profile: import('@classroom/protocol').ProfileView; endpoint: string; relation: string; seenAt: number; verified: boolean; network?: string; connection?: string };
 export type MyPeopleProfile = { key: string; fingerprint: string; qr: string; port: number; profile: { name: string; deviceName: string | null; ready: boolean; visibilityChoice: 'everyone' | 'friends' | 'invisible'; fields: Record<string, unknown>; fieldVisibility: Record<string, 'everyone' | 'friends' | 'nobody'>;
   visibility: 'everyone' | 'friends' | 'invisible'; everyoneUntil: number | null; avatar: { sha256: string; size: number; mime: string; objectId: string } | null; updatedAt: number } };
+export type DiagnosticsView = { state: import('@classroom/client').DiscoveryState; hint: string | null; recent: { at: number; what: string }[] };
 export type PeopleApi = {
   directory(config?: import('@classroom/protocol').DirectoryConfig | null): Promise<{ config: import('@classroom/protocol').DirectoryConfig | null; status: string }>;
   nearbyAlerts(on?: boolean): Promise<boolean>;
@@ -349,6 +350,7 @@ export type PeopleApi = {
   page(convId: string, before?: number | null, limit?: number): Promise<PeopleMessage[]>; send(convId: string, text: string, replyTo?: string): Promise<PeopleMessage>; retry(msgId: string): Promise<void>;
   message(action: 'edit' | 'deleteForEveryone' | 'deleteForMe' | 'react' | 'forward', msgId: string, arg?: string | null): Promise<void>;
   autoDownload(set?: { on: boolean; maxBytes: number; kinds: ('image' | 'video' | 'audio' | 'document')[] } | null): Promise<{ on: boolean; maxBytes: number; kinds: ('image' | 'video' | 'audio' | 'document')[] }>;
+  diagnostics(): Promise<DiagnosticsView>; restartDiscovery(): Promise<DiagnosticsView>; exportDiagnostics(): Promise<{ name: string } | null>;
   pushRelay(url?: string | null): Promise<{ relay: string | null; status: string }>; wakeCall(key: string, callId: string, kind: 'call' | 'call.cancel'): Promise<boolean>;
   read(convId: string): Promise<void>; clear(convId: string): Promise<void>; remove(convId: string): Promise<void>;
   sendFile(convId: string, files?: File[]): Promise<PeopleTransfer[]>; sendVoice(convId: string, bytes: Uint8Array, mime: string, durationMs: number): Promise<PeopleTransfer>;

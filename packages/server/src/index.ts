@@ -22,3 +22,4 @@ export { startPeopleServer, advertisePeople, browsePeople, type PeopleHost } fro
 export { listenLinks, tcpTransport, socketLink, advertiseLinks, browseLinks, LINK_SERVICE } from './link-tcp.ts';
 export { startLanDirectory } from './lan-directory.ts';
 export { pushRelay, fcmSender, apnsSender, type PushSender, type PushTarget } from './push-relay.ts';
+export { lanAddresses, rankAddresses, publishLan, browseLan, type LanAddr, type LanService, type MdnsState } from './lan-mdns.ts';

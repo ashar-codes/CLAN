@@ -22,3 +22,11 @@ it('unknown advertisements cannot grant access; bounded window ends without a me
 it('an empty bounded discovery produces no-host feedback rather than a fabricated wrong-code result',async()=>{
  await opaque.ready;const started=performance.now();await expect(pairAndJoin({candidates:[],candidatesNow:()=>[],discoveryWindowMs:200,code:'482915',profile:profile(),device:device(),opaque:opaque.client,transportFor:pinnedTransport})).rejects.toMatchObject({code:'none_found'});expect(performance.now()-started).toBeLessThan(1000);
 });
+
+it('a slow wrong-code attempt is reported as a wrong code, not as "no CLAN found" (deterministic form of the intermittent failure)',async()=>{
+ await opaque.ready;const wrong=await host('991122'),old={url:wrong.bootstrapUrl,sid:wrong.classroom.id};
+ // the bounded discovery window ends while the only real attempt is still pairing (a loaded machine / slow Wi-Fi)
+ const slow:typeof fetch=async(u,i)=>{await new Promise(r=>setTimeout(r,250));return fetch(u,i);};
+ await expect(pairAndJoin({candidates:[old],candidatesNow:()=>[old],discoveryWindowMs:100,code:'482915',profile:profile(),device:device(),opaque:opaque.client,plainFetch:slow,transportFor:pinnedTransport})).rejects.toMatchObject({code:'bad_code'});
+ expect(wrong.classroom.roster()).toHaveLength(0);
+});

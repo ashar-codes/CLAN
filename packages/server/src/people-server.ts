@@ -9,7 +9,7 @@ import websocket from '@fastify/websocket';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { z } from 'zod';
-import { Bonjour } from 'bonjour-service';
+import { browseLan, publishLan } from './lan-mdns.ts';
 import { b64u, bodySha, PEER_SERVICE, PEER_SKEW_MS, peerRequestStatement, verifyStatement, type PeerEnvelope, type PeerTlsBinding } from '@classroom/protocol';
 import { parseRange } from './storage.ts';
 import { Throttle } from './throttle.ts';
@@ -179,20 +179,13 @@ export async function startPeopleServer(o: PeopleServerOptions) {
 
 /** DNS-SD: TXT carries only a random id that the caller rotates; nothing identifies the person. */
 /** `r` random per advert; `t` the presence tag only friends can recognise (presenceTag). Nothing else is advertised. */
-export function advertisePeople(o: { port: number; r: string; t?: string }) {
-  const bonjour = new Bonjour({ bind: '0.0.0.0' } as object, () => {});
-  bonjour.publish({ name: `CLAN person ${o.r.slice(0, 6)}`, type: PEER_SERVICE, port: o.port, txt: { v: '1', r: o.r, ...(o.t ? { t: o.t } : {}) }, disableIPv6: true });
-  return () => new Promise<void>((r) => bonjour.unpublishAll(() => { bonjour.destroy(); r(); }));
+export function advertisePeople(o: { port: number; r: string; t?: string; onError?(m: string): void }) {
+  return publishLan({ type: PEER_SERVICE, name: `CLAN person ${o.r.slice(0, 6)}`, port: o.port, txt: { v: '1', r: o.r, ...(o.t ? { t: o.t } : {}) }, onError: o.onError });
 }
-export function browsePeople(onUp: (s: { addr: string; port: number; r: string; t: string }) => void, onDown?: (r: string) => void, type: string = PEER_SERVICE) {
-  const bonjour = new Bonjour({ bind: '0.0.0.0' } as object, () => {});
-  const b = bonjour.find({ type });
-  const observed = (s: import('bonjour-service').Service) => {
-    const txt = (s.txt ?? {}) as { v?: string; r?: string; t?: string }; const addr = s.addresses?.find((a) => a.includes('.')) ?? s.referer?.address;
-    if (txt.v === '1' && addr && txt.r && /^[A-Za-z0-9_-]{8,24}$/.test(txt.r)) onUp({ addr, port: s.port, r: txt.r, t: typeof txt.t === 'string' && /^[A-Za-z0-9_-]{16}$/.test(txt.t) ? txt.t : '' });
-  };
-  b.on('up', observed); b.on('srv-update', observed); b.on('txt-update', observed);
-  b.on('down', (s) => { const r = (s.txt as { r?: string } | undefined)?.r; if (r) onDown?.(r); });
-  const t = setInterval(() => { b.expire(); b.update(); }, 4000);
-  return () => { clearInterval(t); b.stop(); bonjour.destroy(); };
+/** Browse adverts; `addrs` are every usable address, best first (try them in order), `addr` the best one. */
+export function browsePeople(onUp: (s: { addr: string; addrs: string[]; port: number; r: string; t: string }) => void, onDown?: (r: string) => void, type: string = PEER_SERVICE, o: { onError?(m: string): void } = {}) {
+  return browseLan(type, (s) => {
+    const txt = s.txt as { v?: string; r?: string; t?: string };
+    if (txt.v === '1' && typeof txt.r === 'string' && /^[A-Za-z0-9_-]{8,24}$/.test(txt.r)) onUp({ addr: s.addrs[0]!, addrs: s.addrs, port: s.port, r: txt.r, t: typeof txt.t === 'string' && /^[A-Za-z0-9_-]{16}$/.test(txt.t) ? txt.t : '' });
+  }, (s) => { const r = (s.txt as { r?: unknown }).r; if (typeof r === 'string') onDown?.(r); }, o);
 }

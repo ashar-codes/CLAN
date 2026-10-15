@@ -33,7 +33,7 @@ export function Onboarding({ onDone }: { onDone(): void }) {
       <div className="row"><button type="button" onClick={() => void api.people.pickAvatar().then((a) => setPic(!!a), (e) => setErr((e as Error).message))}>{pic ? 'Picture added ✓ (change)' : 'Add your profile picture (optional)'}</button></div>
       <fieldset className="stack"><legend><b>Who can find you nearby?</b></legend>
         {VIS.map(([v, label, help]) => <label key={v} className="row"><input type="radio" name="vis" checked={vis === v} onChange={() => setVis(v)} /><span><b>{label}</b><br /><small className="muted">{help}</small></span></label>)}
-        <small className="muted">Nearby people see only your name and picture (plus profile fields you mark for everyone). Change this any time in People. Blocked people never see you.</small>
+        <small className="muted">Nearby people see only your name and picture (plus profile fields you mark for everyone). Change this any time in People. People you block can't contact you, but in Everyone Nearby anyone on this network can see you — choose Friends Only or Invisible to hide.</small>
       </fieldset>
       {err && <p role="alert" className="error">{err}</p>}
       <button className="primary" disabled={busy} onClick={() => void save()}>Continue</button>

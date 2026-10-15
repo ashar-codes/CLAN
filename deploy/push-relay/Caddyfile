@@ -1,0 +1,15 @@
+# HTTPS front for the CLAN push relay (automatic Let's Encrypt certificates). Replace the host name.
+# The relay itself listens on 127.0.0.1 only; Caddy forwards and sets X-Forwarded-For (CLAN_RELAY_TRUST_PROXY=1).
+relay.example.edu {
+	encode gzip
+	request_body {
+		max_size 8KB
+	}
+	reverse_proxy 127.0.0.1:8443
+	log {
+		# no request bodies or headers are logged; keep access logs short-lived
+		output file /var/log/caddy/clan-relay.log {
+			roll_keep_for 72h
+		}
+	}
+}

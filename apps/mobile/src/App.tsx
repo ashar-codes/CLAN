@@ -15,6 +15,7 @@ import { setupPhoneSync, startSyncSchedule } from './sync/phone';
 import { bump, ThemeRoot } from './ui/kit';
 import { onPeopleNotification } from './people/notifications';
 import { PeopleScreen } from './screens/People';
+import { discoveryDiagnostics } from './people/nearby';
 import { PhoneCallProvider } from './people/Call';
 import { Shell } from './Shell';
 import { PresentationCard } from './media/Watch';
@@ -130,13 +131,23 @@ function ProfileForm({ c, initial, first, onSaved }: { c: C; initial: OwnProfile
             <Text style={{ color: c.muted, fontSize: 12 }}>{help}</Text>
           </Pressable>
         ))}
-        <Text style={{ color: c.muted, fontSize: 12 }}>Nearby people see your name and picture only. Change this any time in People. Anyone you block can never see you.</Text>
+        <Text style={{ color: c.muted, fontSize: 12 }}>Nearby people see your name and picture only. Change this any time in People. People you block can't contact you, but in Everyone Nearby anyone on this network can see you — choose Friends Only or Invisible to hide.</Text>
       </View>}
       {!!error && <Text style={{ color: c.danger }} accessibilityLiveRegion="polite">{error}</Text>}
       <Text style={{ color: c.muted, fontSize: 12 }}>Device key {shortFingerprint(initial.fingerprint)} — kept in this phone's secure storage.</Text>
       <Button c={c} primary label={first ? 'Continue' : 'Save'} onPress={() => void save()} />
     </ScrollView>
   );
+}
+
+/** Say which stage failed: nothing advertised, discovery not running, found but unreachable, or the code/authentication. */
+function joinMessage(e: TransferError) {
+  const d = discoveryDiagnostics.state;
+  if (e.code === 'none_found') return d.clanBrowsing ? 'No live CLAN was found on this Wi-Fi. Check the host has started the CLAN and that you are on the same network; otherwise type the host address shown on its screen.' : 'CLAN discovery is not running on this phone. Tap Refresh discovery in People › Nearby, or type the host address.';
+  if (e.code === 'unreachable') return 'A CLAN was found but could not be reached. The network may isolate devices (guest Wi-Fi) or a firewall blocks the host. Type the host address or use its QR code.';
+  if (e.code === 'bad_code') return 'No CLAN here matches that code. Check the 6 digits on the host screen.';
+  if (e.code === 'mitm') return 'The CLAN did not prove its identity. Nothing was joined. Ask the host for its QR code.';
+  return e.message;
 }
 
 function JoinScreen({ c, profile: own, onJoined, onEdit, onProfile }: { c: C; profile: OwnProfile; onJoined(j: PairedJoin): void; onEdit(): void; onProfile(p: OwnProfile): void }) {
@@ -179,11 +190,11 @@ function JoinScreen({ c, profile: own, onJoined, onEdit, onProfile }: { c: C; pr
       const carriers = qr || candidates.length ? [] : (await bleAllowed()) ? await bleCarriers() : [];
       for (let i = 0; i < 12 && candidates.length === 0 && carriers.length === 0; i++) { await new Promise((r) => setTimeout(r, 250)); candidates = foundRef.current; }
       // Same secure flow as desktop: OPAQUE (official WASM in the isolated WebView) -> MACed binding -> pinned native TLS.
-      onJoined(await pairAndJoin({ candidates, candidatesNow: qr || address.trim() ? undefined : () => foundRef.current, discoveryWindowMs: Math.max(0, 3000-(performance.now()-discoveryStarted)), carriers, associate: associator, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
+      onJoined(await pairAndJoin({ candidates, candidatesNow: qr || address.trim() ? undefined : () => foundRef.current, discoveryWindowMs: Math.max(0, 9000-(performance.now()-discoveryStarted)), carriers, associate: associator, code, profile, device: await deviceSigner(), opaque: opaqueClient(), transportFor: pinnedNativeTransport }));
     } catch (e) {
       const d = (e as { code?: string; direct?: DirectPackage }).direct;
       if ((e as { code?: string }).code === 'direct_manual' && d) setManual({ ssid: d.ssid, passphrase: d.passphrase });
-      else setError(e instanceof TransferError ? e.message : 'Something went wrong. Try again.');
+      else setError(e instanceof TransferError ? joinMessage(e) : 'Something went wrong. Try again.');
     } finally { setBusy(false); }
   };
 

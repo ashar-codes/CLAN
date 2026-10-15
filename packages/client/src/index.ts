@@ -187,3 +187,4 @@ export { peerAuthHeaders, peerSocketAuth, type PeerKeySigner } from './people-au
 export * from './lan-directory.ts';
 export { MeetingRoom, type MeetingMedia } from './meeting-room.ts';
 export * from './remote-control.ts';
+export { DiscoveryDiagnostics, clean as cleanDiagnostic, type DiscoveryFailure, type DiscoveryState } from './diagnostics.ts';

@@ -5,6 +5,7 @@ set -eu
 SRC="$(cd "$(dirname "$0")/../../.." && pwd)"
 case "$SRC" in *' '*) echo 'Use an isolated space-free worktree.' >&2; exit 1;; esac
 export CLAN_SOURCE_SHA="${CLAN_SOURCE_SHA:-$(git -C "$SRC" rev-parse HEAD)}"
+export EXPO_PUBLIC_CLAN_SOURCE_SHA="$CLAN_SOURCE_SHA" # shown in exported diagnostics
 export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home}"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 cd "$SRC/apps/mobile"

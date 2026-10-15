@@ -1,7 +1,7 @@
 // clan-link/1 over plain TCP (security comes from the link handshake, not the socket): a listener for incoming links
 // and a dialer for `tcp:host:port` addresses. Used by computers on any LAN or hotspot, and by tests.
 import { createServer, connect, type Socket } from 'node:net';
-import { Bonjour } from 'bonjour-service';
+import { publishLan } from './lan-mdns.ts';
 import { browsePeople } from './people-server.ts';
 import type { ByteLink } from '@classroom/protocol';
 
@@ -46,9 +46,7 @@ export const tcpTransport = (timeoutMs = 8000) => ({
 });
 
 /** DNS-SD for link listeners: a random id and the friends-only presence tag, nothing else. */
-export function advertiseLinks(o: { port: number; r: string; t?: string }) {
-  const bonjour = new Bonjour({ bind: '0.0.0.0' } as object, () => {});
-  bonjour.publish({ name: `clan-${o.r.slice(0, 8)}`, type: LINK_SERVICE, port: o.port, txt: { v: '1', r: o.r, ...(o.t ? { t: o.t } : {}) }, disableIPv6: true });
-  return () => new Promise<void>((r) => bonjour.unpublishAll(() => { bonjour.destroy(); r(); }));
+export function advertiseLinks(o: { port: number; r: string; t?: string; onError?(m: string): void }) {
+  return publishLan({ type: LINK_SERVICE, name: `clan-${o.r.slice(0, 8)}`, port: o.port, txt: { v: '1', r: o.r, ...(o.t ? { t: o.t } : {}) }, onError: o.onError });
 }
-export const browseLinks = (onUp: (s: { addr: string; port: number; r: string; t: string }) => void, onDown?: (r: string) => void) => browsePeople(onUp, onDown, LINK_SERVICE);
+export const browseLinks = (onUp: Parameters<typeof browsePeople>[0], onDown?: (r: string) => void, o: { onError?(m: string): void } = {}) => browsePeople(onUp, onDown, LINK_SERVICE, o);

@@ -11,7 +11,8 @@ import { phoneClan, me } from '../core/clan';
 let agent: PushAgent | null = null, devices: PushDevice[] = [];
 const answered = new Set<string>(), declined = new Set<string>();
 export const pushStatus = () => !ClanPush ? 'This build has no push module: local network only.' : !ClanPush.configured() ? 'Push is not configured in this build (no Firebase/Apple push credentials): local network only.' : agent?.status ?? 'Starting…';
-export const pushTick = () => void agent?.tick();
+/** Re-read the token (FCM rotates it; onNewToken also stores it natively) and run the agent. */
+export const pushTick = () => { if (agent) void tokens().then((d) => { devices = d; return agent!.tick(); }).catch(() => {}); };
 
 async function tokens() {
   const out: PushDevice[] = [], topic = ClanPush?.bundleId?.() ?? undefined;

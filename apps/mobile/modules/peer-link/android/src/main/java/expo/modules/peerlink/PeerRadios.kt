@@ -43,6 +43,7 @@ import java.net.Inet6Address
 import java.util.concurrent.ConcurrentHashMap
 
 const val SERVICE_TYPE = "_clanlink._tcp"
+const val CLAN_SERVICE_TYPE = "_classroomlan._tcp"
 private val R_RE = Regex("^[A-Za-z0-9_-]{8,24}$")
 private val T_RE = Regex("^[A-Za-z0-9_-]{16}$")
 
@@ -76,58 +77,106 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
   private val nsd get() = ctx.getSystemService(Context.NSD_SERVICE) as NsdManager
   private var nsdReg: NsdManager.RegistrationListener? = null
   private var nsdDisc: NsdManager.DiscoveryListener? = null
-  private val resolveQueue = ArrayDeque<NsdServiceInfo>()
-  private var resolving = false
+  private var clanDisc: NsdManager.DiscoveryListener? = null
+  // One serialized resolve queue for People (_clanlink) and hosted CLANs (_classroomlan): Android before 14 refuses
+  // concurrent resolves and a resolve can hang without a callback. Each resolve has a deadline; failures are retried
+  // with backoff (bounded), and every outcome is reported instead of being dropped (docs/DISCOVERY_ROOT_CAUSE.md).
+  private data class Pending(val info: NsdServiceInfo, val kind: String, val generation: Int, val attempt: Int)
+  private val resolveQueue = ArrayDeque<Pending>()
+  private var resolving: Pending? = null
+  private var resolveToken = 0
   private var nsdGeneration = 0
+  private var clanGeneration = 0
+  private fun status(what: String, extra: Map<String, Any?> = emptyMap()) = emit("radio", mapOf("type" to "status", "via" to "nsd", "what" to what) + extra)
 
   fun nsdAdvertise(r: String, t: String, port: Int) {
-    require(R_RE.matches(r) && (t.isEmpty() || T_RE.matches(t))) { "bad id" }
+    if (!R_RE.matches(r) || (t.isNotEmpty() && !T_RE.matches(t)) || port !in 1..65535) return
     nsdStopAdvertise()
     val info = NsdServiceInfo().apply { serviceName = "clan-${r.take(8)}"; serviceType = SERVICE_TYPE; setPort(port); setAttribute("r", r); if (t.isNotEmpty()) setAttribute("t", t); setAttribute("v", "1") }
     val l = object : NsdManager.RegistrationListener {
-      override fun onServiceRegistered(i: NsdServiceInfo) {}
-      override fun onRegistrationFailed(i: NsdServiceInfo, code: Int) { emit("radio", mapOf("type" to "error", "via" to "nsd", "message" to "advertise failed ($code)")) }
+      override fun onServiceRegistered(i: NsdServiceInfo) { status("advertise-registered") }
+      override fun onRegistrationFailed(i: NsdServiceInfo, code: Int) { emit("radio", mapOf("type" to "error", "via" to "nsd", "message" to "advertise failed ($code)")); status("advertise-failed", mapOf("code" to code)) }
       override fun onServiceUnregistered(i: NsdServiceInfo) {}
       override fun onUnregistrationFailed(i: NsdServiceInfo, code: Int) {}
     }
     nsdReg = l
-    nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, l)
+    try { nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, l) } catch (e: Exception) { nsdReg = null; status("advertise-failed", mapOf("code" to -1, "message" to (e.message ?: ""))) }
   }
   fun nsdStopAdvertise() { nsdReg?.let { runCatching { nsd.unregisterService(it) } }; nsdReg = null }
 
+  private fun discovery(kind: String, generation: () -> Int) = object : NsdManager.DiscoveryListener {
+    val started = generation()
+    override fun onDiscoveryStarted(t: String) { status("browse-started", mapOf("kind" to kind)) }
+    override fun onDiscoveryStopped(t: String) {}
+    override fun onStartDiscoveryFailed(t: String, code: Int) { emit("radio", mapOf("type" to "error", "via" to "nsd", "message" to "browse failed ($code)")); status("browse-failed", mapOf("kind" to kind, "code" to code)) }
+    override fun onStopDiscoveryFailed(t: String, code: Int) {}
+    override fun onServiceFound(i: NsdServiceInfo) {
+      if (kind == "people" && !i.serviceName.startsWith("clan-")) return
+      main.post { if (started == generation()) { status("found", mapOf("kind" to kind)); enqueue(Pending(i, kind, started, 0)) } }
+    }
+    override fun onServiceLost(i: NsdServiceInfo) { main.post { if (started == generation()) emit(if (kind == "people") "radio" else "clan", mapOf("type" to "lost", "via" to "nsd", "name" to i.serviceName)) } }
+  }
   fun nsdBrowse() {
     nsdStopBrowse()
-    val generation = nsdGeneration
-    val l = object : NsdManager.DiscoveryListener {
-      override fun onDiscoveryStarted(t: String) {}
-      override fun onDiscoveryStopped(t: String) {}
-      override fun onStartDiscoveryFailed(t: String, code: Int) { emit("radio", mapOf("type" to "error", "via" to "nsd", "message" to "browse failed ($code)")) }
-      override fun onStopDiscoveryFailed(t: String, code: Int) {}
-      override fun onServiceFound(i: NsdServiceInfo) { if (i.serviceName.startsWith("clan-")) main.post { if (generation == nsdGeneration && resolveQueue.size < 64) { resolveQueue.add(i); nextResolve() } } }
-      override fun onServiceLost(i: NsdServiceInfo) { if (generation == nsdGeneration) emit("radio", mapOf("type" to "lost", "via" to "nsd", "name" to i.serviceName)) }
-    }
+    val l = discovery("people") { nsdGeneration }
     nsdDisc = l
-    nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l)
+    try { nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l) } catch (e: Exception) { nsdDisc = null; status("browse-failed", mapOf("kind" to "people", "code" to -1)) }
   }
-  // one resolve at a time (older Android refuses concurrent resolves)
+  /** Hosted CLAN sessions (_classroomlan._tcp), sharing the same resolve queue as People. */
+  fun clanBrowse() {
+    clanStopBrowse()
+    val l = discovery("clan") { clanGeneration }
+    clanDisc = l
+    try { nsd.discoverServices(CLAN_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l) } catch (e: Exception) { clanDisc = null; status("browse-failed", mapOf("kind" to "clan", "code" to -1)) }
+  }
+  fun clanStopBrowse() { clanGeneration++; clanDisc?.let { runCatching { nsd.stopServiceDiscovery(it) } }; clanDisc = null; resolveQueue.removeAll { it.kind == "clan" } }
+
+  private fun current(p: Pending) = p.generation == (if (p.kind == "people") nsdGeneration else clanGeneration)
+  private fun enqueue(p: Pending) {
+    if (resolveQueue.size >= 64 || resolveQueue.any { it.kind == p.kind && it.info.serviceName == p.info.serviceName }) return
+    resolveQueue.add(p); nextResolve()
+  }
+  private fun retry(p: Pending, why: String) {
+    status("resolve-failed", mapOf("kind" to p.kind, "attempt" to p.attempt + 1, "reason" to why))
+    if (p.attempt < 2) main.postDelayed({ if (current(p)) enqueue(p.copy(attempt = p.attempt + 1)) }, 1500L * (p.attempt + 1))
+  }
+  /** Every address of a resolved service, IPv4 first (IPv6 link-local needs a scope and is rarely routable). */
+  @Suppress("DEPRECATION")
+  private fun hostsOf(s: NsdServiceInfo): List<String> {
+    val all = if (Build.VERSION.SDK_INT >= 34) s.hostAddresses else listOfNotNull(s.host)
+    return all.sortedBy { if (it is java.net.Inet4Address) 0 else 1 }.mapNotNull { it.hostAddress?.substringBefore('%') }.distinct().take(6)
+  }
   @Suppress("DEPRECATION")
   private fun nextResolve() {
-    if (resolving) return
-    val i = resolveQueue.removeFirstOrNull() ?: return
-    resolving = true
-    val generation = nsdGeneration
-    nsd.resolveService(i, object : NsdManager.ResolveListener {
-      override fun onResolveFailed(s: NsdServiceInfo, code: Int) { main.post { if (generation == nsdGeneration) { resolving = false; nextResolve() } } }
-      override fun onServiceResolved(s: NsdServiceInfo) {
-        val r = s.attributes["r"]?.let { String(it) } ?: ""
-        val t = s.attributes["t"]?.let { String(it) }?.takeIf { T_RE.matches(it) } ?: ""
-        val host = s.host?.hostAddress
-        if (generation == nsdGeneration && host != null && R_RE.matches(r)) emit("radio", mapOf("type" to "found", "via" to "nsd", "r" to r, "t" to t, "host" to host, "port" to s.port, "name" to s.serviceName))
-        main.post { if (generation == nsdGeneration) { resolving = false; nextResolve() } }
-      }
-    })
+    if (resolving != null) return
+    var p = resolveQueue.removeFirstOrNull() ?: return
+    while (!current(p)) p = resolveQueue.removeFirstOrNull() ?: return
+    resolving = p
+    val token = ++resolveToken
+    val done = { main.post { if (token == resolveToken) { resolving = null; nextResolve() } } }
+    // a resolve that never answers must not block every later service
+    main.postDelayed({ if (token == resolveToken && resolving === p) { resolveToken++; resolving = null; retry(p, "timeout"); nextResolve() } }, 10_000)
+    try {
+      nsd.resolveService(p.info, object : NsdManager.ResolveListener {
+        override fun onResolveFailed(s: NsdServiceInfo, code: Int) { main.post { if (token == resolveToken) retry(p, "code $code") }; done() }
+        override fun onServiceResolved(s: NsdServiceInfo) {
+          val hosts = hostsOf(s)
+          val attr = { k: String -> s.attributes[k]?.let { String(it) } ?: "" }
+          main.post {
+            if (token == resolveToken && current(p)) {
+              if (hosts.isEmpty()) retry(p, "no address")
+              else if (p.kind == "people") {
+                val r = attr("r"); val t = attr("t").takeIf { T_RE.matches(it) } ?: ""
+                if (R_RE.matches(r)) emit("radio", mapOf("type" to "found", "via" to "nsd", "r" to r, "t" to t, "host" to hosts.first(), "hosts" to hosts, "port" to s.port, "name" to s.serviceName))
+              } else emit("clan", mapOf("type" to "found", "name" to s.serviceName, "hosts" to hosts, "port" to s.port, "v" to attr("v"), "sid" to attr("sid"), "title" to attr("title"), "clanType" to attr("type"), "a" to attr("a")))
+            }
+          }
+          done()
+        }
+      })
+    } catch (e: Exception) { retry(p, "error"); done() }
   }
-  fun nsdStopBrowse() { nsdGeneration++; resolving = false; nsdDisc?.let { runCatching { nsd.stopServiceDiscovery(it) } }; nsdDisc = null; resolveQueue.clear() }
+  fun nsdStopBrowse() { nsdGeneration++; nsdDisc?.let { runCatching { nsd.stopServiceDiscovery(it) } }; nsdDisc = null; resolveQueue.removeAll { it.kind == "people" } }
 
   // ---------------- Wi-Fi Direct ----------------
   private var p2p: WifiP2pManager? = null
@@ -326,5 +375,5 @@ class PeerRadios(private val ctx: Context, private val emit: (String, Map<String
   }
   fun leaveWifi() { joinCb?.let { runCatching { cm.unregisterNetworkCallback(it) } }; joinCb = null; cm.bindProcessToNetwork(null) }
 
-  fun stopAll() { nsdStopAdvertise(); nsdStopBrowse(); p2pStop(); awareStop(); hotspotStop() }
+  fun stopAll() { nsdStopAdvertise(); nsdStopBrowse(); clanStopBrowse(); p2pStop(); awareStop(); hotspotStop() }
 }

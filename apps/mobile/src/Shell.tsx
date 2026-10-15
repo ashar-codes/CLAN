@@ -36,7 +36,9 @@ export function Shell({ join, onEditProfile, intake }: { join: ReactNode; onEdit
   useEffect(()=>{const sub=AppState.addEventListener('change',s=>{if(s==='active')void syncTimetableNotifications().catch(()=>{});});const click=Notifications.addNotificationResponseReceivedListener(r=>{if(r.notification.request.content.data?.timetable===true){setStudyInitial('timetable');setTab('study');setJoining(false);setDevices(false);setHosting(false);}});return()=>{sub.remove();click.remove();};},[]);
   const inboxCount = useData(() => phoneClan().capture.inbox(me()).length) ?? 0;
   // Known contacts reconnect on launch; optional Android availability is restored only after foreground consent.
-  useEffect(() => { try { if (phoneClan().people.contacts('all').length || nearby.mode === 'keep' || directorySettings()) void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
+  // Nearby starts with CLAN for every onboarded person (not only people who already have contacts): a new person must
+  // be discoverable and looking without first opening People (docs/DISCOVERY_ROOT_CAUSE.md). Nearby "Off" still stops it.
+  useEffect(() => { try { const p = phoneClan().people; if ((p.ready() && nearby.mode !== 'off') || p.contacts('all').length || nearby.mode === 'keep' || directorySettings()) void phonePeople().catch(() => {}); } catch { /* CLAN not open yet */ } }, []);
   const peopleCount = useData(() => phoneClan().people.conversations().reduce((n, x) => n + x.unread + (x.state === 'invited_in' ? 1 : 0), 0) + phoneClan().people.contacts('requests').filter((r) => r.relation === 'incoming').length) ?? 0;
   const body = intake ?? (joining ? <Screen><Btn label="← Back" onPress={() => setJoining(false)} />{join}</Screen>
     : tab === 'home' ? <Home onCreate={() => { setTab('me'); setHosting(true); }} onJoin={() => setJoining(true)} go={setTab} onStudy={(t) => { setStudyInitial(t); setTab('study'); }} />

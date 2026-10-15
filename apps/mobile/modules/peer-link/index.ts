@@ -9,7 +9,8 @@ export type PeerCapabilities = {
   wifiDirect: boolean; wifiAware: boolean; wifiAwareAvailable: boolean; localHotspot: boolean; joinWifi: boolean;
 };
 export type RadioEvent =
-  | { type: 'found'; via: 'nsd'; r: string; t: string; host: string; port: number; name: string }
+  | { type: 'found'; via: 'nsd'; r: string; t: string; host: string; hosts?: string[]; port: number; name: string }
+  | { type: 'status'; via: 'nsd'; what: 'advertise-registered' | 'advertise-failed' | 'browse-started' | 'browse-failed' | 'found' | 'resolve-failed'; kind?: 'people' | 'clan'; code?: number; attempt?: number; reason?: string }
   | { type: 'found'; via: 'bonjour'; r: string; t: string; service: string }
   | { type: 'found'; via: 'p2p'; r: string; t: string; port: number; device: string }
   | { type: 'found'; via: 'aware'; r: string; t: string; peer: string }
@@ -20,6 +21,7 @@ export type RadioEvent =
   | { type: 'state'; via: 'p2p'; enabled: boolean }
   | { type: 'hotspotStopped'; via: 'hotspot' }
   | { type: 'error'; via: string; message: string };
+export type ClanEvent = { type: 'found'; name: string; hosts: string[]; port: number; v: string; sid: string; title: string; clanType: string; a: string } | { type: 'lost'; name: string };
 type SocketEvent = { id: string; type: 'accepted' | 'data' | 'closed'; data?: string; remote?: string };
 type NativeApi = {
   capabilities(): PeerCapabilities;
@@ -29,6 +31,8 @@ type NativeApi = {
   write(id: string, b64: string): boolean; close(id: string): void;
   addresses(): string[];
   advertise(r: string, t: string, port: number): void; stopAdvertise(): void; browse(): void; stopBrowse(): void;
+  /** Android: hosted CLAN discovery through the same serialized NSD resolve queue as People. */
+  clanBrowse?(): void; clanStopBrowse?(): void;
   p2pStart(r: string, t: string, port: number): Promise<void>; p2pConnect(device: string): Promise<void>; p2pDisconnect(): void; p2pStop(): void;
   awareStart(r: string, t: string, port: number): Promise<void>; awareConnect(peer: string): Promise<void>; awareStop(): void;
   hotspotStart(): Promise<{ ssid: string; passphrase: string }>; hotspotStop(): void;
@@ -40,6 +44,8 @@ type NativeApi = {
   addListener(event: 'socket', cb: (e: SocketEvent) => void): { remove(): void };
   addListener(event: 'radio', cb: (e: RadioEvent) => void): { remove(): void };
   addListener(event: 'availabilityTick', cb: (e: { networkChanged: boolean }) => void): { remove(): void };
+  addListener(event: 'clan', cb: (e: ClanEvent) => void): { remove(): void };
+  addListener(event: 'network', cb: (e: { addresses: string[] }) => void): { remove(): void };
   addListener(event: 'availability', cb: (e: { running: boolean; byUser?: boolean }) => void): { remove(): void };
 };
 export const PeerLink = requireOptionalNativeModule<NativeApi>('PeerLink');

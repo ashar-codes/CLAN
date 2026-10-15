@@ -19,3 +19,10 @@ Installable Files/
 native/remote-control/bin/
 native/remote-control/obj/
 native/timetable-ocr/bin/
+# push credentials never enter Git
+google-services*.json
+GoogleService-Info*.plist
+*firebase*sa*.json
+*-firebase-adminsdk-*.json
+relay.env
+*.p8

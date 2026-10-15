@@ -26,7 +26,7 @@ import { backgroundWindow } from './background.ts';
 import { registerStudy } from './study.ts';
 import { registerSync } from './sync.ts';
 import { registerHosting } from './hosting.ts';
-import { registerPeople } from './people.ts';
+import { desktopDiagnostics, registerPeople } from './people.ts';
 import { registerData } from './data.ts';
 import { registerFeedback } from './feedback.ts';
 import { Credentials, providerFactory, registerAI } from './ai.ts';
@@ -430,9 +430,17 @@ function registerIpc() {
     // Discovery is a hint only ("there may be a classroom here"); OPAQUE decides.
     let local: import('@classroom/server/discovery').DiscoveredClassroom[] = [];
     const emit = () => { const byId = new Map([...directoryClassrooms(), ...local].map((x) => [x.sid, x])); discovered = [...byId.values()]; if (!e.sender.isDestroyed()) e.sender.send('discover:list', discovered); };
-    const stopLan = browse((list) => { local = list; emit(); }); const stopDir = onDirectoryClassrooms(emit);
-    const expiry = setInterval(emit, 5000); expiry.unref(); emit();
-    const stop = () => { stopLan(); stopDir(); clearInterval(expiry); };
+    // re-created when this computer's LAN addresses change (Wi-Fi switch, sleep/resume): browsing stays on the live network
+    const addrs = () => candidateInterfaces().map((i) => i.address).sort().join(',');
+    let seenAddrs = addrs(), stopLan = browse((list) => { local = list; desktopDiagnostics.set({ clansFound: list.length }); emit(); });
+    desktopDiagnostics.set({ clanBrowsing: true }, 'CLAN discovery started');
+    const stopDir = onDirectoryClassrooms(emit);
+    const expiry = setInterval(() => {
+      const now = addrs();
+      if (now !== seenAddrs) { seenAddrs = now; stopLan(); local = []; stopLan = browse((list) => { local = list; desktopDiagnostics.set({ clansFound: list.length }); emit(); }); desktopDiagnostics.restarted('CLAN discovery: network changed'); }
+      emit();
+    }, 5000); expiry.unref(); emit();
+    const stop = () => { stopLan(); stopDir(); clearInterval(expiry); desktopDiagnostics.set({ clanBrowsing: false }); };
     browsers.set(e.sender, stop);
     e.sender.once('destroyed', () => { browsers.get(e.sender)?.(); browsers.delete(e.sender); });
   });

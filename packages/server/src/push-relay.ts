@@ -9,7 +9,11 @@ import { capHash, PushGrant, PushNotify, PushRegister, PushRevoke, pushStatement
 
 export type PushTarget = { platform: 'fcm' | 'apns' | 'apns-voip'; token: string; topic: string | null };
 export type PushSender = (t: PushTarget, e: PushEvent) => Promise<{ ok: boolean; gone?: boolean; error?: string }>;
-export type RelayOptions = { dbPath?: string; senders: { fcm?: PushSender; apns?: PushSender }; topics?: string[]; now?: () => number };
+export type RelayOptions = { dbPath?: string; senders: { fcm?: PushSender; apns?: PushSender }; topics?: string[]; now?: () => number;
+  /** Behind a local HTTPS reverse proxy: take the client address from X-Forwarded-For (only when the proxy is loopback). */
+  trustProxy?: boolean;
+  /** Registrations not refreshed for this long are deleted with their capabilities (devices re-register on every start). */
+  staleAfterMs?: number };
 
 const LIMIT = { capPerMin: 30, callPerMin: 6, ipPerMin: 300, capsPerDevice: 500 };
 
@@ -19,6 +23,13 @@ export function pushRelay(o: RelayOptions) {
     CREATE TABLE IF NOT EXISTS caps (hash TEXT PRIMARY KEY, cap_id TEXT NOT NULL, device TEXT NOT NULL, at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS caps_device ON caps(device);`);
   const nonces = new Map<string, number>(), hits = new Map<string, number[]>();
+  const purge = () => {
+    const before = now() - (o.staleAfterMs ?? 60 * 86_400_000);
+    db.prepare('DELETE FROM devices WHERE at < ?').run(before);
+    db.prepare('DELETE FROM caps WHERE device NOT IN (SELECT device FROM devices)').run();
+  };
+  purge();
+  const purger = setInterval(purge, 6 * 3_600_000); purger.unref?.();
   const rate = (k: string, max: number) => {
     const t = now(), a = (hits.get(k) ?? []).filter((x) => x > t - 60_000);
     if (a.length >= max) return false;
@@ -78,16 +89,19 @@ export function pushRelay(o: RelayOptions) {
   }
   const listener = (req: IncomingMessage, res: ServerResponse) => {
     const reply = (s: number, b: object) => { res.writeHead(s, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(b)); };
+    if (req.method === 'GET' && req.url === '/healthz') return reply(200, { ok: true, fcm: !!o.senders.fcm, apns: !!o.senders.apns });
     if (req.method !== 'POST') return reply(405, { error: 'method' });
     let size = 0; const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => { size += c.length; if (size > 8192) { reply(413, { error: 'too large' }); req.destroy(); } else chunks.push(c); });
     req.on('end', () => {
       if (res.headersSent) return;
       let body: unknown; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return reply(400, { error: 'json' }); }
-      void handle(req.url ?? '', body, req.socket.remoteAddress ?? '?').then(([s, b]) => reply(s, b), () => reply(500, { error: 'internal' }));
+      const peer = req.socket.remoteAddress ?? '?', loopProxy = o.trustProxy && /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(peer);
+      const ip = loopProxy ? String(req.headers['x-forwarded-for'] ?? peer).split(',')[0]!.trim().slice(0, 64) : peer;
+      void handle(req.url ?? '', body, ip).then(([s, b]) => reply(s, b), () => reply(500, { error: 'internal' }));
     });
   };
-  return { handle, listener, server: () => createServer(listener), close: () => db.close() };
+  return { handle, listener, server: () => createServer(listener), close: () => { clearInterval(purger); db.close(); } };
 }
 
 const b64u = (b: Buffer | string) => Buffer.from(b).toString('base64url');
@@ -115,7 +129,8 @@ export function fcmSender(sa: { project_id: string; client_email: string; privat
       body: JSON.stringify({ message: { token: t.token, data: { clan: JSON.stringify(e) }, android: { priority: 'high', ttl: `${ttl}s`, ...(e.k === 'msg' || e.k === 'file' ? { collapse_key: e.c } : {}) } } }) });
     if (r.ok) return { ok: true };
     const body = await r.text();
-    return { ok: false, gone: r.status === 404 || body.includes('UNREGISTERED'), error: `FCM ${r.status}` };
+    // UNREGISTERED: app uninstalled / token rotated; SENDER_ID_MISMATCH: token belongs to another Firebase project
+    return { ok: false, gone: r.status === 404 || /UNREGISTERED|SENDER_ID_MISMATCH/.test(body), error: `FCM ${r.status}` };
   };
 }
 

@@ -18,6 +18,10 @@ import { PeerLink, capabilities, listen, nativeLinkTransport, stopListening, typ
 import { phoneClan } from '../core/clan';
 import { retainPeople } from './availability';
 import { bump } from '../ui/kit';
+import { DiscoveryDiagnostics } from '@classroom/client';
+
+/** One diagnostics record for this phone (Nearby › Connectivity diagnostics). */
+export const discoveryDiagnostics = new DiscoveryDiagnostics();
 
 export type NearbyMode = 'off' | 'app' | 'session' | 'keep';
 export type NearbyEntry = { id: string; key: string | null; name: string; profile: ProfileView | null; friend: boolean; via: 'wifi' | 'apple' | 'direct' | 'aware' | 'internal'; address: string | null; device?: string; seenAt: number };
@@ -55,6 +59,7 @@ class Nearby {
   private directoryGeneration = 0;
   private directoryRound = 0;
   private probed = new Map<string, number>();
+  private ownRs: string[] = []; // our recent advert ids: the network may still answer with an old one after rotation
   private timers: ReturnType<typeof setInterval>[] = [];
   private dialedDevice = '';
   private live: ((e: import('@classroom/protocol').PeerEnvelope) => void) | null = null;
@@ -106,6 +111,8 @@ class Nearby {
       });
       this.cm.onState(() => { this.keepAlive(); bump(); });
       PeerLink?.addListener('radio', (e) => this.radio(e));
+      // any Wi-Fi/LAN change while CLAN is open (not only in Keep mode): rediscover on the new network
+      PeerLink?.addListener('network', () => { discoveryDiagnostics.event('network changed'); this.networkChanged(); });
       PeerLink?.addListener('availability', (e) => { if (!e.running && e.byUser) { this.setMode('app'); if (AppState.currentState !== 'active') this.stop(); } });
       AppState.addEventListener('change', (st) => { if (st === 'active') void this.start(); else this.background(); });
     }
@@ -141,8 +148,9 @@ class Nearby {
         this.port = await listen(0, (l) => void this.cm!.accept(l)).catch(() => 0);
       }
       if (generation !== this.generation) { stopListening(); this.port = 0; return; }
-      if (!this.port) { this.status = 'Nearby could not start on this phone.'; bump(); return; }
+      if (!this.port) { this.status = 'Nearby could not start on this phone.'; discoveryDiagnostics.set({ listener: null }); discoveryDiagnostics.fail('listener'); bump(); return; }
       this.running = true;
+      discoveryDiagnostics.set({ listener: this.port }, `listener ready on ${this.port}`); this.noteNetwork();
       try { PeerLink.browse(); } catch { /* reported by radio events */ }
       this.timers.push(setInterval(() => this.advertise(), 60_000));
       this.timers.push(setInterval(() => { if (AppState.currentState === 'active' || this.keepInBackground()) void refreshDirectory(); }, 5000));
@@ -152,19 +160,34 @@ class Nearby {
     void refreshDirectory(true);
     this.keepAlive();
   }
+  /** Refresh discovery for real: restart NSD browse + advertisement and re-read addresses (sessions stay). */
+  restartDiscovery(reason = 'requested') {
+    discoveryDiagnostics.restarted(reason);
+    if (!this.running) { void this.start(); return; }
+    try { PeerLink?.stopBrowse(); PeerLink?.stopAdvertise(); } catch { /* restarted below */ }
+    this.networkChanged();
+  }
   /** Native network changes invalidate DNS-SD hints, not authenticated identities or durable queues. */
   networkChanged(invalidateSessions = false) {
+    this.noteNetwork();
     if (!PeerLink || !this.running) return;
     this.generation++; this.directoryGeneration++; this.probed.clear(); this.entries.clear();
     try { PeerLink.browse(); } catch { this.status = 'Discovery could not restart. Try a trusted QR or address.'; }
     this.advertise(true); this.cm?.networkChanged(invalidateSessions); void refreshDirectory(true); bump();
   }
+  noteNetwork() {
+    let addrs: string[] = [];
+    try { addrs = PeerLink?.addresses().filter((a) => /^[0-9.]{7,15}$/.test(a)) ?? []; } catch { /* reported below */ }
+    discoveryDiagnostics.set({ network: addrs.length > 0, addresses: addrs });
+    if (!addrs.length) discoveryDiagnostics.fail('no-network');
+  }
   /** Rotated hourly and whenever visibility changes; nothing while Invisible. */
   advertise(force = false) {
     if (!PeerLink || !this.running) return;
     const vis = people().visibility();
-    if (vis === 'invisible') { PeerLink.stopAdvertise(); this.r = ''; return; }
+    if (vis === 'invisible') { PeerLink.stopAdvertise(); this.r = ''; discoveryDiagnostics.set({ advertising: false }, people().ready() ? 'not advertising: Invisible' : 'not advertising: profile not set up'); return; }
     if (!force && this.r && Date.now() - this.rAt < 3_600_000) return;
+    if (this.r) this.ownRs = [...this.ownRs, this.r].slice(-8);
     this.r = b64u.encode(getRandomBytes(12)); this.rAt = Date.now();
     try { PeerLink.advertise(this.r, people().presenceTagFor(this.r), this.port); } catch { /* reported */ }
   }
@@ -191,6 +214,15 @@ class Nearby {
 
   private upsert(e: NearbyEntry) { if (!this.entries.has(e.id) && e.friend && e.key) people().friendReachable(e.key); this.entries.set(e.id, e); bump(); }
   private radio(e: RadioEvent) {
+    if (e.type === 'status') {
+      if (e.what === 'found') discoveryDiagnostics.count('servicesFound');
+      else if (e.what === 'browse-started') discoveryDiagnostics.set({ browsing: true }, `browse started (${e.kind})`);
+      else if (e.what === 'advertise-registered') discoveryDiagnostics.set({ advertising: true }, 'advertisement registered');
+      else if (e.what === 'advertise-failed') { discoveryDiagnostics.set({ advertising: false }); discoveryDiagnostics.fail('advertise', `code ${e.code}`); }
+      else if (e.what === 'browse-failed') { if (e.kind !== 'clan') discoveryDiagnostics.set({ browsing: false }); discoveryDiagnostics.fail('browse', `${e.kind} code ${e.code}`); }
+      else if (e.what === 'resolve-failed') discoveryDiagnostics.event(`resolve failed (${e.kind}, try ${e.attempt}, ${e.reason})`);
+      bump(); return;
+    }
     if (e.type === 'error') { this.status = e.message; bump(); return; }
     if (e.type === 'lost') { for (const [id, x] of this.entries) if (x.address === `svc:${e.name}` || id.endsWith(`:${e.name}`)) this.entries.delete(id); bump(); return; }
     if (e.type === 'connected' && e.via === 'p2p') {
@@ -199,30 +231,46 @@ class Nearby {
       this.status = 'Connected directly (Wi-Fi Direct).'; bump(); return;
     }
     if (e.type !== 'found') return;
-    if (this.r && e.r === this.r) return;
+    if (this.r && e.r === this.r || this.ownRs.includes(e.r)) return; // our own (also earlier, rotated) adverts
     const last = this.probed.get(e.r) ?? 0;
     if (Date.now() - last < 60_000) return;
     if (this.probed.size >= 256) this.probed.delete(this.probed.keys().next().value!);
     this.probed.set(e.r, Date.now());
     const friend = e.t ? people().matchPresence(e.r, e.t) : null;
     const base = { id: `${e.via}:${e.r}`, key: friend, name: friend ? people().contact(friend)?.name ?? 'Friend' : 'Someone nearby', profile: friend ? people().contact(friend)?.profile ?? null : null, friend: !!friend, seenAt: Date.now() };
-    if (e.via === 'nsd') void this.look(`tcp:${e.host}:${e.port}`, { ...base, via: 'wifi', address: `tcp:${e.host}:${e.port}` });
+    if (e.via === 'nsd') {
+      discoveryDiagnostics.count('servicesResolved');
+      const addrs = (e.hosts?.length ? e.hosts : [e.host]).map((h) => (h.includes(':') ? `tcp:[${h}]:${e.port}` : `tcp:${h}:${e.port}`));
+      void this.look(addrs, { ...base, via: 'wifi', address: addrs[0]! });
+    }
     else if (e.via === 'bonjour') void this.look(`svc:${e.service}`, { ...base, via: 'apple', address: `svc:${e.service}` });
     else if (e.via === 'p2p') this.upsert({ ...base, via: 'direct', address: `p2p:${e.port}:${e.device}`, device: e.device }); // forming a group needs the person's tap
     else if (e.via === 'aware') { if (friend) void this.connectAware(e.peer, base); else this.upsert({ ...base, via: 'aware', address: `aware-peer:${e.peer}` }); }
   }
   /** Friend → connect as ourselves (expecting their key); anyone else → a throwaway-identity look at their public profile. */
-  private async look(address: string, entry: Omit<NearbyEntry, 'address'> & { address: string | null }, valid = () => true) {
+  private async look(addresses: string | string[], entry: Omit<NearbyEntry, 'address'> & { address: string | null }, valid = () => true) {
     const cm = this.cm, generation = this.generation; if (!cm) return;
-    try {
-      if (entry.key) { if (people().visibility() === 'invisible' || people().isBlocked(entry.key)) return; if (!cm.connected(entry.key)) await cm.connect(address, { expectKey: entry.key, automatic: true }); if (!this.running || generation !== this.generation || !valid()) return; this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); return; }
-      const { key, profile } = await probeAnonymously(await nativeLinkTransport.dial(address));
-      if (!this.running || generation !== this.generation || !valid()) return;
-      const c = people().meet({ profile });
-      if (people().isBlocked(c.key) || c.key === people().myKey()) return;
-      if (address.startsWith('tcp:')) { try { people().setLinkAddrs(c.key, [address]); } catch { /* unusual address */ } }
-      this.upsert({ ...entry, key, name: c.name, profile: c.profile, address });
-    } catch { /* not visible to us: never shown */ }
+    const list = (Array.isArray(addresses) ? addresses : [addresses]).filter((a) => nativeLinkTransport.handles(a));
+    if (!list.length) { discoveryDiagnostics.fail('resolve', 'no usable address'); return; }
+    let last: unknown = null;
+    // every resolved address in order: a device can announce addresses that this phone cannot reach
+    for (const address of list) {
+      try {
+        if (entry.key) { if (people().visibility() === 'invisible' || people().isBlocked(entry.key)) return; if (!cm.connected(entry.key)) await cm.connect(address, { expectKey: entry.key, automatic: true }); if (!this.running || generation !== this.generation || !valid()) return; this.upsert({ ...entry, address, profile: people().contact(entry.key)?.profile ?? entry.profile }); discoveryDiagnostics.count('probesOk'); return; }
+        const { key, profile } = await probeAnonymously(await nativeLinkTransport.dial(address));
+        if (!this.running || generation !== this.generation || !valid() || key === people().myKey()) return; // ourselves
+        const c = people().meet({ profile });
+        discoveryDiagnostics.count('probesOk');
+        if (people().isBlocked(c.key)) return;
+        if (address.startsWith('tcp:')) { try { people().setLinkAddrs(c.key, [address]); } catch { /* unusual address */ } }
+        this.upsert({ ...entry, key, name: c.name, profile: c.profile, address });
+        return;
+      } catch (e) { last = e; }
+    }
+    discoveryDiagnostics.count('probesFailed');
+    const m = String((last as Error)?.message ?? '');
+    // hidden (Friends Only / Invisible / blocked) is expected privacy, not a fault
+    discoveryDiagnostics.fail(/profile|closed|refused|Closed/i.test(m) ? 'hidden-or-refused' : /identity|match|sign/i.test(m) ? 'auth' : 'unreachable', m);
   }
 
   // ---- explicit router-free actions (each one is the person's choice) ----

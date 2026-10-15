@@ -36,7 +36,8 @@ export function NearbyPeople({ onChat }: { onChat(convId: string): void }) {
           <button aria-pressed={vis === 'invisible'} onClick={() => act(() => api.people.visibility('invisible').then(reloadMe), 'You are invisible. Discovery is off.')}>Invisible</button>
         </div>
         <AutoDownload />
-        <p className="muted small-text">Everyone Nearby shows only the fields you mark “everyone”, on the local network (and an explicitly configured internal directory), until you change it (or for one hour if you choose that). Blocked people never see you. Your location is never shown.</p>
+        <Diagnostics />
+        <p className="muted small-text">Everyone Nearby shows only the fields you mark “everyone”, on the local network (and an explicitly configured internal directory), until you change it (or for one hour if you choose that). People you block can't contact you, but in Everyone Nearby anyone on this network can see you — choose Friends Only or Invisible to hide. Your location is never shown.</p>
       </div>
       <button aria-pressed={alerts} onClick={() => void api.people.nearbyAlerts(!alerts).then(setAlerts)}>Friend nearby alerts: {alerts ? 'On' : 'Off'}</button>
       {msg && <p role="status">{msg}</p>}{err && <p role="alert" className="error">{err}</p>}
@@ -131,5 +132,32 @@ function AutoDownload() {
     <div className="row">{(['image', 'video', 'audio', 'document'] as const).map((k) => <label key={k} className="row"><input type="checkbox" checked={a.kinds.includes(k)} disabled={!a.on} onChange={() => set({ kinds: a.kinds.includes(k) ? a.kinds.filter((x) => x !== k) : [...a.kinds, k] })} /> {k}s</label>)}</div>
     <label>Largest file <select value={a.maxBytes} disabled={!a.on} onChange={(e) => set({ maxBytes: Number(e.target.value) })}>{[10, 25, 100].map((n) => <option key={n} value={n * 1024 * 1024}>{n} MB</option>)}</select></label>
     <p className="muted small-text">Friends only, verified by SHA-256, never opened automatically. Larger files, other people's files and anything that could run code always ask first.</p>
+  </details>;
+}
+
+/** Connectivity diagnostics: each discovery stage, the last failure with what to do, a real restart and an export. */
+function Diagnostics() {
+  const [d, reload] = usePeople(() => api.people.diagnostics());
+  const [msg, setMsg] = useState('');
+  useEffect(() => { const t = setInterval(reload, 3000); return () => clearInterval(t); }, [reload]);
+  if (!d) return null;
+  const s = d.state, yes = (b: boolean) => (b ? '✓' : '✕');
+  return <details><summary>Connectivity diagnostics{s.lastFailure ? ' · needs attention' : ''}</summary>
+    <ul className="small-text" aria-label="Discovery stages">
+      <li>{yes(s.network)} Network {s.addresses.length ? `(${s.addresses.join(', ')})` : '— no LAN address'}</li>
+      <li>{yes(!!s.listener)} Listener {s.listener ? `ready (port ${s.listener})` : 'not ready'}</li>
+      <li>{yes(s.advertising)} Announcing this computer</li>
+      <li>{yes(s.browsing)} Looking for people · found {s.servicesResolved} · reached {s.probesOk} · failed {s.probesFailed}</li>
+      <li>{yes(s.clanBrowsing)} Looking for CLANs (while Join is open) · {s.clansFound} found</li>
+      <li>Last authenticated person: {s.lastPeerAt ? new Date(s.lastPeerAt).toLocaleTimeString() : '—'}</li>
+      <li>Restarts: {s.restarts}{s.lastRestartAt ? ` (last ${new Date(s.lastRestartAt).toLocaleTimeString()})` : ''}</li>
+    </ul>
+    {d.hint && <p role="status" className="small-text"><b>{s.lastFailure}:</b> {d.hint}</p>}
+    <div className="row">
+      <button onClick={() => void api.people.restartDiscovery().then(() => { reload(); setMsg('Discovery restarted.'); }, (e) => setMsg(errText(e)))}>Refresh discovery</button>
+      <button onClick={() => void api.people.exportDiagnostics().then((r) => setMsg(r ? `Saved ${r.name} (no keys, codes, messages or files inside).` : ''), (e) => setMsg(errText(e)))}>Export diagnostics…</button>
+    </div>
+    {msg && <p role="status" className="muted small-text">{msg}</p>}
+    <details><summary className="small-text">Recent events</summary><pre className="preview-text">{d.recent.map((e) => `${new Date(e.at).toLocaleTimeString()}  ${e.what}`).join('\n')}</pre></details>
   </details>;
 }

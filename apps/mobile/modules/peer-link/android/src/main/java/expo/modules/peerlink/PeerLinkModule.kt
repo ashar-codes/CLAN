@@ -3,6 +3,11 @@
 package expo.modules.peerlink
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
@@ -17,10 +22,29 @@ class PeerLinkModule : Module() {
   private val io = Executors.newCachedThreadPool()
   private val sockets by lazy { PeerSockets { e -> sendEvent("socket", e) } }
   private val radios by lazy { PeerRadios(ctx.applicationContext) { name, e -> sendEvent(name, e) } }
+  private var netCallback: ConnectivityManager.NetworkCallback? = null
+  private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+  private val fire = Runnable { sendEvent("network", mapOf("addresses" to radios.addresses())) }
+  private fun changed(why: String) { handler.removeCallbacks(fire); handler.postDelayed(fire, 1500) }
 
   override fun definition() = ModuleDefinition {
     Name("PeerLink")
-    Events("socket", "radio", "availability", "availabilityTick")
+    Events("socket", "radio", "availability", "availabilityTick", "clan", "network")
+
+    // Foreground network changes (Wi-Fi switch, reconnect, new address) restart discovery in JS even without the
+    // Keep CLAN Available service; debounced so one handover produces one restart.
+    OnCreate {
+      runCatching {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cb = object : ConnectivityManager.NetworkCallback() {
+          override fun onAvailable(n: Network) = changed("available")
+          override fun onLost(n: Network) = changed("lost")
+          override fun onLinkPropertiesChanged(n: Network, lp: LinkProperties) = changed("addresses")
+        }
+        cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET).build(), cb)
+        netCallback = cb
+      }
+    }
 
     Function("capabilities") { radios.capabilities() }
 
@@ -44,6 +68,8 @@ class PeerLinkModule : Module() {
     Function("stopAdvertise") { radios.nsdStopAdvertise() }
     Function("browse") { radios.nsdBrowse() }
     Function("stopBrowse") { radios.nsdStopBrowse() }
+    Function("clanBrowse") { radios.clanBrowse() }
+    Function("clanStopBrowse") { radios.clanStopBrowse() }
 
     // ---- Wi-Fi Direct ----
     AsyncFunction("p2pStart") { r: String, t: String, port: Int, promise: Promise -> radios.p2pStart(r, t, port) { err -> if (err == null) promise.resolve(null) else promise.reject("P2P", err, null) } }
@@ -82,6 +108,7 @@ class PeerLinkModule : Module() {
     }
 
     OnDestroy {
+      netCallback?.let { cb -> runCatching { (ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb) } }; netCallback = null
       ring?.stop(); ring = null; PeerLinkService.onPulse = null; PeerLinkService.onStopRequested = null; PeerLinkService.stop(ctx); sockets.closeAll(); radios.stopAll(); io.shutdown() }
   }
 }

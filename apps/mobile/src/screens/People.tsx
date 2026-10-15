@@ -2,7 +2,7 @@ import { saveDirectory, directoryStatus, directoryEnrollmentKey } from '../peopl
 // People on the phone: visibility and Nearby availability, codes (show and scan), direct connections without a router
 // (Wi-Fi Direct, Wi-Fi Aware, Apple peer-to-peer, hotspots), friends and requests, personal chats with files and voice
 // notes, calls, and QR file transfer.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Linking, Platform, Pressable, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { parseProfileQr, profileQr, safetyNumber, TEMP_TTLS } from '@classroom/protocol';
@@ -14,7 +14,9 @@ import { phoneClan, me } from '../core/clan';
 import { allowPeopleNotifications, takePeopleChat, onPeopleNotification } from '../people/notifications';
 import { phonePeople } from '../people/native';
 import { PeerLink } from '../../modules/peer-link';
-import { nearby, parseWifiQr, wifiQr } from '../people/nearby';
+import { discoveryDiagnostics, nearby, parseWifiQr, wifiQr } from '../people/nearby';
+import * as Sharing from 'expo-sharing';
+import { File, Paths } from 'expo-file-system';
 import { QrImage, QrScanner } from '../ui/qr';
 import { OpticalScreen } from './Optical';
 import { usePhoneCall } from '../people/Call';
@@ -118,7 +120,7 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
           <Btn small label="Friends only" on={vis === 'friends'} onPress={() => setErr(act(() => people().setVisibility('friends')))} />
           <Btn small label="Invisible" on={vis === 'invisible'} onPress={() => setErr(act(() => people().setVisibility('invisible')))} />
         </Row>
-        <Muted small>{vis === 'everyone' ? 'People on this network see your name, picture and the fields you mark for everyone, and can send you a friend or chat request. It stays on until you change it.' : vis === 'friends' ? 'Only friends can find you. Others can still reach you through your code.' : 'Nobody can find you nearby. You can still scan codes.'} Blocked people never see you. Your network’s administrator may see that a CLAN device is present.</Muted>
+        <Muted small>{vis === 'everyone' ? 'People on this network see your name, picture and the fields you mark for everyone, and can send you a friend or chat request. It stays on until you change it.' : vis === 'friends' ? 'Only friends can find you. Others can still reach you through your code.' : 'Nobody can find you nearby. You can still scan codes.'} People you block can't contact you, but in Everyone Nearby anyone on this network can see you — choose Friends Only or Invisible to hide. Your network’s administrator may see that a CLAN device is present.</Muted>
         {vis === 'everyone' && <Btn small label="Only for the next hour" onPress={() => setErr(act(() => people().setVisibility('everyone', 3_600_000)))} />}
         <Muted>Nearby on this phone</Muted>
         <Row gap={6}>
@@ -130,12 +132,11 @@ function Nearby({ onJoin, onChat, onOptical }: { onJoin(): void; onChat(id: stri
         <Muted small>{Platform.OS === 'android' ? 'Keep CLAN Available receives local messages with a persistent notification, even without an open chat. Uses more battery; Android/MIUI battery restrictions or force-stop can interrupt it. Stop from the notification or select While using CLAN.' : 'iPhone keeps a session only while CLAN is open (plus a short moment after you leave, and during a call). Nobody can reach you while CLAN is closed.'}</Muted>
       </Card>
 
-      <Card title="Connectivity diagnostics">
-        <Muted>{nearby.mode === 'off' ? 'Discovery disabled' : nearby.port ? 'Local listener active; discovery is separate from authenticated reachability' : 'Local listener unavailable'}</Muted>
+      <DiagnosticsCard>
         <Muted>{Platform.OS === 'android' ? PeerLink?.availabilityRunning() ? 'Background service active' : 'Background service disabled' : 'Limited by iOS: reopen CLAN to reconnect after suspension'}</Muted>
         {Platform.OS === 'android' && <Muted small>{PeerLink?.availabilityHealth?.().backgroundRestricted ? 'Android restricts background operation. Review CLAN battery settings.' : PeerLink?.availabilityHealth?.().batteryOptimized ? 'Battery optimization is enabled; Android or manufacturer policies may interrupt availability.' : 'Android battery optimization exemption is enabled; force-stop still prevents incoming calls.'}</Muted>}
         <Muted small>Network isolation and firewall rules can prevent connection even when discovery works. No media starts until you accept. Keep mode does not survive force-stop or a terminated app process.</Muted>
-      </Card>
+      </DiagnosticsCard>
 
 
 
@@ -312,5 +313,32 @@ function PushCard() {
     <Muted small>{pushStatus()}</Muted>
     {Platform.OS === 'android' && <Row>{(['msg', 'call'] as const).map((k) => <Btn key={k} small label={k === 'msg' ? 'Test a message wake-up' : 'Test an incoming-call ring'} onPress={() => void selfTestWake(k).then((r) => setErr(`Self-test: genuine ${r.genuine}, forged ${r.forged}, repeated ${r.replay}`), (e) => setErr((e as Error).message))} />)}</Row>}
     <Err msg={err} />
+  </Card>;
+}
+
+/** Each discovery stage, the last failure with what to do, a real restart of native discovery and a shareable report. */
+function DiagnosticsCard({ children }: { children: ReactNode }) {
+  const c = useC(), d = useData(() => ({ ...discoveryDiagnostics.state }));
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => discoveryDiagnostics.onChange(() => bump()), []);
+  if (!d) return null;
+  const yes = (b: boolean) => (b ? '✓' : '✕');
+  const share = async () => {
+    const text = discoveryDiagnostics.export({ app: 'CLAN', source: process.env.EXPO_PUBLIC_CLAN_SOURCE_SHA ?? 'development', platform: `${Platform.OS} ${Platform.Version}`, nearbyMode: nearby.mode, generated: new Date().toISOString() });
+    const f = new File(Paths.cache, `clan-diagnostics-${Date.now()}.txt`); f.create({ overwrite: true }); f.write(text);
+    await Sharing.shareAsync(f.uri, { mimeType: 'text/plain', dialogTitle: 'CLAN diagnostics' });
+  };
+  return <Card title="Connectivity diagnostics">
+    <Muted small>{yes(d.network)} Network {d.addresses.length ? `(${d.addresses.join(', ')})` : '— no Wi-Fi/LAN address'}</Muted>
+    <Muted small>{yes(!!d.listener)} Listener {d.listener ? `ready (port ${d.listener})` : nearby.mode === 'off' ? 'off (Nearby is Off)' : 'not ready'}</Muted>
+    <Muted small>{yes(d.advertising)} Announcing this phone</Muted>
+    <Muted small>{yes(d.browsing)} Looking for people · heard {d.servicesFound} · resolved {d.servicesResolved} · reached {d.probesOk} · failed {d.probesFailed}</Muted>
+    <Muted small>{yes(d.clanBrowsing)} Looking for CLANs · {d.clansFound} found</Muted>
+    <Muted small>Last authenticated person: {d.lastPeerAt ? new Date(d.lastPeerAt).toLocaleTimeString() : '—'} · restarts {d.restarts}</Muted>
+    {discoveryDiagnostics.hint() && <Text accessibilityLiveRegion="polite" style={{ color: c.text }}>{d.lastFailure}: {discoveryDiagnostics.hint()}</Text>}
+    {children}
+    <Row><Btn small label="Refresh discovery" onPress={() => { nearby.restartDiscovery(); setMsg('Discovery restarted.'); bump(); }} /><Btn small label="Share diagnostics" onPress={() => void share().catch((e) => setMsg((e as Error).message))} /></Row>
+    <Muted small>Shared reports contain no keys, codes, messages, names of files or contacts.</Muted>
+    {msg && <Muted small>{msg}</Muted>}
   </Card>;
 }

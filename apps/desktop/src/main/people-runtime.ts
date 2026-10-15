@@ -2,14 +2,14 @@
 // storage), the people endpoint (server), the peer client and DNS-SD: delivers the outbox, downloads accepted files,
 // finds nearby people, carries live call signaling, and serves phones over their authenticated socket.
 import { networkInterfaces } from 'node:os';
-import { lanDirectoryClient, LanDirectoryAgent } from '@classroom/client';
+import { DiscoveryDiagnostics, lanDirectoryClient, LanDirectoryAgent } from '@classroom/client';
 import { pinnedTransport } from '@classroom/client/node';
 import { directoryConfig, type DirectoryConfig, type DirectoryAdvert } from '@classroom/protocol';
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, open, stat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { canonicalBytes, peerBindingValid, profileQr, parseProfileQr, PeerTlsBinding, ProfileView, type PeerEnvelope } from '@classroom/protocol';
-import { advertiseLinks, advertisePeople, browseLinks, browsePeople, listenLinks, startPeopleServer, tcpTransport } from '@classroom/server';
+import { advertiseLinks, advertisePeople, browseLinks, browsePeople, lanAddresses, listenLinks, startPeopleServer, tcpTransport } from '@classroom/server';
 import { hello, peerClient, PeerHttpError } from '@classroom/client/people';
 import { ConnectionManager, probeAnonymously, type LinkFiles, type People } from '@clan/core';
 import { newEd25519, nodeSigner } from '@classroom/client/node';
@@ -26,6 +26,8 @@ export async function startPeopleRuntime(o: {
   allowLoopback?: boolean;
   /** Port for clan-link/1 (phones, hotspots and other router-free paths); a fresh one when omitted or taken. */
   linkPort?: number; directory?: DirectoryConfig | null; ownClans?(): DirectoryAdvert[]; onClans?(items: DirectoryAdvert[], expires: number): void;
+  /** Shared connectivity diagnostics (one per app). */
+  diagnostics?: DiscoveryDiagnostics;
 }) {
   const p = o.people, now = o.now ?? (() => Date.now());
   p.setSigner(o.signer);
@@ -188,6 +190,8 @@ export async function startPeopleRuntime(o: {
   // real-identity connection; any other advert is looked at under a throwaway identity, so only people who chose
   // Everyone Nearby answer, and nobody learns who is looking.
   const nearby = new Map<string, NearbyPerson>();
+  const diag = o.diagnostics ?? new DiscoveryDiagnostics();
+  const noteNetwork = () => { const lan = lanAddresses(); diag.set({ network: lan.length > 0, addresses: lan.map((l) => l.address), listener: linkPort }); if (!lan.length) diag.fail('no-network'); };
   let stopAd: (() => Promise<void>) | null = null, adVis = '', adAt = 0;
   let advertising: Promise<void> | null = null, advertiseAgain = false;
   const advertise = (): Promise<void> => {
@@ -206,7 +210,9 @@ export async function startPeopleRuntime(o: {
           const r1 = randomBytes(12).toString('base64url'), r2 = randomBytes(12).toString('base64url');
           const a = advertisePeople({ port: server.port, r: r1, t: p.presenceTagFor(r1) }), b = advertiseLinks({ port: linkPort, r: r2, t: p.presenceTagFor(r2) });
           stopAd = async () => { await a(); await b(); };
-        }
+          diag.set({ advertising: true }, `advertising on ${a.state.interfaces.join(', ') || 'no LAN interface'}`);
+          void Promise.all([a.ready, b.ready]).then(() => { if (!a.state.published && !b.state.published) diag.fail('advertise', [...a.state.errors, ...b.state.errors].join('; ') || 'no announcement confirmed'); });
+        } else diag.set({ advertising: false }, vis === 'invisible' ? 'not advertising: Invisible' : 'not advertising');
       } while (advertiseAgain);
     })().finally(() => { advertising = null; });
   };
@@ -230,33 +236,50 @@ export async function startPeopleRuntime(o: {
   const lost = (r: string) => { const k = byAdvert.get(r); byAdvert.delete(r); if (k && ![...byAdvert.values()].includes(k) && nearby.delete(k)) changed('nearby'); };
   const tried = new Map<string, number>();
   const fresh = (r: string) => { if ((tried.get(r) ?? 0) > now() - 60_000) return false; if (tried.size >= 256) tried.delete(tried.keys().next().value!); tried.set(r, now()); return true; };
+  /** Try a discovered service's addresses in order (best first); classify the last failure for diagnostics. */
+  const firstReachable = async <T,>(addrs: string[], attempt: (a: string) => Promise<T>) => {
+    let last: unknown = null;
+    for (const a of addrs) { try { const v = await attempt(a); diag.count('probesOk'); return v; } catch (e) { last = e; } }
+    diag.count('probesFailed');
+    const m = String((last as { code?: string; message?: string })?.code ?? (last as Error)?.message ?? '');
+    diag.fail(/refused|hidden|No profile|not_found|403|Not shared/i.test(m) ? 'hidden-or-refused' : /identity|match|signature/i.test(m) ? 'auth' : 'unreachable', m);
+    throw last;
+  };
   const makeBrowse = () => o.discover ? browsePeople((s) => {
-    const endpoint = `${s.addr}:${s.port}`;
-    if (endpoint === `${o.bind ?? ''}:${server.port}` || s.port === server.port && o.endpoints(server.port).includes(endpoint)) return;
-    if (!fresh(`${s.r}|${endpoint}`)) return;
+    const endpoints = s.addrs.map((a) => `${a}:${s.port}`).filter((e) => !(e === `${o.bind ?? ''}:${server.port}` || s.port === server.port && o.endpoints(server.port).includes(e)));
+    if (!endpoints.length || !fresh(`${s.r}|${endpoints.join(',')}`)) return;
+    diag.count('servicesResolved');
     const friend = s.t ? p.matchPresence(s.r, s.t) : null;
     if (friend && p.visibility() === 'invisible') return;
-    void probe(endpoint, undefined, friend ? o.signer : nodeSigner(newEd25519().privatePkcs8)).then(({ contact }) => {
+    void firstReachable(endpoints, (endpoint) => probe(endpoint, undefined, friend ? o.signer : nodeSigner(newEd25519().privatePkcs8)).then((r) => ({ ...r, endpoint }))).then(({ contact, endpoint }) => {
       if (friend && contact.key !== friend) return; // a presence tag copied by someone else: ignored
       seen(contact, endpoint, s.r); void tick();
-    }, () => { /* hidden or not reachable: never shown */ });
-  }, lost) : () => {};
+    }, () => { /* hidden or not reachable: never shown (classified in diagnostics) */ });
+  }, lost, undefined, { onError: (m) => diag.fail('browse', m) }) : () => {};
   // link-only devices (phones) too
   const makeLinkBrowse = () => o.discover ? browseLinks((sv) => {
-    const addr = `tcp:${sv.addr}:${sv.port}`;
-    if (sv.port === linkPort && linkAddrs().includes(addr)) return;
-    if (!fresh(`${sv.r}|${addr}`)) return;
+    const addrs = sv.addrs.map((a) => `tcp:${a}:${sv.port}`).filter((a) => !(sv.port === linkPort && linkAddrs().includes(a)));
+    if (!addrs.length || !fresh(`${sv.r}|${addrs.join(',')}`)) return;
+    diag.count('servicesResolved');
     const friend = sv.t ? p.matchPresence(sv.r, sv.t) : null;
     if (friend) {
       if (p.visibility() === 'invisible') return;
-      void cm.connect(addr, { expectKey: friend, automatic: true }).then(() => seen(p.contact(friend), addr, sv.r), () => {});
+      void firstReachable(addrs, (addr) => cm.connect(addr, { expectKey: friend, automatic: true }).then(() => addr)).then((addr) => seen(p.contact(friend), addr, sv.r), () => {});
       return;
     }
-    void tcpTransport().dial(addr).then((l) => probeAnonymously(l)).then(({ key, profile }) => {
-      try { seen(p.meet({ profile }), addr, sv.r); try { p.setLinkAddrs(key, [addr]); } catch { /* unusual address */ } } catch { /* no valid public profile */ }
-    }, () => { /* hidden or not reachable */ });
-  }, lost) : () => {};
+    void firstReachable(addrs, (addr) => tcpTransport().dial(addr).then((l) => probeAnonymously(l)).then((x) => ({ ...x, addr }))).then(({ key, profile, addr }) => {
+      try { seen(p.meet({ profile }), addr, sv.r); try { p.setLinkAddrs(key, [addr]); } catch { /* unusual address */ } } catch { diag.fail('auth', 'invalid public profile'); }
+    }, () => { /* hidden or not reachable (classified in diagnostics) */ });
+  }, lost, { onError: (m) => diag.fail('browse', m) }) : () => {};
   let stopBrowse = makeBrowse(), stopLinkBrowse = makeLinkBrowse();
+  noteNetwork(); diag.set({ browsing: !!o.discover }, o.discover ? 'browsing for people' : 'discovery disabled');
+  /** Really restart discovery (sockets, browsers, adverts), not just the screen. Authenticated sessions stay. */
+  const restartDiscovery = (reason: string) => {
+    if (stopped) return;
+    stopBrowse(); stopLinkBrowse(); tried.clear(); nearby.clear(); byAdvert.clear(); changed('nearby');
+    stopBrowse = makeBrowse(); stopLinkBrowse = makeLinkBrowse(); adAt = 0; noteNetwork(); diag.restarted(reason);
+    void advertise(); void agent.refresh(true); void tick();
+  };
   void advertise();
   const adTimer = setInterval(() => void advertise(), 30_000); adTimer.unref?.();
 
@@ -316,7 +339,9 @@ export async function startPeopleRuntime(o: {
       throw last;
     },
     probe, configureDirectory, directory: () => ({ config: directory, status: directoryMessage }),
-    networkChanged: () => { if (stopped) return; stopBrowse(); stopLinkBrowse(); tried.clear(); nearby.clear(); byAdvert.clear(); stopBrowse = makeBrowse(); stopLinkBrowse = makeLinkBrowse(); cm.networkChanged(); adAt = 0; void advertise(); void agent.refresh(true); void tick(); },
+    networkChanged: () => { if (stopped) return; cm.networkChanged(); restartDiscovery('network changed'); },
+    restartDiscovery: () => restartDiscovery('requested'),
+    diagnostics: () => diag,
     nearby: () => [...nearby.values()].filter((n) => now() - n.seenAt < 10 * 60_000 && !p.isBlocked(n.key)).map((n) => ({ ...n, relation: p.contact(n.key)?.relation ?? 'none', connection: cm.status(n.key)?.state ?? 'nearby' })),
     refreshDiscovery: () => { adAt = 0; void agent.refresh(true); return advertise(); },
     sendLive, tick, server, links: cm, linkPort,

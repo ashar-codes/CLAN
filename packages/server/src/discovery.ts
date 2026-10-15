@@ -19,7 +19,11 @@ export function advertise(o: { host: string; port: number; sid: string; title: s
   // `interface`/`bind` are forwarded to multicast-dns at runtime; the bundled typings omit them.
   const bonjour = new Bonjour({ interface: o.host, bind: '0.0.0.0' } as object, (e: Error) => console.warn('[mdns]', e.message));
   const txt: Advertisement = { v: '1', sid: o.sid, title: o.title, type: o.type, a: o.host };
-  const svc = bonjour.publish({ name: `CLAN ${o.sid.slice(0, 8)}`, type: SERVICE_TYPE, port: o.port, txt, disableIPv6: true });
+  const svc = bonjour.publish({ name: `CLAN ${o.sid.slice(0, 8)}`, type: SERVICE_TYPE, port: o.port, host: `clan-${o.sid.slice(0, 8)}.local`, txt, disableIPv6: true });
+  // Only the hosting interface's address: the machine's other adapters (VPN, VM, link-local) are unreachable for members
+  // and a browser that picks one of them fails (docs/DISCOVERY_ROOT_CAUSE.md).
+  const records = svc.records.bind(svc);
+  svc.records = () => records().filter((r) => r.type !== 'A' || r.data === o.host);
   const ready = new Promise<void>((r) => { svc.once('up', () => { dlog('advertise ready', o.sid); r(); }); svc.once('error', () => r()); setTimeout(r, 5000).unref(); });
   let stopping: Promise<void> | null = null;
   const stop = () => stopping ??= new Promise<void>((resolve) => {
