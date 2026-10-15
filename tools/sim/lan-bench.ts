@@ -46,7 +46,7 @@ const page = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <style>body{font:16px system-ui;margin:0;padding:16px;max-width:640px}button{font:inherit;padding:12px 20px}input{font:inherit;padding:8px;width:100%;box-sizing:border-box}pre{white-space:pre-wrap}</style>
 <h2>CLAN — network benchmark</h2>
 <p>Stay on the classroom Wi-Fi. This downloads ${resources.map((r) => Math.round(r.size / MB) + ' MB').join(', ')} × ${values.runs} from the teacher computer.</p>
-<label>Device label (e.g. "Ashar iPhone 13, 5 GHz, back row")<input id="label"></label><p><button id="go">Run</button></p><pre id="log"></pre>
+<label>Device label (e.g. "iPhone 13, 5 GHz, back row")<input id="label"></label><p><button id="go">Run</button></p><pre id="log"></pre>
 <script>
 const CLASS = ${JSON.stringify({ resources: resources.map((r) => ({ id: r.id, size: r.size })), runs: Number(values.runs) })};
 const log = (t) => { document.getElementById('log').textContent += t + '\\n'; };

@@ -63,6 +63,19 @@ const FileMeta = z.object({ transferId: Id, name: Text(255).min(1).refine((n) =>
   retention: z.enum(['temporary', 'permanent']), voice: z.object({ durationMs: z.number().int().positive().max(15 * 60_000) }).optional() }).strict();
 export type FileMeta = z.infer<typeof FileMeta>;
 
+/** One emoji (with modifiers / ZWJ sequences), never free text. */
+export const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200D|\uFE0F){1,10}$/u;
+/**
+ * A wake-up relay is an internet HTTPS service. Plain http / IP literals of private ranges are refused so a friend
+ * cannot point this device at its own LAN or loopback services. (Tests may opt into loopback http.)
+ */
+export const RelayUrl = z.string().max(200).url().refine((u) => {
+  try {
+    const x = new URL(u), loop = /^(127\.0\.0\.1|localhost)$/.test(x.hostname);
+    if (loop) return x.protocol === 'http:' && (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CLAN_TEST_INSECURE_RELAY === '1';
+    return x.protocol === 'https:' && !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.|\[)/.test(x.hostname) && !x.username && !x.password;
+  } catch { return false; }
+}, 'Use an https:// internet relay address.');
 export const PeerBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('friend.request'), note: Text(200).optional() }).strict(),
   z.object({ kind: z.literal('friend.accept') }).strict(),
@@ -85,13 +98,13 @@ export const PeerBody = z.discriminatedUnion('kind', [
   /** Author only, within PEOPLE_DELETE_WINDOW_MS: a durable tombstone on the recipient (never resurrected). */
   z.object({ kind: z.literal('msg.delete'), msgId: Id }).strict(),
   /** Either participant; null removes their reaction. */
-  z.object({ kind: z.literal('msg.react'), msgId: Id, emoji: z.string().min(1).max(16).nullable() }).strict(),
+  z.object({ kind: z.literal('msg.react'), msgId: Id, emoji: z.string().regex(EMOJI).nullable() }).strict(),
   /**
    * Friend → friend: how to wake this person's phone through an internet push relay (or null to stop). `cap`
    * authorises the relay call (the relay keeps only its hash); `mac` keys each wake-up so neither the relay nor the
    * push provider can forge one. Neither contains message content.
    */
-  z.object({ kind: z.literal('push.cap'), grant: z.object({ relay: z.string().url().max(200), capId: z.string().regex(/^[A-Za-z0-9_-]{22}$/), cap: Key, mac: Key }).strict().nullable() }).strict(),
+  z.object({ kind: z.literal('push.cap'), grant: z.object({ relay: RelayUrl, capId: z.string().regex(/^[A-Za-z0-9_-]{22}$/), cap: Key, mac: Key }).strict().nullable() }).strict(),
   z.object({ kind: z.literal('file.offer'), msgId: Id, file: FileMeta }).strict(),
   z.object({ kind: z.literal('file.accept'), transferId: Id }).strict(),
   z.object({ kind: z.literal('file.decline'), transferId: Id }).strict(),

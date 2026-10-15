@@ -74,7 +74,7 @@ export default function App() {
   return (
     <SafeAreaProvider><SafeAreaView style={[s.fill, { backgroundColor: c.bg }]} edges={['top', 'bottom', 'left', 'right']}>
       <OpaqueBridgeHost />
-      <KeyboardAvoidingView style={s.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={s.fill} behavior="padding">
         <ThemeRoot><PhoneCallProvider>
         {editing ? (
           <ProfileForm c={c} initial={profile} first={!profile.fullName} onSaved={(p, extra) => { onboarding.current = { previous: profile.fullName, ...extra }; setProfile(p); setEditing(false); }} />

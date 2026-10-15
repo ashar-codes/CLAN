@@ -98,7 +98,7 @@ describe('sync', () => {
     const item = a.app.saved.add(a.me, { url: 'https://example.com/v', title: 'Video' });
     const deck = a.app.flashcards.createDeck(a.me, { name: 'Enzymes' }); const card = a.app.flashcards.addCard(a.me, deck.id, { front: 'ATP?', back: 'energy' });
     a.app.flashcards.review(a.me, card.id, 'good');
-    a.app.identity.rename(a.app.me, 'Ashar');
+    a.app.identity.rename(a.app.me, 'Sam');
     a.app.diary.write(a.me, { day: '2026-10-01', body: 'private' });
 
     await sync(b, a);
@@ -109,7 +109,7 @@ describe('sync', () => {
     expect(b.app.tasks.get(b.me, task.id)?.checklist.map((x) => x.text)).toEqual(['Q1']);
     expect(b.app.saved.items(b.me, b.app.saved.inbox(b.me)).map((x) => x.id)).toEqual([item.id]); // built-in Inbox maps to this device's Inbox
     expect(b.app.flashcards.card(b.me, card.id)).toMatchObject({ reps: 1, interval: a.app.flashcards.card(a.me, card.id)!.interval });
-    expect(b.app.identity.displayName(b.app.me)).toBe('Ashar');
+    expect(b.app.identity.displayName(b.app.me)).toBe('Sam');
     expect(b.app.diary.day(b.me, '2026-10-01')).toBeNull(); // Diary is off by default
 
     const again = await sync(b, a);

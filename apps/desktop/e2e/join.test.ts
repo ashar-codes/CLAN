@@ -43,9 +43,9 @@ it('secure join, approve, files, assignment + signed receipt, MITM/downgrade/clo
   let student = await launch({ CLASSROOM_DOWNLOADS_DIR: downloads }, studentData);
   let studentApp = lastApp;
   await student.getByText('Join Classroom').click();
-  await student.getByLabel('Full name').fill('Ashar Khan');
+  await student.getByLabel('Full name').fill('Sample Student');
   await student.getByLabel('Student / roll number').fill('FA23-CS-114');
-  await student.getByLabel('Device name').fill('Ashar-MacBook');
+  await student.getByLabel('Device name').fill('Sample-Laptop');
   await student.getByRole('button', { name: 'Save' }).click();
 
   // Wrong code first: must be refused without revealing anything.
@@ -60,7 +60,7 @@ it('secure join, approve, files, assignment + signed receipt, MITM/downgrade/clo
     student.locator('.error').filter({ hasNotText: 'No CLAN matches' }).waitFor({ timeout: 15_000 }).then(async () => { throw new Error('join failed: ' + await student.locator('.error').textContent()); }),
   ]);
 
-  await teacher.getByText('Ashar Khan', { exact: true }).waitFor();
+  await teacher.getByText('Sample Student', { exact: true }).waitFor();
   await teacher.getByRole('button', { name: 'Approve', exact: true }).click();
   await student.getByTestId('secure-state').waitFor({ timeout: 5000 });
   expect(await student.getByTestId('secure-state').textContent()).toMatch(/Secure connection · teacher [0-9A-F]{4}(-[0-9A-F]{4}){3}/);

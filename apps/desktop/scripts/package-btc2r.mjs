@@ -7,9 +7,10 @@ if (!/^[0-9a-f]{40}$/.test(sha ?? '') || sha !== execFileSync('git', ['rev-parse
   throw new Error('CLAN_SOURCE_SHA must match the frozen checkout');
 }
 const target = process.argv[2];
-if (target !== 'mac' && target !== 'win') throw new Error('Use package-btc2r.mjs mac|win');
+if (target !== 'mac' && target !== 'win') throw new Error('Use package-btc2r.mjs mac|win [final]');
+const identity = process.argv[3] === 'final' ? './electron-builder.final.yml' : './electron-builder.btc2r.yml';
 await build({
   targets: target === 'mac' ? Platform.MAC.createTarget(['dmg'], Arch.arm64) : Platform.WINDOWS.createTarget(['nsis'], Arch.x64),
-  config: { extends: './electron-builder.btc2r.yml', extraMetadata: { clanSourceCommit: sha } },
+  config: { extends: identity, extraMetadata: { clanSourceCommit: sha } },
   publish: 'never',
 });

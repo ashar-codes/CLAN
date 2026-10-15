@@ -25,6 +25,6 @@ it('requires name and device name, then People shows them with Everyone Nearby o
     await page.getByRole('heading', { name: 'Welcome to CLAN' }).waitFor({ state: 'detached' });
     const me = await page.evaluate(() => (window as unknown as { classroom: { people: { me(): Promise<{ profile: { name: string; deviceName: string | null; visibility: string; everyoneUntil: number | null } }> } } }).classroom.people.me());
     expect(me.profile).toMatchObject({ name: 'Zoë Ñúñez', deviceName: 'Zoë’s MacBook', visibility: 'everyone', everyoneUntil: null });
-    expect(await page.evaluate(() => document.body.innerText.includes('Ashar'))).toBe(false);
+    expect(await page.evaluate(() => document.body.innerText.includes('Ashar') || document.body.innerText.includes('CLAN user'))).toBe(false);
   } finally { await app.close(); }
 }, 90_000);

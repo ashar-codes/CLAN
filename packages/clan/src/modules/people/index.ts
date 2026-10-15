@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { z } from 'zod';
 import {
-  b64u, personDeviceStatement, presenceTag, safetyNumber, verifyStatement, CHAT_MODES, conversationId, envelopeValid, FILE_MAX, PEOPLE_EDIT_WINDOW_MS as EDIT_WINDOW_MS, PEOPLE_DELETE_WINDOW_MS as DELETE_WINDOW_MS, PUSH_CALL_TTL_MS, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
+  b64u, personDeviceStatement, presenceTag, safetyNumber, verifyStatement, CHAT_MODES, conversationId, envelopeValid, FILE_MAX, PEOPLE_EDIT_WINDOW_MS as EDIT_WINDOW_MS, PEOPLE_DELETE_WINDOW_MS as DELETE_WINDOW_MS, PUSH_CALL_TTL_MS, RelayUrl, EMOJI, FieldVisibility, LIVE_KINDS, LIVE_MAX_AGE_MS, PeerEnvelope, PROFILE_FIELDS, ProfileView, profileValid, SignedProfile, signEnvelope, signProfile,
   TEMP_TTLS, Visibility, VOICE_MAX, VOICE_MIME, type FileMeta, type PeerBody, type PeerSigner, type ProfileField,
 } from '@classroom/protocol';
 import { tx, type Db, type ModuleSchema } from '../../core/db.ts';
@@ -592,7 +592,7 @@ export class People {
   react(msgId: string, emoji: string | null) {
     const m = this.visibleRow(msgId), c = this.must(m.conv_id);
     if (!this.canMessage(c) || m.deleted_at || m.kind === 'event' || m.kind === 'call') throw new PeerError('not_allowed', 'You cannot react to this message.');
-    const e = emoji === null ? null : z.string().trim().min(1).max(16).parse(emoji), r = JSON.parse(m.reactions) as Record<string, string>;
+    const e = emoji === null ? null : z.string().trim().regex(EMOJI, 'Choose an emoji.').parse(emoji), r = JSON.parse(m.reactions) as Record<string, string>;
     if (e) r[this.myKey()] = e; else delete r[this.myKey()];
     tx(this.db, () => { this.db.prepare('UPDATE people_messages SET reactions = ? WHERE id = ?').run(JSON.stringify(r), msgId); this.queue(c.peer_key, { kind: 'msg.react', msgId, emoji: e }); });
     this.changed('messages', { convId: m.conv_id });
@@ -790,7 +790,7 @@ export class People {
   pushRelay(url?: string | null): string | null {
     this.profileRow();
     if (url !== undefined) {
-      const u = url === null || url.trim() === '' ? null : z.string().url().max(200).refine((x) => x.startsWith('https://') || /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(x), 'Use an https:// relay address.').parse(url.trim());
+      const u = url === null || url.trim() === '' ? null : RelayUrl.parse(url.trim());
       this.db.prepare('UPDATE people_profile SET push_relay = ? WHERE one = 1').run(u);
       this.db.prepare("UPDATE people_push_caps SET state = 'revoke'").run();
     }
@@ -1014,6 +1014,7 @@ export class People {
           const m = this.db.prepare('SELECT * FROM people_messages WHERE id = ?').get(body.msgId) as MsgRow | undefined;
           const editing = body.kind === 'msg.edit';
           if (!m) { // arrived before its message (or the message expired): remember, so it can never appear unchanged
+            if ((this.db.prepare('SELECT count(*) n FROM people_msg_ops WHERE author = ?').get(e.from) as { n: number }).n >= 500) throw new PeerError('rate_limited', 'Too many changes to unknown messages.');
             this.db.prepare(`INSERT INTO people_msg_ops (msg_id, author, text, edited_at, deleted_at, at) VALUES (?, ?, ?, ?, ?, ?)
               ON CONFLICT (msg_id) DO UPDATE SET text = CASE WHEN excluded.edited_at > coalesce(edited_at, 0) THEN excluded.text ELSE text END, edited_at = max(coalesce(edited_at, 0), coalesce(excluded.edited_at, 0)), deleted_at = coalesce(deleted_at, excluded.deleted_at) WHERE author = excluded.author`)
               .run(body.msgId, e.from, editing ? body.text : null, editing ? e.at : null, editing ? null : e.at, at);

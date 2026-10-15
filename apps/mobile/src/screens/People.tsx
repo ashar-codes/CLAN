@@ -310,7 +310,7 @@ function PushCard() {
     <Field label="Relay address (https://…)" value={url} onChange={setUrl} autoCapitalize="none" autoCorrect={false} placeholder="https://relay.example.edu" />
     <Row><Btn small label="Save relay" onPress={() => { setErr(act(() => people().pushRelay(url.trim() || null))); pushTick(); }} /><Btn small label="Turn off" onPress={() => { setUrl(''); setErr(act(() => people().pushRelay(null))); pushTick(); }} /></Row>
     <Muted small>{pushStatus()}</Muted>
-    {Platform.OS === 'android' && <Btn small label="Test a wake-up notification on this phone" onPress={() => void selfTestWake().then((r) => setErr(`Self-test: genuine ${r.genuine}, forged ${r.forged}, repeated ${r.replay}`), (e) => setErr((e as Error).message))} />}
+    {Platform.OS === 'android' && <Row>{(['msg', 'call'] as const).map((k) => <Btn key={k} small label={k === 'msg' ? 'Test a message wake-up' : 'Test an incoming-call ring'} onPress={() => void selfTestWake(k).then((r) => setErr(`Self-test: genuine ${r.genuine}, forged ${r.forged}, repeated ${r.replay}`), (e) => setErr((e as Error).message))} />)}</Row>}
     <Err msg={err} />
   </Card>;
 }

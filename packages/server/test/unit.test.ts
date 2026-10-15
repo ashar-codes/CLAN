@@ -267,16 +267,16 @@ describe('migration 3 (Milestone 2.5 upgrade of an existing teacher database)', 
     migrate(db, 2); // a Milestone 2 database
     db.exec(`INSERT INTO sessions (id, title, join_code, network_mode, started_at, ended_at) VALUES ('s1', 'OS', '482915', 'lan', 1, 2);
       INSERT INTO members (id, session_id, device_id, full_name, roll_no, device_name, status, token_hash, token_expires, joined_at, last_seen)
-        VALUES ('m1', 's1', '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a', 'Ashar', 'FA23-CS-114', 'Mac', 'approved', 'h', 0, 1, 1);
-      INSERT INTO known_devices (course, device_id, full_name, roll_no, first_approved_at) VALUES ('OS', '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a', 'Ashar', 'FA23-CS-114', 1);`);
+        VALUES ('m1', 's1', '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a', 'Sam', 'FA23-CS-114', 'Mac', 'approved', 'h', 0, 1, 1);
+      INSERT INTO known_devices (course, device_id, full_name, roll_no, first_approved_at) VALUES ('OS', '0b6f1c8e-5b1a-4c55-9a8b-0f0e1d2c3b4a', 'Sam', 'FA23-CS-114', 1);`);
     migrate(db);
     expect(db.prepare('SELECT join_code, title FROM sessions').get()).toEqual({ join_code: '', title: 'OS' });
-    expect(db.prepare('SELECT full_name, trust, device_key FROM members').get()).toEqual({ full_name: 'Ashar', trust: 'legacy', device_key: null });
+    expect(db.prepare('SELECT full_name, trust, device_key FROM members').get()).toEqual({ full_name: 'Sam', trust: 'legacy', device_key: null });
     expect(db.prepare('SELECT count(*) n FROM trusted_devices').get()).toEqual({ n: 0 });
     // A new class of the same course: the old UUID gives no trust.
     const c = new Classroom(db, 'OS', 'lan');
     c.setPolicy('known');
-    expect(c.join({ ...profile(), fullName: 'Ashar', rollNo: 'FA23-CS-114' }).status).toBe('pending');
+    expect(c.join({ ...profile(), fullName: 'Sam', rollNo: 'FA23-CS-114' }).status).toBe('pending');
   });
 });
 

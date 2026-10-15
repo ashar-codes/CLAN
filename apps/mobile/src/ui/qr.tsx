@@ -32,7 +32,9 @@ export function QrScanner({ onCode, onClose, hint, continuous = false }: { onCod
   const [perm, ask] = useCameraPermissions();
   const [err, setErr] = useState<string | null>(null), [active, setActive] = useState(true);
   const last = useRef(''), lastAt = useRef(0);
-  useEffect(() => { if (perm && !perm.granted && perm.canAskAgain) void ask(); }, [perm, ask]);
+  // ask once per opening; after "Don't allow" the person can still pick a picture or tap Allow camera
+  const asked = useRef(false);
+  useEffect(() => { if (perm && !perm.granted && perm.canAskAgain && !asked.current) { asked.current = true; void ask(); } }, [perm, ask]);
   const handle = (text: string) => {
     if (!active || !text) return;
     const now = Date.now();

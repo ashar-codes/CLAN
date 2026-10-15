@@ -1,0 +1,106 @@
+name: CLAN final Windows TEST installer
+on:
+  push:
+    branches: [final-clan-polish]
+    paths: ['apps/**', 'packages/**', 'native/**', '.github/workflows/final-qa-packages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installer:
+    env:
+      CLAN_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '8.0.x'
+      - run: npm install -g pnpm@11.20.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: dotnet publish native/windows-direct -c Release -o native/windows-direct/bin/publish
+      - name: Fetch pinned Windows SFU
+        shell: bash
+        run: sh native/livekit/fetch.sh win32-x64
+      - name: Build Windows remote control native adapter
+        shell: bash
+        run: sh native/remote-control/build.sh
+      - run: pnpm build:desktop
+      - name: Build unsigned TEST NSIS installer
+        working-directory: apps/desktop
+        run: node scripts/package-btc2r.mjs win final
+      - name: Install and launch on disposable runner
+        shell: pwsh
+        run: |
+          # Sentinel production rules on this disposable runner: installing/uninstalling TEST must preserve them.
+          $betaNames = @('CLAN (local network)', 'CLAN discovery (local network)', 'CLAN screen sharing (local network)', 'CLAN TEST (local network)', 'CLAN TEST discovery (local network)', 'CLAN TEST screen sharing (local network)', 'CLAN BTC2R QA (local network)', 'CLAN BTC2R QA discovery (local network)', 'CLAN BTC2R QA screen sharing (local network)')
+          foreach ($name in $betaNames) {
+            New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Block -Program "$env:WINDIR\System32\notepad.exe" -Protocol TCP | Out-Null
+          }
+          $installer = Get-ChildItem apps/desktop/release-final/*.exe | Select-Object -First 1
+          if (!$installer) { throw 'No NSIS installer generated' }
+          $install = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exit $($install.ExitCode)" }
+          $app = 'C:\Program Files\CLAN QA\CLAN QA.exe'
+          if (!(Test-Path $app)) { throw 'Installed application missing' }
+          foreach ($helper in @('CLAN.DirectHelper.exe','livekit-server.exe','remote-control\clan-control.exe')) {
+            if (!(Test-Path (Join-Path 'C:\Program Files\CLAN QA\resources' $helper))) { throw "Packaged helper missing: $helper" }
+          }
+          foreach ($name in $betaNames) {
+            if (!(Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) { throw "TEST installer removed beta firewall rule: $name" }
+          }
+          $rules = @('CLAN QA (local network)', 'CLAN QA discovery (local network)', 'CLAN QA screen sharing (local network)')
+          foreach ($name in $rules) {
+            $rule = Get-NetFirewallRule -DisplayName $name -ErrorAction Stop
+            if ($rule.Direction -ne 'Inbound' -or $rule.Action -ne 'Allow') { throw "Invalid TEST rule: $name" }
+            $expectedProgram = if ($name -like '*screen sharing*') { 'C:\Program Files\CLAN QA\resources\livekit-server.exe' } else { $app }
+            if (($rule | Get-NetFirewallApplicationFilter).Program -ne $expectedProgram) { throw "Wrong TEST executable: $name" }
+            if (($rule | Get-NetFirewallAddressFilter).RemoteAddress -notcontains 'LocalSubnet') { throw "TEST firewall rule is not local-subnet scoped: $name" }
+          }
+          $env:CLASSROOM_USER_DATA = Join-Path $env:RUNNER_TEMP 'clan-test-profile'
+          $process = Start-Process $app -PassThru
+          try {
+            $db = Join-Path $env:CLASSROOM_USER_DATA 'teacher.db'
+            for ($i=0; $i -lt 60 -and !(Test-Path $db); $i++) { Start-Sleep 1 }
+            if (!(Test-Path $db)) { throw 'Installed app did not initialize disposable database' }
+            $process.Refresh()
+            if ($process.HasExited) { throw 'Installed app exited during startup' }
+            node apps/desktop/e2e/packaged-profile-lock.mjs $app
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged profile-lock/capture regression failed' }
+          } finally { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
+          $uninstaller = Get-ChildItem 'C:\Program Files\CLAN QA\Uninstall*.exe' | Select-Object -First 1
+          if (!$uninstaller) { throw 'Uninstaller missing' }
+          $removed = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw 'TEST uninstall failed' }
+          foreach ($name in $rules) {
+            if (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue) { throw "TEST uninstall left firewall rule: $name" }
+          }
+          foreach ($name in $betaNames) {
+            if (!(Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) { throw "TEST uninstall removed beta firewall rule: $name" }
+          }
+
+      - name: Label and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force windows-final-delivery | Out-Null
+          $short = $env:CLAN_SOURCE_SHA.Substring(0,7)
+          $installer = Get-ChildItem apps/desktop/release-final/*.exe | Select-Object -First 1
+          $output = "windows-final-delivery/CLAN-Windows-TEST.exe"
+          Copy-Item $installer.FullName $output
+          $sha = (Get-FileHash $output -Algorithm SHA256).Hash.ToLower()
+          "$sha  $(Split-Path $output -Leaf)" | Set-Content windows-final-delivery/SHA256SUMS -Encoding ascii
+          @{commit=$env:CLAN_SOURCE_SHA;version='0.2.0-final-test';signing='unsigned';build='Windows x64 NSIS';smoke='runner install, startup, uninstall and beta firewall preservation passed';physicalTests='NOT TESTED';publicRelease='NOT APPROVED'} | ConvertTo-Json | Set-Content windows-final-delivery/build-evidence.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: CLAN-Windows-TEST
+          path: windows-final-delivery/
+          retention-days: 14
+          if-no-files-found: error

@@ -8,6 +8,7 @@ import { PushEvent, pushEventValid, signEnvelope, type PeerEnvelope } from '@cla
 import { PushAgent } from '@clan/core';
 import { pushRelay, type PushTarget } from '@classroom/server';
 import { setup } from './helpers.ts';
+process.env.CLAN_TEST_INSECURE_RELAY = '1'; // the test relay listens on loopback http
 
 
 function person(name: string | null, clock: { t: number }, base?: ReturnType<typeof setup>, signer = nodeSigner(newEd25519().privatePkcs8)) {
@@ -40,6 +41,7 @@ describe('profile onboarding and visibility', () => {
     expect(fresh.p.ready()).toBe(false);
     expect(fresh.p.visibility()).toBe('invisible');
     expect(fresh.p.profileFor(viewer.key).profile).toBeNull();
+    for (const bad of ['http://relay.example.com', 'https://192.168.1.1/x', 'https://10.0.0.5', 'ftp://x.example', 'https://u:p@relay.example.com']) expect(() => fresh.p.pushRelay(bad)).toThrow();
     expect(fresh.p.reachableBy(viewer.key)).toBe(false);
     expect(() => fresh.p.updateProfile({ name: 'CLAN user' })).toThrow();
     fresh.p.adoptIdentity('  Zoë Ñúñez  ', 'Zoë’s Pixel');
@@ -88,7 +90,8 @@ describe('messages: replies, edit, delete, reactions', () => {
     expect(() => a.p.receive(forged, b.key)).toThrow();
     expect(a.p.message(m.id)!.text).toBe('hello there');
     // reactions from either side
-    b.p.react(m.id, '👍'); flush(b, a);
+    expect(() => b.p.react(m.id, 'lol text')).toThrow();
+    b.p.react(m.id, '👍🏽'); b.p.react(m.id, '👍'); flush(b, a);
     expect(a.p.message(m.id)!.reactions[b.key]).toBe('👍');
     // an older edit arriving late does not overwrite a newer one
     clock.t += 1000; a.p.editMessage(m.id, 'v3');

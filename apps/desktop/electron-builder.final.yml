@@ -1,0 +1,15 @@
+# Final TEST identity ("CLAN QA"): own app id, install folder, firewall rules and profile (final-test). Existing
+# production / BTC TEST installs and their data are untouched.
+extends: ./electron-builder.yml
+appId: app.classroomlan.desktop.finalqa
+productName: CLAN QA
+directories:
+  output: release-final
+extraMetadata:
+  version: 0.2.0-final-test
+  clanInternalQa: true
+  clanQaProfile: final-test
+  clanQaAppId: app.classroomlan.desktop.finalqa
+mac:
+  identity: '-'
+  target: [dmg]
