@@ -42,9 +42,8 @@ export function publishLan(o: { type: string; name: string; port: number; txt: R
   const sources = lans.map((lan) => {
     const bonjour = new Bonjour({ interface: lan.address, bind: '0.0.0.0' } as object, (e: Error) => { state.errors.push(e.message); o.onError?.(e.message); });
     const svc = bonjour.publish({ name: o.name, type: o.type, port: o.port, host, txt: { ...o.txt, a: lan.address }, disableIPv6: true });
-    const records = svc.records.bind(svc);
     // only this interface's address, never the machine's other adapters
-    svc.records = () => records().filter((r) => r.type !== 'A' || r.data === lan.address);
+    if (typeof svc.records === 'function') { const records = svc.records.bind(svc); svc.records = () => records().filter((r) => r.type !== 'A' || r.data === lan.address); }
     return { bonjour, svc };
   });
   const ready = Promise.all(sources.map(({ svc }) => new Promise<void>((r) => { svc.once('up', () => { state.published++; r(); }); svc.once('error', (e: Error) => { state.errors.push(e.message); r(); }); setTimeout(r, 5000).unref?.(); })));

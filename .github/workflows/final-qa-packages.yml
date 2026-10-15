@@ -1,7 +1,7 @@
 name: CLAN final Windows TEST installer
 on:
   push:
-    branches: [final-clan-polish]
+    branches: [final-clan-polish, fix/discovery-and-android-push]
     paths: ['apps/**', 'packages/**', 'native/**', '.github/workflows/final-qa-packages.yml']
   workflow_dispatch:
 permissions:

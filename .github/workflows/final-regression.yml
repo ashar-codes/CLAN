@@ -1,7 +1,7 @@
 name: CLAN final regression (Linux + Windows)
 on:
   push:
-    branches: [final-clan-polish]
+    branches: [final-clan-polish, fix/discovery-and-android-push]
     paths: ['apps/**', 'packages/**', 'native/**', 'pnpm-lock.yaml', '.github/workflows/final-regression.yml']
 permissions:
   contents: read
@@ -43,3 +43,18 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         working-directory: apps/desktop
         run: pnpm exec vitest run -c vitest.e2e.config.ts
+      - name: Real-network discovery matrix (native mDNS + sockets on this runner)
+        if: '!cancelled()'
+        shell: bash
+        env:
+          CLAN_DISCOVERY_MATRIX: '1'
+          CLAN_DISCOVERY_RUNS: '6'
+          CLAN_DISCOVERY_RESULTS: discovery-results-${{ runner.os }}.json
+        run: pnpm exec vitest run packages/clan/test/discovery-matrix.test.ts --maxWorkers=1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: '!cancelled()'
+        with:
+          name: discovery-results-${{ runner.os }}
+          path: discovery-results-*.json
+          if-no-files-found: warn
+          retention-days: 14
