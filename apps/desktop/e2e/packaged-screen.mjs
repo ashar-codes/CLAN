@@ -18,6 +18,7 @@ const log = openSync(join(tmpdir(), 'clan-packaged-screen.log'), 'a');
 async function port() { const s = createServer(); await new Promise((r) => s.listen(0, '127.0.0.1', r)); const p = s.address().port; await new Promise((r) => s.close(r)); return p; }
 async function launch() {
   const p = await port(), dir = mkdtempSync(join(tmpdir(), 'clan-screen-'));
+  writeFileSync(join(dir, 'profile.json'), JSON.stringify({ fullName: 'QA Tester', rollNo: '', deviceName: 'QA device' })); // onboarding result
   const env = { ...process.env, CLASSROOM_USER_DATA: dir }; delete env.CLAN_TEST_CAPTURE;
   const child = spawn(binary, [`--remote-debugging-port=${p}`, '--remote-debugging-address=127.0.0.1'], { env, stdio: ['ignore', log, log] }); children.push(child);
   let b; for (let i = 0; i < 90 && !b; i++) { assert.equal(child.exitCode, null, 'App exited before startup'); try { b = await chromium.connectOverCDP(`http://127.0.0.1:${p}`, { timeout: 1500 }); } catch { await delay(500); } }
