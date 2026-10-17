@@ -31,7 +31,7 @@ function frames() {
   const dir = mkdtempSync(join(tmpdir(), 'clan-frames-'));
   writeFileSync(join(dir, 'index.html'), `<title>CLAN Frames Test</title><body style="margin:0;background:#0a8f3c"><canvas id=c width=640 height=360></canvas><script>
 const g=c.getContext('2d');let i=0;setInterval(()=>{g.fillStyle='#0a8f3c';g.fillRect(0,0,640,360);g.fillStyle='#fff';g.fillRect((i*23)%600,(i*11)%320,40,40);g.font='48px sans-serif';g.fillText(String(i++),20,340)},50)</script>`);
-  writeFileSync(join(dir, 'main.cjs'), `const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{const w=new BrowserWindow({width:640,height:400,x:40,y:40,title:'CLAN Frames Test'});w.loadFile(__dirname+'/index.html');});`);
+  writeFileSync(join(dir, 'main.cjs'), `const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{const w=new BrowserWindow({width:640,height:400,x:40,y:40,title:'CLAN Frames Test',webPreferences:{backgroundThrottling:false}});w.loadFile(__dirname+'/index.html');});`);
   const electron = createRequire(join(import.meta.dirname, '..', 'package.json'))('electron');
   children.push(spawn(electron, [join(dir, 'main.cjs')], { stdio: ['ignore', log, log] }));
 }

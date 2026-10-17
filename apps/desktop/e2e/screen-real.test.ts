@@ -37,7 +37,7 @@ type Api = { classroom: { clan: { notes(): Promise<{ title: string; body: string
 
 it.skipIf(!run)('real window and screen capture reach another CLAN; fullscreen + notes while it plays; stop ends capture', async () => {
   const { app: hostApp, page: host } = await launch();
-  await hostApp.evaluate(({ BrowserWindow }, html) => { const w = new BrowserWindow({ width: 640, height: 400, x: 40, y: 40, title: 'CLAN Frames Test', webPreferences: { sandbox: true } }); void w.loadURL(`data:text/html,${encodeURIComponent(html)}`); }, FRAMES);
+  await hostApp.evaluate(({ BrowserWindow }, html) => { const w = new BrowserWindow({ width: 640, height: 400, x: 40, y: 40, title: 'CLAN Frames Test', webPreferences: { sandbox: true, backgroundThrottling: false } }); void w.loadURL(`data:text/html,${encodeURIComponent(html)}`); }, FRAMES);
   await host.getByRole('button', { name: 'CLANs', exact: false }).first().click();
   await host.getByRole('button', { name: 'Create CLAN' }).click();
   await host.getByRole('radio', { name: 'Study group', exact: true }).click();
