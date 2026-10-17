@@ -1,7 +1,7 @@
 name: CLAN final regression (Linux + Windows)
 on:
   push:
-    branches: [final-clan-polish, fix/discovery-and-android-push]
+    branches: [final-clan-polish, fix/discovery-and-android-push, fix/screen-sharing-and-presentation-ux]
     paths: ['apps/**', 'packages/**', 'native/**', 'pnpm-lock.yaml', '.github/workflows/final-regression.yml']
 permissions:
   contents: read

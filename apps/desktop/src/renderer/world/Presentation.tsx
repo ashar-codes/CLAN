@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { MediaDiagnostics, MediaQuality, MediaTransport, ScreenProfile, ScreenView } from '@classroom/client';
 import type { ClientMessage, PresentationView, ServerMessage } from '@classroom/protocol';
-import type { CaptureDiagnostics } from '../../shared.ts';
+import { classifyCapture, type CaptureFailure } from './media/captureError.ts';
 import { api } from '../App.tsx';
 import { FloatPanel, NoteEditor, ToolsFab, type ToolItem } from './PresentationTools.tsx';
 
@@ -13,31 +13,11 @@ type Src = { id: string; kind: 'screen' | 'window'; name: string; thumbnail: str
 
 const loadTransport = () => import('./media/livekit.ts').then((m) => m.createTransport());
 
-/** Why a capture or publish failed, from the real error and the main-process capture stages (never a guess). */
-export type CaptureFailure = { kind: 'permission' | 'restart' | 'source' | 'cancelled' | 'init' | 'refused' | 'publish' | 'server'; text: string; detail: string; diag: CaptureDiagnostics | null };
 export async function explainCapture(e: unknown, stage: 'capture' | 'publish' = 'capture'): Promise<CaptureFailure> {
-  const err = (e ?? {}) as { name?: string; message?: string; code?: unknown };
-  const name = err.name ?? 'Error', message = String(err.message ?? e).slice(0, 200);
-  const d = await api.mediaDiagnostics().catch(() => null);
-  const mac = d?.platform === 'darwin';
-  const detail = `${name}${err.code != null ? ` (${String(err.code)})` : ''}: ${message}`;
-  const f = (kind: CaptureFailure['kind'], text: string): CaptureFailure => ({ kind, text, detail, diag: d });
-  if (stage === 'publish') return /token|401|403|forbidden|not allowed to publish/i.test(message) ? f('refused', 'The host has not allowed this screen to be published. Ask the host, then try again.')
-    : /connect|websocket|signal|timeout|network/i.test(message) ? f('server', 'Couldn’t reach the presentation server in this CLAN. Check the connection to the host and try again.')
-    : f('publish', 'The selected screen was captured but could not be published to the room. Try again.');
-  if (/no longer available/.test(message) || name === 'NotFoundError' || d?.sourceFound === false) return f('source', 'The selected screen or window is no longer available. Refresh the list and choose again.');
-  if (mac && d && d.screen !== 'granted') return f('permission', 'Screen Recording permission is off for CLAN. Turn CLAN on in System Settings › Privacy & Security › Screen & System Audio Recording, then quit and reopen CLAN.');
-  if (name === 'AbortError' || name === 'NotReadableError') return f(mac ? 'restart' : 'init', mac
-    ? 'macOS could not start capturing this source. If you just turned on Screen Recording, quit and reopen CLAN; otherwise choose another screen or window.'
-    : 'The system could not start capturing this source. Choose another screen or window, or restart CLAN.');
-  if (name === 'InvalidStateError') return f('cancelled', 'Capture has to start from your click. Press Share again.');
-  if (name === 'NotAllowedError' && d?.permissionGranted === false) return f('cancelled', 'The screen choice expired before capture started. Choose the screen again.');
-  if (name === 'NotAllowedError') return f(mac ? 'restart' : 'init', mac
-    ? 'macOS refused to capture the screen. Check that this CLAN app is on in Screen & System Audio Recording (turn it off and on again after an update), then quit and reopen CLAN.'
-    : 'The system refused to capture this source. Choose another screen or window, or restart CLAN.');
-  return f('init', 'Screen capture could not start. Try again or choose another screen or window.');
+  return classifyCapture(e, await api.mediaDiagnostics().catch(() => null), stage);
 }
 /** Plain-text report for support: error, platform and capture stages. No source names, thumbnails or frames. */
+export type { CaptureFailure };
 export const captureReport = (x: CaptureFailure) => ['CLAN screen-capture diagnostics', `result: ${x.kind}`, `error: ${x.detail}`,
   ...Object.entries(x.diag ?? {}).map(([k, v]) => `${k}: ${k === 'at' && typeof v === 'number' ? new Date(v).toISOString() : String(v)}`)].join('\n');
 
@@ -225,7 +205,7 @@ function ScreenWall({ pres, live, people }: { pres: Presentation; live: Presenta
         : <div className="wall-msg"><b>{live.state === 'reconnecting' || pres.mediaState !== 'connected' ? 'Reconnecting presentation…' : `Waiting for ${live.presenterName}’s screen…`}</b></div>}
       {!pres.presenting && !left && v && !immersive && <div className="wall-controls" role="toolbar" aria-label="Presentation view">{controls}</div>}
       {immersive && <ToolsFab items={items} idle={idle} />}
-      {immersive && notes && <div hidden={panel !== 'notes'}><NoteEditor context={`${live.presenterName}’s presentation`} onClose={() => { setNotes(false); setPanel(null); }} onSaved={setToast} /></div>}
+      {notes && <div hidden={panel !== 'notes'}><NoteEditor context={`${live.presenterName}’s presentation`} onClose={() => { setNotes(false); setPanel(null); }} onSaved={setToast} /></div>}
       {immersive && panel === 'people' && people && <FloatPanel title="Participants" onClose={() => setPanel(null)} testid="presentation-people">
         <ul className="pt-people">{people.map((p, i) => <li key={i}><span className={`dot ${p.connected !== false ? 'on' : ''}`} aria-hidden />{p.name}{p.you && <small className="muted"> · you</small>}{p.host && <small className="muted"> · host</small>}{p.name === live.presenterName && <small className="muted"> · presenting</small>}</li>)}</ul></FloatPanel>}
       {immersive && panel === 'controls' && <FloatPanel title="Presentation" onClose={() => setPanel(null)} testid="presentation-controls">

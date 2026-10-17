@@ -1,7 +1,7 @@
 name: CLAN final Windows TEST installer
 on:
   push:
-    branches: [final-clan-polish, fix/discovery-and-android-push]
+    branches: [final-clan-polish, fix/discovery-and-android-push, fix/screen-sharing-and-presentation-ux]
     paths: ['apps/**', 'packages/**', 'native/**', '.github/workflows/final-qa-packages.yml']
   workflow_dispatch:
 permissions:
@@ -75,6 +75,8 @@ jobs:
             if ($process.HasExited) { throw 'Installed app exited during startup' }
             node apps/desktop/e2e/packaged-profile-lock.mjs $app
             if ($LASTEXITCODE -ne 0) { throw 'Packaged profile-lock/capture regression failed' }
+            node apps/desktop/e2e/packaged-screen.mjs $app
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged real screen-sharing check failed' }
           } finally { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
           $uninstaller = Get-ChildItem 'C:\Program Files\CLAN QA\Uninstall*.exe' | Select-Object -First 1
           if (!$uninstaller) { throw 'Uninstaller missing' }
