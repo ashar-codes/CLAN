@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { MediaDiagnostics, MediaQuality, MediaTransport, ScreenProfile, ScreenView } from '@classroom/client';
 import type { ClientMessage, PresentationView, ServerMessage } from '@classroom/protocol';
+import type { CaptureDiagnostics } from '../../shared.ts';
 import { api } from '../App.tsx';
+import { FloatPanel, NoteEditor, ToolsFab, type ToolItem } from './PresentationTools.tsx';
 
 export type PresentationMsg = Extract<ServerMessage, { t: 'presentation' }>;
 type Perm = { platform: string; screen: string; audio: boolean; testCapture: boolean };
@@ -11,12 +13,41 @@ type Src = { id: string; kind: 'screen' | 'window'; name: string; thumbnail: str
 
 const loadTransport = () => import('./media/livekit.ts').then((m) => m.createTransport());
 
+/** Why a capture or publish failed, from the real error and the main-process capture stages (never a guess). */
+export type CaptureFailure = { kind: 'permission' | 'restart' | 'source' | 'cancelled' | 'init' | 'refused' | 'publish' | 'server'; text: string; detail: string; diag: CaptureDiagnostics | null };
+export async function explainCapture(e: unknown, stage: 'capture' | 'publish' = 'capture'): Promise<CaptureFailure> {
+  const err = (e ?? {}) as { name?: string; message?: string; code?: unknown };
+  const name = err.name ?? 'Error', message = String(err.message ?? e).slice(0, 200);
+  const d = await api.mediaDiagnostics().catch(() => null);
+  const mac = d?.platform === 'darwin';
+  const detail = `${name}${err.code != null ? ` (${String(err.code)})` : ''}: ${message}`;
+  const f = (kind: CaptureFailure['kind'], text: string): CaptureFailure => ({ kind, text, detail, diag: d });
+  if (stage === 'publish') return /token|401|403|forbidden|not allowed to publish/i.test(message) ? f('refused', 'The host has not allowed this screen to be published. Ask the host, then try again.')
+    : /connect|websocket|signal|timeout|network/i.test(message) ? f('server', 'Couldn’t reach the presentation server in this CLAN. Check the connection to the host and try again.')
+    : f('publish', 'The selected screen was captured but could not be published to the room. Try again.');
+  if (/no longer available/.test(message) || name === 'NotFoundError' || d?.sourceFound === false) return f('source', 'The selected screen or window is no longer available. Refresh the list and choose again.');
+  if (mac && d && d.screen !== 'granted') return f('permission', 'Screen Recording permission is off for CLAN. Turn CLAN on in System Settings › Privacy & Security › Screen & System Audio Recording, then quit and reopen CLAN.');
+  if (name === 'AbortError' || name === 'NotReadableError') return f(mac ? 'restart' : 'init', mac
+    ? 'macOS could not start capturing this source. If you just turned on Screen Recording, quit and reopen CLAN; otherwise choose another screen or window.'
+    : 'The system could not start capturing this source. Choose another screen or window, or restart CLAN.');
+  if (name === 'InvalidStateError') return f('cancelled', 'Capture has to start from your click. Press Share again.');
+  if (name === 'NotAllowedError' && d?.permissionGranted === false) return f('cancelled', 'The screen choice expired before capture started. Choose the screen again.');
+  if (name === 'NotAllowedError') return f(mac ? 'restart' : 'init', mac
+    ? 'macOS refused to capture the screen. Check that this CLAN app is on in Screen & System Audio Recording (turn it off and on again after an update), then quit and reopen CLAN.'
+    : 'The system refused to capture this source. Choose another screen or window, or restart CLAN.');
+  return f('init', 'Screen capture could not start. Try again or choose another screen or window.');
+}
+/** Plain-text report for support: error, platform and capture stages. No source names, thumbnails or frames. */
+export const captureReport = (x: CaptureFailure) => ['CLAN screen-capture diagnostics', `result: ${x.kind}`, `error: ${x.detail}`,
+  ...Object.entries(x.diag ?? {}).map(([k, v]) => `${k}: ${k === 'at' && typeof v === 'number' ? new Date(v).toISOString() : String(v)}`)].join('\n');
+
 /** Presentation state machine for one CLAN connection. `me` = 'host' or the member id. */
 export function usePresentation(o: { baseUrl: string; bearer: string; sessionId: string; msg: PresentationMsg | null; send(m: ClientMessage): void; me: string }) {
   const live = o.msg?.state ?? null;
   const [view, setView] = useState<ScreenView | null>(null);
   const [mediaState, setMediaState] = useState<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed'>('idle');
   const [notice, setNotice] = useState('');
+  const [failure, setFailure] = useState<CaptureFailure | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const transport = useRef<MediaTransport | null>(null);
   const connecting = useRef<Promise<MediaTransport> | null>(null);
@@ -69,7 +100,7 @@ export function usePresentation(o: { baseUrl: string; bearer: string; sessionId:
       const { profile } = pending.current; pending.current = null;
       void (async () => {
         try { const t = await ensureConnected(); await t.publishScreen(stream.current!, profile); }
-        catch { try { const t = await ensureConnected(true); await t.publishScreen(stream.current!, profile); } catch (e) { setNotice(`Couldn’t start sharing: ${(e as Error).message}`); o.send({ t: 'present.stop' }); await stopLocal(); } }
+        catch { try { const t = await ensureConnected(true); await t.publishScreen(stream.current!, profile); } catch (e) { setFailure(await explainCapture(e, 'publish')); o.send({ t: 'present.stop' }); await stopLocal(); } }
       })();
     }
     if (!presenting && stream.current && !pending.current) { void stopLocal(); } // stopped by host, removed, or session ended
@@ -96,18 +127,18 @@ export function usePresentation(o: { baseUrl: string; bearer: string; sessionId:
   });
 
   return {
-    live, presenting, view, mediaState, notice, setNotice, busy,
+    live, presenting, view, mediaState, notice, setNotice, busy, failure, clearFailure: () => setFailure(null),
     /** Capture first (the user picked a source), then ask the host; publishing follows the server's decision. */
     async start(src: Src | 'test-screen' | 'test-window', audio: boolean, profile: ScreenProfile, takeover = false) {
-      setNotice(''); setBusy(null);
+      setNotice(''); setBusy(null); setFailure(null);
       let s: MediaStream;
-      try { s = await capture(src, audio); } catch { setNotice('Screen capture was not allowed.'); return; }
+      try { s = await capture(src, audio); } catch (e) { setFailure(await explainCapture(e)); return; }
       stream.current = s; pending.current = { profile }; watchEnd(s);
       o.send({ t: 'present.start', source: typeof src === 'string' ? (src === 'test-screen' ? 'screen' : 'window') : src.kind, audio: s.getAudioTracks().length > 0, takeover });
     },
     async switchTo(src: Src | 'test-screen' | 'test-window', audio: boolean) {
-      let s: MediaStream;
-      try { s = await capture(src, audio); } catch { setNotice('Screen capture was not allowed.'); return; }
+      let s: MediaStream; setFailure(null);
+      try { s = await capture(src, audio); } catch (e) { setFailure(await explainCapture(e)); return; } // the current share keeps running
       const old = stream.current; stream.current = s; watchEnd(s);
       await transport.current?.replaceScreen(s);
       old?.getTracks().forEach((t) => t.stop());
@@ -124,48 +155,89 @@ export type Presentation = ReturnType<typeof usePresentation>;
 
 /** The room wall. Modes are modular so a whiteboard or a document can take the wall later. */
 export type SurfaceMode = 'DEFAULT' | 'SCREEN_SHARE' | 'WHITEBOARD' | 'DOCUMENT_PRESENTATION';
+type Person = { name: string; host?: boolean; connected?: boolean; you?: boolean };
 /** One owner of the wall at a time: the default content, a presentation, or the whiteboard. */
-export function RoomSurface({ mode, children, screen, board }: { mode: SurfaceMode; children: ReactNode; screen?: { pres: Presentation; live: PresentationView }; board?: ReactNode }) {
+export function RoomSurface({ mode, children, screen, board, people }: { mode: SurfaceMode; children: ReactNode; screen?: { pres: Presentation; live: PresentationView }; board?: ReactNode; people?: Person[] }) {
   if (mode === 'WHITEBOARD' && board) return <div className="surface board-surface" data-testid="wall-board">{board}</div>;
   if (mode !== 'SCREEN_SHARE' || !screen) return <div className="surface">{children}</div>;
-  return <ScreenWall pres={screen.pres} live={screen.live} />;
+  return <ScreenWall pres={screen.pres} live={screen.live} people={people} />;
 }
 
-function ScreenWall({ pres, live }: { pres: Presentation; live: PresentationView }) {
+type Zoom = 'fit' | 1 | 2;
+/** Viewer of a shared screen. Immersive = the whole window (and display) shows the screen; the + menu opens CLAN tools
+ *  over it while the stream keeps playing. */
+function ScreenWall({ pres, live, people }: { pres: Presentation; live: PresentationView; people?: Person[] }) {
   const video = useRef<HTMLVideoElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState<'fit' | 'actual'>('fit');
+  const [zoom, setZoom] = useState<Zoom>('fit');
   const [muted, setMuted] = useState(true);
   const [left, setLeft] = useState(false);
   const [q, setQ] = useState<MediaQuality>('unknown');
   const [diag, setDiag] = useState<MediaDiagnostics | null>(null);
+  const [immersive, setImmersive] = useState(false);
+  const [panel, setPanel] = useState<null | 'notes' | 'people' | 'controls'>(null);
+  const [notes, setNotes] = useState(false); // the editor survives switching panels so a draft is never dropped
+  const [chat, setChat] = useState(false);
+  const [idle, setIdle] = useState(false);
+  const [toast, setToast] = useState('');
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const v = pres.view;
   useEffect(() => { const el = video.current; if (!el || !v || left) return; v.attach(el); return () => v.detach(el); }, [v, left]);
   useEffect(() => { const t = setInterval(() => setQ(pres.quality()), 2000); return () => clearInterval(t); }, [pres]);
   const who = pres.presenting ? 'You are' : `${live.presenterName} is`;
   const label = `${who} presenting ${pres.presenting ? 'your' : 'their'} ${live.source === 'window' ? 'window' : 'screen'}`;
-  const full = () => { const el = box.current; if (!el) return; if (document.fullscreenElement) void document.exitFullscreen(); else void el.requestFullscreen(); };
+  const exit = useCallback(() => { setImmersive(false); setChat(false); if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); }, []);
+  const enter = () => { setImmersive(true); setLeft(false); void document.documentElement.requestFullscreen?.().catch(() => {}); }; // the window fills its current display
+  const toggle = () => (immersive ? exit() : enter());
+  // Esc (handled by the browser in fullscreen) or leaving fullscreen any other way ends immersive view.
+  useEffect(() => { const f = () => { if (!document.fullscreenElement) { setImmersive(false); setChat(false); } }; document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
+  useEffect(() => { if (!immersive) return; const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) exit(); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [immersive, exit]);
+  useEffect(() => { document.body.toggleAttribute('data-immersive', immersive); document.body.toggleAttribute('data-immersive-chat', immersive && chat); }, [immersive, chat]);
+  useEffect(() => () => { document.body.removeAttribute('data-immersive'); document.body.removeAttribute('data-immersive-chat'); if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); }, []); // presentation ended
+  useEffect(() => { if (!immersive) return; let t = setTimeout(() => setIdle(true), 2500); const wake = () => { setIdle(false); clearTimeout(t); t = setTimeout(() => setIdle(true), 2500); }; addEventListener('pointermove', wake); addEventListener('keydown', wake); return () => { clearTimeout(t); removeEventListener('pointermove', wake); removeEventListener('keydown', wake); }; }, [immersive]);
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3500); return () => clearTimeout(t); }, [toast]);
+  const hasChat = () => !!document.querySelector('[data-testid="chat"]');
+  const items: ToolItem[] = [
+    { id: 'notes', label: 'Take Notes', icon: '✎', run: () => { setNotes(true); setPanel('notes'); } },
+    { id: 'capture', label: 'Quick Capture', icon: '+', run: () => dispatchEvent(new CustomEvent('clan:quick-capture')) },
+    ...(hasChat() ? [{ id: 'chat', label: chat ? 'Hide Chat' : 'Chat', icon: '💬', run: () => setChat(!chat) }] : []),
+    ...(people?.length ? [{ id: 'people', label: 'Participants', icon: '👥', run: () => setPanel('people') }] : []),
+    { id: 'controls', label: 'Presentation Controls', icon: '⚙', run: () => setPanel('controls') },
+  ];
+  const zoomLabel = (z: Zoom) => (z === 'fit' ? 'Fit to screen' : z === 1 ? 'Actual size' : '200%');
+  const dpr = devicePixelRatio || 1;
+  const videoStyle = zoom === 'fit' || !size ? undefined : { width: (size.w / dpr) * zoom, height: (size.h / dpr) * zoom, maxWidth: 'none', maxHeight: 'none' };
+  const controls = (
+    <>
+      <span className={`q q-${q}`} title="Connection">{q === 'good' ? 'Good' : q === 'fair' ? 'Fair' : q === 'poor' ? 'Poor' : '…'}</span>
+      <button className="small" onClick={() => setZoom(zoom === 'fit' ? 1 : zoom === 1 ? 2 : 'fit')} aria-label={`Zoom: ${zoomLabel(zoom)}`}>{zoomLabel(zoom === 'fit' ? 1 : zoom === 1 ? 2 : 'fit')}</button>
+      {v?.hasAudio && <button className="small" onClick={() => setMuted(!muted)} aria-pressed={!muted}>{muted ? 'Unmute' : 'Mute'}</button>}
+      <button className="small" onClick={toggle}>{immersive ? 'Exit fullscreen' : 'Fullscreen'}</button>
+      <button className="small" onClick={() => { exit(); setLeft(true); }}>Leave view</button>
+    </>
+  );
   return (
-    <div className="screen-wall" ref={box} data-testid="screen-wall" onDoubleClick={full}>
+    <div className={`screen-wall ${immersive ? 'immersive' : ''}`} data-testid="screen-wall" onDoubleClick={(e) => { if (!(e.target as HTMLElement).closest('.pt-panel, .pt-fab-wrap, .wall-controls')) toggle(); }}>
       <p className="sr-live" aria-live="polite" data-testid="wall-state">{live.state === 'reconnecting' || pres.mediaState === 'reconnecting' ? 'Reconnecting presentation…' : label}</p>
       {left ? <div className="wall-msg"><b>{label}</b><button className="small" onClick={() => setLeft(false)}>Watch again</button></div>
         : pres.presenting ? <div className="wall-msg"><b>You are presenting</b><span>Everyone in the room sees your {live.source === 'window' ? 'window' : 'screen'} here.</span></div>
-        : v ? <video ref={video} className={`screen-video ${fit}`} autoPlay playsInline muted={muted} data-testid="screen-video" aria-label={label} />
+        : v ? <div className={`screen-scroll ${zoom === 'fit' ? '' : 'zoomed'}`}><video ref={video} className={`screen-video ${zoom === 'fit' ? 'fit' : 'actual'}`} style={videoStyle} autoPlay playsInline muted={muted} data-testid="screen-video" aria-label={label}
+            onResize={(e) => setSize({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })} onLoadedMetadata={(e) => setSize({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })} /></div>
         : <div className="wall-msg"><b>{live.state === 'reconnecting' || pres.mediaState !== 'connected' ? 'Reconnecting presentation…' : `Waiting for ${live.presenterName}’s screen…`}</b></div>}
-      {!pres.presenting && !left && v && (
-        <div className="wall-controls" role="toolbar" aria-label="Presentation view">
-          <span className={`q q-${q}`} title="Connection">{q === 'good' ? 'Good' : q === 'fair' ? 'Fair' : q === 'poor' ? 'Poor' : '…'}</span>
-          <button className="small" onClick={() => setFit(fit === 'fit' ? 'actual' : 'fit')} aria-pressed={fit === 'actual'}>{fit === 'fit' ? 'Actual size' : 'Fit'}</button>
-          {v.hasAudio && <button className="small" onClick={() => setMuted(!muted)} aria-pressed={!muted}>{muted ? 'Unmute' : 'Mute'}</button>}
-          <button className="small" onClick={full}>Fullscreen</button>
-          <button className="small" onClick={() => setLeft(true)}>Leave view</button>
-        </div>
-      )}
-      <details className="wall-diag" onToggle={async (e) => { if ((e.target as HTMLDetailsElement).open) setDiag(await pres.diagnostics()); }}>
+      {!pres.presenting && !left && v && !immersive && <div className="wall-controls" role="toolbar" aria-label="Presentation view">{controls}</div>}
+      {immersive && <ToolsFab items={items} idle={idle} />}
+      {immersive && notes && <div hidden={panel !== 'notes'}><NoteEditor context={`${live.presenterName}’s presentation`} onClose={() => { setNotes(false); setPanel(null); }} onSaved={setToast} /></div>}
+      {immersive && panel === 'people' && people && <FloatPanel title="Participants" onClose={() => setPanel(null)} testid="presentation-people">
+        <ul className="pt-people">{people.map((p, i) => <li key={i}><span className={`dot ${p.connected !== false ? 'on' : ''}`} aria-hidden />{p.name}{p.you && <small className="muted"> · you</small>}{p.host && <small className="muted"> · host</small>}{p.name === live.presenterName && <small className="muted"> · presenting</small>}</li>)}</ul></FloatPanel>}
+      {immersive && panel === 'controls' && <FloatPanel title="Presentation" onClose={() => setPanel(null)} testid="presentation-controls">
+        <p className="small-text">{label}{live.audio ? ' · with sound' : ''} · media {pres.mediaState}</p>
+        {v && <div className="row wrap">{controls}</div>}
+      </FloatPanel>}
+      {immersive && toast && <div className="toast" role="status">{toast}</div>}
+      {!immersive && <details className="wall-diag" onToggle={async (e) => { if ((e.target as HTMLDetailsElement).open) setDiag(await pres.diagnostics()); }}>
         <summary>Diagnostics</summary>
         {diag ? <dl className="kv"><dt>Transport</dt><dd>{diag.transport}</dd><dt>Codec</dt><dd>{diag.codec ?? '—'}</dd><dt>Resolution</dt><dd>{diag.width ? `${diag.width}×${diag.height}` : '—'}</dd><dt>FPS</dt><dd>{diag.fps ?? '—'}</dd>
           <dt>Bitrate</dt><dd>{diag.bitrateKbps != null ? `${diag.bitrateKbps} kb/s` : '—'}</dd><dt>Packets lost</dt><dd>{diag.packetsLost ?? '—'}</dd><dt>RTT</dt><dd>{diag.rttMs != null ? `${diag.rttMs} ms` : '—'}</dd><dt>Layer</dt><dd>{diag.layer ?? '—'}</dd><dt>Media</dt><dd>{pres.mediaState}</dd></dl> : <p className="muted small-text">No media connection.</p>}
-      </details>
+      </details>}
     </div>
   );
 }
@@ -178,7 +250,8 @@ export function SourcePicker({ onPick, onClose, title = 'Present' }: { onPick(sr
   const [audio, setAudio] = useState(false);
   const [profile, setProfile] = useState<ScreenProfile>('auto');
   const [err, setErr] = useState('');
-  useEffect(() => { void api.mediaPermission().then(async (p) => { setPerm(p); if (p.testCapture) return setSources([]); if (p.platform === 'darwin' && p.screen === 'denied') return; try { setSources(await api.mediaSources()); } catch (e) { setErr((e as Error).message); } }); }, []);
+  const load = useCallback(() => { setErr(''); setSources(null); void api.mediaPermission().then(async (p) => { setPerm(p); if (p.testCapture) return setSources([]); if (p.platform === 'darwin' && p.screen === 'denied') return; try { const l = await api.mediaSources(); setSources(l); setSel((x) => (l.some((s) => s.id === x) ? x : null)); } catch (e) { setErr((e as Error).message); } }); }, []);
+  useEffect(load, [load]);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [onClose]);
   const tests = perm?.testCapture ? [{ id: 'test-screen', kind: 'screen' as const, name: 'Test pattern (screen)', thumbnail: '' }, { id: 'test-window', kind: 'window' as const, name: 'Test pattern (window)', thumbnail: '' }] : [];
   const all = [...tests, ...(sources ?? [])];
@@ -186,10 +259,11 @@ export function SourcePicker({ onPick, onClose, title = 'Present' }: { onPick(sr
   return (
     <div className="picker-backdrop" role="presentation" onClick={onClose}>
       <div className="picker card" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
-        <div className="row between"><h3>{title}</h3><button className="small" onClick={onClose}>Cancel</button></div>
+        <div className="row between"><h3>{title}</h3><span className="row"><button className="small" onClick={load}>Refresh</button><button className="small" onClick={onClose}>Cancel</button></span></div>
         {perm?.platform === 'darwin' && perm.screen === 'denied' && !perm.testCapture ? (
           <div className="perm-help" role="alert"><b>CLAN needs permission to record your screen.</b>
-            <ol><li>Open <b>System Settings › Privacy &amp; Security › Screen &amp; System Audio Recording</b>.</li><li>Turn on <b>CLAN</b>.</li><li>Quit and reopen CLAN, then press Present again.</li></ol></div>
+            <ol><li>Open <b>System Settings › Privacy &amp; Security › Screen &amp; System Audio Recording</b>.</li><li>Turn on <b>CLAN</b> (after an update, turn it off and on again).</li><li>Quit and reopen CLAN, then press Present again.</li></ol>
+            <button className="small" onClick={() => void api.mediaOpenSettings()}>Open Screen Recording settings</button></div>
         ) : !sources ? <p className="muted">Looking for screens and windows…</p> : (
           <>
             {(['screen', 'window'] as const).map((k) => {
@@ -208,7 +282,7 @@ export function SourcePicker({ onPick, onClose, title = 'Present' }: { onPick(sr
           {perm?.audio ? <label className="check"><input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} /> Share audio</label> : <span className="muted small-text">Sharing sound isn’t available on this system — the picture is.</span>}
           <label className="inline">Quality <select value={profile} onChange={(e) => setProfile(e.target.value as ScreenProfile)}><option value="auto">Auto</option><option value="text">Text &amp; slides (sharpest)</option><option value="motion">Motion (smoother)</option></select></label>
         </div>
-        {chosen && <p className="muted small-text">You’ll share: <b>{chosen.kind === 'screen' ? 'an entire screen' : 'one window'}</b> — {chosen.name}. Nothing else is shared, and nothing is recorded.</p>}
+        {chosen && <p className="muted small-text">You’ll share: <b>{chosen.kind === 'screen' ? 'an entire screen' : 'one window'}</b> — {chosen.name}. Nothing else is shared, and nothing is recorded.{chosen.kind === 'screen' && ' Everything on that screen is visible, including CLAN notes you open over it — share one window to keep notes private.'}</p>}
         <button className="primary" disabled={!chosen} onClick={() => chosen && onPick(chosen.id.startsWith('test-') ? (chosen.id as 'test-screen') : (chosen as Src), audio, profile)}>Share {chosen?.kind === 'window' ? 'this window' : 'this screen'}</button>
       </div>
     </div>

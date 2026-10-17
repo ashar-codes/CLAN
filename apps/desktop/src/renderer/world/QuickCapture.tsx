@@ -1,7 +1,7 @@
 // Quick Capture: Note, Task, Reminder, Link, File, Idea. Notes/links/ideas/files land in Personal Space › Inbox first
 // (private until filed) — or straight into one of your courses/topics when picked under “Into”. Tasks and reminders
 // go to their own modules.
-import { useState, type DragEvent } from 'react';
+import { useEffect, useState, type DragEvent } from 'react';
 import { api } from '../App.tsx';
 import { errText, useLoad } from './useLoad.ts';
 import { fromLocal } from './study/common.tsx';
@@ -22,6 +22,7 @@ export function QuickCapture({ onDone }: { onDone(msg: string, go?: 'notes' | 's
   const [text, setText] = useState('');
   const [err, setErr] = useState('');
   const [cols] = useLoad(api.clan.collections);
+  useEffect(() => { const f = () => { reloadCourses(); setOpen(true); }; addEventListener('clan:quick-capture', f); return () => removeEventListener('clan:quick-capture', f); }, []); // eslint-disable-line react-hooks/exhaustive-deps — from the presentation + menu
   const close = () => { setOpen(false); setMode(null); setUrl(''); setNote(''); setTags(''); setCol(''); setText(''); setDue(''); setErr(''); };
   const [cId, tId] = into.split(':');
   const target = cId ? { courseId: cId, topicId: tId || null } : undefined;

@@ -33,7 +33,7 @@ import { Credentials, providerFactory, registerAI } from './ai.ts';
 import { registerBoards } from './board.ts';
 import { camArmed, micArmed, registerMediaScheme, registerTapes } from './tape.ts';
 import { DesktopDirect } from './direct.ts';
-import { mediaBinary, mediaWorkDir, registerScreen } from './screen.ts';
+import { displayArmed, mediaBinary, mediaWorkDir, notePermission, registerScreen } from './screen.ts';
 import { ScreenShareEvents } from '@clan/core';
 import { connect as tcpConnect } from 'node:net';
 import { decodeDirectQr } from '@classroom/protocol';
@@ -481,7 +481,10 @@ app.whenReady().then(async () => {
   // placed/answered a call or joined a meeting. Camera requests follow explicit video/QR actions; combined audio/video requests stay denied.
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb, details) => {
     const types = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
-    cb(perm === 'display-capture' || (perm === 'media' && types.length > 0 && ((micArmed() && types.every((t) => t === 'audio')) || (camArmed() && types.every((t) => t === 'video')))));
+    // getDisplayMedia arrives as 'media' with no device types (Electron 44); it is granted only while the user's explicit
+    // source pick is pending, and the display-media handler then hands over exactly that source.
+    if (perm === 'display-capture' || (perm === 'media' && types.length === 0)) { const ok = displayArmed(); notePermission(ok); return cb(ok); }
+    cb(perm === 'media' && types.length > 0 && ((micArmed() && types.every((t) => t === 'audio')) || (camArmed() && types.every((t) => t === 'video'))));
   });
   process.on('uncaughtException', (e) => logError('main', e));
   process.on('unhandledRejection', (e) => logError('main', e)); // a failed startup step must be visible, not silent
