@@ -27,3 +27,12 @@ complete: the internet-assisted path is implemented and tested locally but not d
 | D4 | Android background under Doze / OEM battery managers / force-stop | Keep mode works in background and screen-off and recovers after Doze; Doze pauses it (OS policy); force-stop stops it |
 | D5 | Packaged macOS smoke: 1 of 5 first-launch runs failed without a captured error right after signing | Open; 4/5 PASS |
 | D6 | Personal sync still uses a separate NSD client on Android | Tolerated by the new resolve deadlines/retries; consolidate later |
+
+## Update — screen sharing phase (`fix/screen-sharing-and-presentation-ux`)
+
+| # | Item | Status |
+|---|---|---|
+| S1 | "Screen capture was not allowed" | **Fixed**: CLAN's permission handler refused Electron 44's display request (SCREEN_SHARING_ROOT_CAUSE.md). Real window/screen capture received live by a second packaged instance on macOS and Windows |
+| S2 | macOS Screen Recording grant does not carry across ad-hoc QA builds | After each new DMG: turn CLAN QA off and on in Screen & System Audio Recording, then reopen it. Fixed for good only by Developer ID signing (#10) |
+| S3 | Physical cross-computer and desktop → Android presentations, Android fullscreen notes | NOT TESTED; SCREEN-SHARING-TEST-GUIDE.md |
+| S4 | Sharing an entire screen also captures CLAN overlays on that screen | Documented limitation; share a window |
